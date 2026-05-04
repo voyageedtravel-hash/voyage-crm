@@ -336,12 +336,9 @@ export default function TravelCRM() {
       .then(data => { setAllDeals(data); saveAllDeals(data); })
       .catch(err => console.warn("Could not fetch leads from server:", err.message));
   },[]);
-if (!isLoggedIn) {
-  return <Login onLogin={() => setIsLoggedIn(true)} />;
-}
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
 
-  const updH=(id,key,val)=>{
+  const updH=(id,key,val)=>
     setDeal(d=>({...d,hotelVendors:d.hotelVendors.map(v=>{
       if(v.id!==id) return v;
       const updated={...v,[key]:val};
@@ -462,7 +459,10 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"summary",label:"📋 Summary"},
   ];
 
-  // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
+  if (!isLoggedIn) {
+  return <Login onLogin={() => setIsLoggedIn(true)} />;
+}
+// ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
     const thisMonth=new Date().toISOString().slice(0,7);
     const monthDeals=allDeals.filter(d=>(d._savedAt||"").startsWith(thisMonth));
