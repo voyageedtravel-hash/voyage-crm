@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import Login from "./Login";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCIES = ["INR","USD","EUR","GBP","SGD","THB","MYR"];
@@ -130,7 +131,7 @@ const loadAllDeals = () => { try { const d=localStorage.getItem(DEALS_KEY); retu
 const saveAllDeals = (deals) => { try { localStorage.setItem(DEALS_KEY,JSON.stringify(deals)); } catch(e){} };
 
 // ─── API LAYER ────────────────────────────────────────────────────────────────
-const API_BASE = "http://localhost:5000";
+const API_BASE = "https://voyage-crm.onrender.com";
 
 const leadsAPI = {
   getAll: async () => {
@@ -311,6 +312,9 @@ function SectorRow({sector, onChange, onRemove, showRemove, label}) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function TravelCRM() {
+  const [isLoggedIn, setIsLoggedIn] = useState(
+    !!localStorage.getItem("token")
+  );
   const [screen,setScreen]=useState("dashboard");
   const [allDeals,setAllDeals]=useState(()=>loadAllDeals());
   const [deal,setDeal]=useState(()=>loadDeal()||{...initDeal});
@@ -319,6 +323,9 @@ export default function TravelCRM() {
   const [receiptPayment,setReceiptPayment]=useState(null);
   const [saveStatus,setSaveStatus]=useState("");
   const [apiLoading,setApiLoading]=useState(false);
+  if (!isLoggedIn) {
+  return <Login onLogin={() => setIsLoggedIn(true)} />;
+}
 
   // Auto-save to localStorage
   useEffect(()=>{

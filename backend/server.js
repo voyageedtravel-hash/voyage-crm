@@ -6,6 +6,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 👉 IMPORT AUTH ROUTES
+const authRoutes = require("./routes/auth");
+
 // ===== START SERVER AFTER DB CONNECT =====
 const start = async () => {
   try {
@@ -19,11 +22,11 @@ const start = async () => {
 
     console.log("MongoDB Connected ✅");
 
-    // ===== SCHEMA (AFTER CONNECT) =====
+    // ===== LEAD SCHEMA =====
     const leadSchema = new mongoose.Schema({}, { strict: false });
     const Lead = mongoose.model("Lead", leadSchema);
 
-    // ===== ROUTES =====
+    // ===== LEAD ROUTES =====
     app.post("/api/leads", async (req, res) => {
       try {
         const lead = new Lead(req.body);
@@ -43,6 +46,10 @@ const start = async () => {
       }
     });
 
+    // ===== AUTH ROUTES (🔥 IMPORTANT) =====
+    app.use("/api/auth", authRoutes);
+
+    // ===== TEST ROUTE =====
     app.get("/", (req, res) => {
       res.send("Voyage-Ed CRM Backend Running 🚀");
     });
