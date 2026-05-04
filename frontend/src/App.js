@@ -323,10 +323,7 @@ export default function TravelCRM() {
   const [receiptPayment,setReceiptPayment]=useState(null);
   const [saveStatus,setSaveStatus]=useState("");
   const [apiLoading,setApiLoading]=useState(false);
-  if (!isLoggedIn) {
-  return <Login onLogin={() => setIsLoggedIn(true)} />;
-}
-
+  
   // Auto-save to localStorage
   useEffect(()=>{
     const t=setTimeout(()=>{ saveDeal(deal); setSaveStatus("Saved"); setTimeout(()=>setSaveStatus(""),1500); },600);
@@ -339,7 +336,9 @@ export default function TravelCRM() {
       .then(data => { setAllDeals(data); saveAllDeals(data); })
       .catch(err => console.warn("Could not fetch leads from server:", err.message));
   },[]);
-
+if (!isLoggedIn) {
+  return <Login onLogin={() => setIsLoggedIn(true)} />;
+}
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
 
   const updH=(id,key,val)=>{
