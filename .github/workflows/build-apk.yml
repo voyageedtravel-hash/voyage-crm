@@ -20,45 +20,37 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Generate Keystore
-        run: |
-          keytool -genkeypair -v -storetype PKCS12 \
-            -keystore voyage-ed-crm.keystore \
-            -alias voyage-ed-crm -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
-            -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
-          echo "✅ Keystore generated"
-          ls -la voyage-ed-crm.keystore
-
-      - name: Make Gradle wrapper executable
-        run: |
-          chmod +x gradlew 2>/dev/null || true
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Build Release APK
+      - name: Generate Keystore
         run: |
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/voyage-ed-crm.keystore \
+          keytool -genkeypair -v -storetype PKCS12 \
+            -keystore android/voyage-ed-crm.keystore \
+            -alias voyage-ed-crm -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
+            -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/voyage-ed-crm.keystore \
             -Pandroid.injected.signing.store.password=VoyageEdCRM2026 \
             -Pandroid.injected.signing.key.alias=voyage-ed-crm \
             -Pandroid.injected.signing.key.password=VoyageEdCRM2026
 
-      - name: Locate APK
-        run: |
-          echo "=== APK files ==="
-          find . -name "*.apk" | sort
-          echo "=== AAB files ==="
-          find . -name "*.aab" | sort
+      - name: Find APK
+        run: find android -name "*.apk" | sort
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VoyageEd-CRM-APK
-          path: app/build/outputs/apk/release/app-release.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 90
