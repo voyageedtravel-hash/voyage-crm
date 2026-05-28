@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -28,56 +28,70 @@ jobs:
       - name: Install Bubblewrap CLI
         run: npm install -g @bubblewrap/cli@latest
 
-      - name: Generate signing keystore
-        run: |
-          keytool -genkeypair \
-            -v \
-            -storetype PKCS12 \
-            -keystore voyage-ed-crm.keystore \
-            -alias voyage-ed-crm \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass VoyageEdCRM2026 \
-            -keypass VoyageEdCRM2026 \
-            -dname "CN=Voyage-Ed Travels, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
-          echo "✅ Keystore generated"
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android licenses
+      - name: Accept licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install Android build tools
-        run: |
-          sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
+      - name: Install build tools
+        run: sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
 
-      - name: Run Bubblewrap build (non-interactive)
+      - name: Generate keystore
+        run: |
+          keytool -genkeypair -v -storetype PKCS12 \
+            -keystore voyage-ed-crm.keystore \
+            -alias voyage-ed-crm -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
+            -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
+
+      - name: Bubblewrap init
         run: |
           mkdir -p twa-project
-          cp twa-manifest.json twa-project/twa-manifest.json
-          cp voyage-ed-crm.keystore twa-project/voyage-ed-crm.keystore
+          cd twa-project
+          bubblewrap init \
+            --manifest https://remarkable-horse-c2fed5.netlify.app/manifest.json \
+            --skipPwaValidation \
+            --directory . \
+            --packageId com.voyageed.crm \
+            --name "Voyage-Ed CRM" \
+            --launcherName "VE CRM" \
+            --themeColor "#f97316" \
+            --backgroundColor "#0d1117" \
+            --startUrl "/" \
+            --iconUrl https://remarkable-horse-c2fed5.netlify.app/icon-512.png \
+            --maskableIconUrl https://remarkable-horse-c2fed5.netlify.app/icon-512.png \
+            --signingKeyPath ../voyage-ed-crm.keystore \
+            --signingKeyAlias voyage-ed-crm \
+            --appVersionCode 1 \
+            --appVersionName 1.0.0 || true
+
+      - name: Bubblewrap build
+        run: |
           cd twa-project
           bubblewrap build \
-            --manifest ../twa-manifest.json \
             --skipPwaValidation \
-            --signingKeyPath ./voyage-ed-crm.keystore \
+            --signingKeyPath ../voyage-ed-crm.keystore \
             --signingKeyAlias voyage-ed-crm \
             --signingKeyStorePassword VoyageEdCRM2026 \
             --signingKeyPassword VoyageEdCRM2026 || true
 
-      - name: Find APK files
+      - name: Find all APK files
         run: |
-          echo "=== APK files found ==="
-          find . -name "*.apk" -o -name "*.aab" 2>/dev/null || echo "No APK yet"
+          echo "=== Searching for APK/AAB files ==="
+          find $GITHUB_WORKSPACE -name "*.apk" 2>/dev/null || echo "No APK found"
+          find $GITHUB_WORKSPACE -name "*.aab" 2>/dev/null || echo "No AAB found"
+          find /root -name "*.apk" 2>/dev/null || true
+          ls -la twa-project/ || true
+          ls -la twa-project/app/build/outputs/apk/ 2>/dev/null || true
 
-      - name: Upload APK as artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: voyage-ed-crm-apk-${{ github.run_number }}
+          name: voyage-ed-crm-apk
           path: |
             **/*.apk
             **/*.aab
+            twa-project/app/build/outputs/**
           if-no-files-found: warn
           retention-days: 90
