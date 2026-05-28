@@ -20,78 +20,45 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Bubblewrap CLI
-        run: npm install -g @bubblewrap/cli@latest
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install build tools
-        run: sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
-
-      - name: Generate keystore
+      - name: Generate Keystore
         run: |
           keytool -genkeypair -v -storetype PKCS12 \
             -keystore voyage-ed-crm.keystore \
             -alias voyage-ed-crm -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
             -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
+          echo "✅ Keystore generated"
+          ls -la voyage-ed-crm.keystore
 
-      - name: Bubblewrap init
+      - name: Make Gradle wrapper executable
         run: |
-          mkdir -p twa-project
-          cd twa-project
-          bubblewrap init \
-            --manifest https://remarkable-horse-c2fed5.netlify.app/manifest.json \
-            --skipPwaValidation \
-            --directory . \
-            --packageId com.voyageed.crm \
-            --name "Voyage-Ed CRM" \
-            --launcherName "VE CRM" \
-            --themeColor "#f97316" \
-            --backgroundColor "#0d1117" \
-            --startUrl "/" \
-            --iconUrl https://remarkable-horse-c2fed5.netlify.app/icon-512.png \
-            --maskableIconUrl https://remarkable-horse-c2fed5.netlify.app/icon-512.png \
-            --signingKeyPath ../voyage-ed-crm.keystore \
-            --signingKeyAlias voyage-ed-crm \
-            --appVersionCode 1 \
-            --appVersionName 1.0.0 || true
+          chmod +x gradlew 2>/dev/null || true
 
-      - name: Bubblewrap build
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Build Release APK
         run: |
-          cd twa-project
-          bubblewrap build \
-            --skipPwaValidation \
-            --signingKeyPath ../voyage-ed-crm.keystore \
-            --signingKeyAlias voyage-ed-crm \
-            --signingKeyStorePassword VoyageEdCRM2026 \
-            --signingKeyPassword VoyageEdCRM2026 || true
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/voyage-ed-crm.keystore \
+            -Pandroid.injected.signing.store.password=VoyageEdCRM2026 \
+            -Pandroid.injected.signing.key.alias=voyage-ed-crm \
+            -Pandroid.injected.signing.key.password=VoyageEdCRM2026
 
-      - name: Find all APK files
+      - name: Locate APK
         run: |
-          echo "=== Searching for APK/AAB files ==="
-          find $GITHUB_WORKSPACE -name "*.apk" 2>/dev/null || echo "No APK found"
-          find $GITHUB_WORKSPACE -name "*.aab" 2>/dev/null || echo "No AAB found"
-          find /root -name "*.apk" 2>/dev/null || true
-          ls -la twa-project/ || true
-          ls -la twa-project/app/build/outputs/apk/ 2>/dev/null || true
+          echo "=== APK files ==="
+          find . -name "*.apk" | sort
+          echo "=== AAB files ==="
+          find . -name "*.aab" | sort
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: voyage-ed-crm-apk
-          path: |
-            **/*.apk
-            **/*.aab
-            twa-project/app/build/outputs/**
-          if-no-files-found: warn
+          name: VoyageEd-CRM-APK
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
           retention-days: 90
