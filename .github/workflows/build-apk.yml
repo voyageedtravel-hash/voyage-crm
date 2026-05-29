@@ -26,6 +26,12 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
+      - name: Install Gradle
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip -O gradle.zip
+          unzip -q gradle.zip -d /opt/gradle
+          echo "/opt/gradle/gradle-8.2/bin" >> $GITHUB_PATH
+
       - name: Generate Keystore
         run: |
           keytool -genkeypair -v -storetype PKCS12 \
@@ -37,12 +43,12 @@ jobs:
       - name: Build APK
         working-directory: android
         run: |
-          chmod +x gradlew 2>/dev/null || true
           gradle assembleRelease \
             -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/voyage-ed-crm.keystore \
             -Pandroid.injected.signing.store.password=VoyageEdCRM2026 \
             -Pandroid.injected.signing.key.alias=voyage-ed-crm \
-            -Pandroid.injected.signing.key.password=VoyageEdCRM2026
+            -Pandroid.injected.signing.key.password=VoyageEdCRM2026 \
+            --stacktrace
 
       - name: Find APK
         run: find android -name "*.apk" | sort
