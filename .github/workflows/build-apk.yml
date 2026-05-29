@@ -26,8 +26,8 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install SDK tools
-        run: sdkmanager "build-tools;34.0.0" "platforms;android-34" "platforms;android-28"
+      - name: Install platform
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Generate Keystore
         run: |
@@ -37,19 +37,23 @@ jobs:
             -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
             -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
 
-      - name: Build APK with Gradle Wrapper
+      - name: Download Gradle Wrapper JAR
+        run: |
+          mkdir -p android/gradle/wrapper
+          curl -L "https://github.com/gradle/gradle/raw/v7.5.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o android/gradle/wrapper/gradle-wrapper.jar || \
+          wget -q "https://raw.githubusercontent.com/gradle/gradle/v7.5.0/gradle/wrapper/gradle-wrapper.jar" \
+            -O android/gradle/wrapper/gradle-wrapper.jar
+          ls -la android/gradle/wrapper/
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build APK
         working-directory: android
-        run: |
-          gradle wrapper
-          chmod +x gradlew
-          ./gradlew assembleRelease
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
-      - name: Find APK
-        run: |
-          find . -name "*.apk" 2>/dev/null
-          ls -la android/app/build/outputs/apk/release/ 2>/dev/null || echo "No APK yet"
-
-      - name: Upload APK
+      - name: Find and Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VoyageEd-CRM-APK
