@@ -325,8 +325,6 @@ export default function TravelCRM() {
   const [apiLoading,setApiLoading]=useState(false);
   
   // Auto-save to localStorage
-  if (!isLoggedIn) return <Login onLogin={() => setIsLoggedIn(true)} />;
-
   useEffect(()=>{
     const t=setTimeout(()=>{ saveDeal(deal); setSaveStatus("Saved"); setTimeout(()=>setSaveStatus(""),1500); },600);
     return ()=>clearTimeout(t);
@@ -403,15 +401,16 @@ export default function TravelCRM() {
       setDeal(finalDeal); saveDeal(finalDeal);
       alert("Deal saved!");
     } catch(e) {
-      console.error("Save error:", e);
-      // fallback to localStorage only
-      const all = loadAllDeals();
-      const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
-      const existIdx = all.findIndex(d => d._id === toSave._id);
-      if (existIdx >= 0) all[existIdx] = toSave; else all.unshift(toSave);
-      saveAllDeals(all); setAllDeals(all);
-      setDeal(toSave); saveDeal(toSave);
-    } finally {
+  console.error("FULL ERROR:", e);   // 👈 main debug line
+  alert("Check console error");
+
+  const all = loadAllDeals();
+  const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
+  const existIdx = all.findIndex(d => d._id === toSave._id);
+  if (existIdx >= 0) all[existIdx] = toSave; else all.unshift(toSave);
+  saveAllDeals(all); setAllDeals(all);
+  setDeal(toSave); saveDeal(toSave);
+} finally {
       setApiLoading(false);
     }
   };
@@ -424,14 +423,14 @@ export default function TravelCRM() {
     sellINR:toINR(v.sellingPrice,v.currency,v.exchangeRate),
     paidINR:sum(v.payments,"amount"),
   });
-  const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
-    const { costINR, sellINR, paidINR } = vendorINR(v);
-    return {
-      cost: acc.cost + costINR,
-      sell: acc.sell + sellINR,
-      paid: acc.paid + paidINR
-    };
-  }, { cost: 0, sell: 0, paid: 0 });
+const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
+  const { costINR, sellINR, paidINR } = vendorINR(v);
+  return {
+    cost: acc.cost + costINR,
+    sell: acc.sell + sellINR,
+    paid: acc.paid + paidINR
+  };
+}, { cost: 0, sell: 0, paid: 0 });
 
   const hotel=sectionCalc(deal.hotelVendors);
   const flight=sectionCalc(deal.flightVendors);
@@ -460,9 +459,9 @@ export default function TravelCRM() {
     {id:"summary",label:"📋 Summary"},
   ];
 
-
-
-
+  if (!isLoggedIn) {
+  return <Login onLogin={() => setIsLoggedIn(true)} />;
+}
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
     const thisMonth=new Date().toISOString().slice(0,7);
