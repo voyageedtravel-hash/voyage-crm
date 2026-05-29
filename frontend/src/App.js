@@ -403,7 +403,6 @@ export default function TravelCRM() {
       setDeal(finalDeal); saveDeal(finalDeal);
       alert("Deal saved!");
     } catch(e) {
-    } catch(e) {
       console.error("Save error:", e);
       // fallback to localStorage only
       const all = loadAllDeals();
@@ -425,14 +424,14 @@ export default function TravelCRM() {
     sellINR:toINR(v.sellingPrice,v.currency,v.exchangeRate),
     paidINR:sum(v.payments,"amount"),
   });
-const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
-  const { costINR, sellINR, paidINR } = vendorINR(v);
-  return {
-    cost: acc.cost + costINR,
-    sell: acc.sell + sellINR,
-    paid: acc.paid + paidINR
-  };
-}, { cost: 0, sell: 0, paid: 0 });
+  const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
+    const { costINR, sellINR, paidINR } = vendorINR(v);
+    return {
+      cost: acc.cost + costINR,
+      sell: acc.sell + sellINR,
+      paid: acc.paid + paidINR
+    };
+  }, { cost: 0, sell: 0, paid: 0 });
 
   const hotel=sectionCalc(deal.hotelVendors);
   const flight=sectionCalc(deal.flightVendors);
