@@ -20,40 +20,42 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '7.6.4'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Accept licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install platform
+      - name: Install Android platform
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Generate Keystore
         run: |
           keytool -genkeypair -v -storetype PKCS12 \
-            -keystore android/voyage-ed-crm.keystore \
+            -keystore $GITHUB_WORKSPACE/android/voyage-ed-crm.keystore \
             -alias voyage-ed-crm -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass VoyageEdCRM2026 -keypass VoyageEdCRM2026 \
             -dname "CN=Voyage-Ed, OU=CRM, O=Voyage-Ed, L=Mohali, ST=Punjab, C=IN"
 
-      - name: Download Gradle Wrapper JAR
-        run: |
-          mkdir -p android/gradle/wrapper
-          curl -L "https://github.com/gradle/gradle/raw/v7.5.0/gradle/wrapper/gradle-wrapper.jar" \
-            -o android/gradle/wrapper/gradle-wrapper.jar || \
-          wget -q "https://raw.githubusercontent.com/gradle/gradle/v7.5.0/gradle/wrapper/gradle-wrapper.jar" \
-            -O android/gradle/wrapper/gradle-wrapper.jar
-          ls -la android/gradle/wrapper/
-
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-
-      - name: Build APK
+      - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: |
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/voyage-ed-crm.keystore \
+            -Pandroid.injected.signing.store.password=VoyageEdCRM2026 \
+            -Pandroid.injected.signing.key.alias=voyage-ed-crm \
+            -Pandroid.injected.signing.key.password=VoyageEdCRM2026 \
+            --no-daemon
 
-      - name: Find and Upload APK
+      - name: Find APK
+        run: find . -name "*.apk" 2>/dev/null | sort
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VoyageEd-CRM-APK
