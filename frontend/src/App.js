@@ -325,6 +325,8 @@ export default function TravelCRM() {
   const [apiLoading,setApiLoading]=useState(false);
   
   // Auto-save to localStorage
+  if (!isLoggedIn) return <Login onLogin={() => setIsLoggedIn(true)} />;
+
   useEffect(()=>{
     const t=setTimeout(()=>{ saveDeal(deal); setSaveStatus("Saved"); setTimeout(()=>setSaveStatus(""),1500); },600);
     return ()=>clearTimeout(t);
@@ -401,16 +403,16 @@ export default function TravelCRM() {
       setDeal(finalDeal); saveDeal(finalDeal);
       alert("Deal saved!");
     } catch(e) {
-  console.error("FULL ERROR:", e);   // 👈 main debug line
-  alert("Check console error");
-
-  const all = loadAllDeals();
-  const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
-  const existIdx = all.findIndex(d => d._id === toSave._id);
-  if (existIdx >= 0) all[existIdx] = toSave; else all.unshift(toSave);
-  saveAllDeals(all); setAllDeals(all);
-  setDeal(toSave); saveDeal(toSave);
-} finally {
+    } catch(e) {
+      console.error("Save error:", e);
+      // fallback to localStorage only
+      const all = loadAllDeals();
+      const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
+      const existIdx = all.findIndex(d => d._id === toSave._id);
+      if (existIdx >= 0) all[existIdx] = toSave; else all.unshift(toSave);
+      saveAllDeals(all); setAllDeals(all);
+      setDeal(toSave); saveDeal(toSave);
+    } finally {
       setApiLoading(false);
     }
   };
@@ -459,9 +461,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"summary",label:"📋 Summary"},
   ];
 
-  if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
-  }
+
+
+
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
     const thisMonth=new Date().toISOString().slice(0,7);
