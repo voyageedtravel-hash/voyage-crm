@@ -460,8 +460,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   ];
 
   if (!isLoggedIn) {
-  return <Login onLogin={() => setIsLoggedIn(true)} />;
-}
+    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  }
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
     const thisMonth=new Date().toISOString().slice(0,7);
