@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.netlify.remarkable_horse_c2fed5.twa",
+        "sha256_cert_fingerprints": ["D9:9E:DB:D8:7E:4A:01:E1:17:3F:FF:21:50:10:AC:74:9D:68:36:E9:BE:34:8F:7F:85:5E:7E:75:5B:B3:2A:09"]
+      }
+    }]
