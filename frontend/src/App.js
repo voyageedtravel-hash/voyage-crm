@@ -345,7 +345,6 @@ export default function TravelCRM() {
       if(key==="checkIn"||key==="checkOut") updated.nights=nightsBetween(updated.checkIn,updated.checkOut);
       return updated;
     })}));
-  };
   const addHV=()=>setDeal(d=>({...d,hotelVendors:[...d.hotelVendors,emptyHotelVendor()]}));
   const rmHV=(id)=>setDeal(d=>({...d,hotelVendors:d.hotelVendors.filter(v=>v.id!==id)}));
 
@@ -460,8 +459,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   ];
 
   if (!isLoggedIn) {
-  return <Login onLogin={() => setIsLoggedIn(true)} />;
-}
+    return <Login onLogin={() => setIsLoggedIn(true)} />;
+  }
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
     const thisMonth=new Date().toISOString().slice(0,7);
