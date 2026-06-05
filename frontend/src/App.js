@@ -9,7 +9,8 @@ const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash dep
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
 const VISA_STATUS_COLORS = {"Not Applied":"#64748b","Not Required":"#94a3b8","In Progress":"#f59e0b","Approved":"#10b981","Rejected":"#ef4444"};
 const QUERY_MODES = ["Call","Website","Sahitya Reference","Vishal Reference","Other Reference"];
-const GST_RATE = 0.18;
+const GST_RATE_PROFIT = 0.18;  // 18% on GPM (profit)
+const GST_RATE_PACKAGE = 0.05; // 5% on total selling price (package)
 
 const AIRLINE_MAP = {
   "6E":"IndiGo","AI":"Air India","UK":"Vistara","SG":"SpiceJet","G8":"Go First",
@@ -107,6 +108,7 @@ const initDeal = {
   adults:"2", children:"0", infants:"0", rooms:"1",
   modeOfQuery:"Call", travelDates:"", destination:"",
   remarks:"",
+  gstMode:"profit",
   hotelVendors:[emptyHotelVendor()],
   flightVendors:[emptyFlightVendor()],
   landVendors:[emptyLandVendor()],
@@ -439,7 +441,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const totalSell=hotel.sell+flight.sell+land.sell+visa.sell;
   const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
   const gpm=totalSell-totalCost;
-  const gst=gpm>0?gpm*GST_RATE:0;
+  const gst = deal.gstMode === "package"
+    ? totalSell * GST_RATE_PACKAGE
+    : (gpm > 0 ? gpm * GST_RATE_PROFIT : 0);
   const netProfit=gpm-gst;
   const marginPct=totalSell>0?((gpm/totalSell)*100).toFixed(1):"0.0";
   const netMarginPct=totalSell>0?((netProfit/totalSell)*100).toFixed(1):"0.0";
@@ -474,7 +478,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       return s+all.reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0);
     },0);
     const mGpm=mSell-mCost;
-    const mGst=mGpm>0?mGpm*GST_RATE:0;
+    const mGst=mGpm>0?mGpm*GST_RATE_PROFIT:0; // Dashboard uses 18% estimate
     const mNet=mGpm-mGst;
     const mVendorPaid=monthDeals.reduce((s,d)=>{
       const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
@@ -576,7 +580,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               {[
                 {l:"Selling",v:fmtINR(totalSell),c:"#e2e8f0"},
                 {l:"GPM",v:fmtINR(gpm),c:gpm>=0?"#10b981":"#ef4444"},
-                {l:"GST",v:fmtINR(gst),c:"#a5b4fc"},
+                {l:`GST (${deal.gstMode==="package"?"5% pkg":"18% profit"})`,v:fmtINR(gst),c:"#a5b4fc"},
                 {l:"Net Profit",v:fmtINR(netProfit),c:netProfit>=0?"#f97316":"#ef4444"},
               ].map((s,i)=>(
                 <div key={i} style={{textAlign:"center",padding:"6px 12px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:7}}>
@@ -1077,9 +1081,30 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 <div style={{fontSize:12,color:"#6ee7b7",marginTop:4}}>{marginPct}% of selling price · Before GST</div>
               </div>
               <div style={{background:"linear-gradient(135deg,#1e1b4b50,#312e8130)",border:"1px solid #6366f133",borderRadius:10,padding:18}}>
-                <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:2,marginBottom:6}}>GST @ 18%</div>
+                <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:2,marginBottom:6}}>GST TYPE</div>
+                <div style={{display:"flex",gap:6,margin:"8px 0"}}>
+                  {[
+                    {mode:"profit",label:"18% on Profit",desc:"Applicable on GPM"},
+                    {mode:"package",label:"5% on Package",desc:"Applicable on Total Sell"},
+                  ].map(opt=>(
+                    <button key={opt.mode}
+                      onClick={()=>upd("gstMode",opt.mode)}
+                      style={{flex:1,padding:"8px 6px",borderRadius:8,border:"1px solid",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,transition:"all .15s",
+                        borderColor:deal.gstMode===opt.mode?"#6366f1":"#334155",
+                        background:deal.gstMode===opt.mode?"#6366f120":"transparent",
+                        color:deal.gstMode===opt.mode?"#a5b4fc":"#64748b"
+                      }}>
+                      <div>{opt.label}</div>
+                      <div style={{fontSize:9,fontWeight:400,marginTop:2,opacity:.7}}>{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
                 <div className="mono" style={{fontSize:24,fontWeight:800,color:"#a5b4fc"}}>{fmtINR(gst)}</div>
-                <div style={{fontSize:12,color:"#a5b4fc",marginTop:4}}>18% × GPM of {fmtINR(gpm)}</div>
+                <div style={{fontSize:12,color:"#a5b4fc",marginTop:4}}>
+                  {deal.gstMode==="package"
+                    ? `5% × Selling ${fmtINR(totalSell)}`
+                    : `18% × GPM ${fmtINR(gpm)}`}
+                </div>
               </div>
               <div style={{background:"linear-gradient(135deg,#451a0350,#78350f30)",border:"1px solid #f9731633",borderRadius:10,padding:18}}>
                 <div style={{fontSize:10,color:"#fdba74",letterSpacing:2,marginBottom:6}}>NET PROFIT (After GST)</div>
