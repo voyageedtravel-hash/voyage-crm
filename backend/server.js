@@ -152,6 +152,31 @@ const start = async () => {
     // ─── AUTH ROUTES ──────────────────────────────────────────────────────────
     app.use("/api/auth", authRoutes);
 
+    // ─── PUBLIC WEBHOOK — Website AI → CRM auto-create ──────────────────────
+    app.post("/api/leads/webhook", async (req, res) => {
+      try {
+        const { clientName, contactNo, destination, email, source, remarks } = req.body;
+        if (!clientName && !contactNo) return res.status(400).json({ error: "Name or contact required" });
+        const dealNumber = await getNextDealNumber();
+        const lead = new Lead({
+          clientName: clientName || "Website Enquiry",
+          contactNo: contactNo || "",
+          email: email || "",
+          destination: destination || "",
+          source: source || "Website AI",
+          modeOfQuery: "Website",
+          remarks: remarks || "",
+          status: "Not Actioned",
+          dealNumber,
+          _savedAt: new Date().toISOString(),
+        });
+        await lead.save();
+        res.json({ success: true, dealNumber });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // ─── HEALTH CHECK ─────────────────────────────────────────────────────────
     app.get("/", (req, res) => res.send("Voyage-Ed CRM Backend v2.0 🚀"));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
