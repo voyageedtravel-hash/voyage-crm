@@ -1,6 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
 import Login from "./Login";
 
+// ─── TOAST NOTIFICATIONS ──────────────────────────────────────────────────────
+window.veToast = (msg, type="success") => {
+  const t = document.createElement("div");
+  const color = type==="error"?"#ef4444":type==="warning"?"#f59e0b":"#0fba74";
+  t.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);` +
+    `background:${color};color:#fff;padding:12px 24px;border-radius:10px;font-weight:600;` +
+    `font-size:13px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,.3);` +
+    `font-family:Outfit,Raleway,sans-serif;max-width:90vw;text-align:center;` +
+    `animation:fadeInUp .3s ease;`;
+  document.body.appendChild(t);
+  t.textContent = msg;
+  setTimeout(()=>t.remove(), 3500);
+};
+
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCIES = ["INR","USD","EUR","GBP","SGD","THB","MYR"];
 const CURRENCY_SYMBOLS = {INR:"₹",USD:"$",EUR:"€",GBP:"£",SGD:"S$",THB:"฿",MYR:"RM"};
@@ -109,6 +124,8 @@ const initDeal = {
   modeOfQuery:"Call", travelDates:"", destination:"",
   remarks:"",
   gstMode:"profit",
+  status:"Not Actioned",
+  dealNumber:"",
   hotelVendors:[emptyHotelVendor()],
   flightVendors:[emptyFlightVendor()],
   landVendors:[emptyLandVendor()],
@@ -389,7 +406,7 @@ export default function TravelCRM() {
   const rmAttachment=(id)=>setDeal(d=>({...d,attachments:d.attachments.filter(a=>a.id!==id)}));
 
   const saveToAllDeals = async () => {
-    if (!deal.clientName) return alert("Please enter client name first.");
+    if (!deal.clientName) { window.veToast && window.veToast("Please enter client name first", "warning"); return; }
     setApiLoading(true);
     try {
       const toSave = { ...deal, _savedAt: new Date().toISOString() };
@@ -400,10 +417,10 @@ export default function TravelCRM() {
       if (existIdx >= 0) all[existIdx] = finalDeal; else all.unshift(finalDeal);
       saveAllDeals(all); setAllDeals(all);
       setDeal(finalDeal); saveDeal(finalDeal);
-      alert("Deal saved!");
+      window.veToast && window.veToast("✅ Deal saved successfully!", "success");
     } catch(e) {
-  console.error("FULL ERROR:", e);   // 👈 main debug line
-  alert("Check console error");
+  console.error("Save error:", e?.message);
+  window.veToast && window.veToast("Save failed. Please try again.", "error");
 
   const all = loadAllDeals();
   const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
@@ -495,7 +512,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <div style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
             <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · DASHBOARD</div>
-            <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>Good morning ☀️</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>{(()=>{const h=new Date().getHours();return h<12?"Good morning ☀️":h<17?"Good afternoon 🌤️":"Good evening 🌙"})()} </div>
             <div style={{fontSize:13,color:"#64748b",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
           </div>
           <div style={{display:"flex",gap:10}}>
@@ -641,7 +658,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>✈️ Flight Vendors</h2>
-              {deal.flightVendors.length<3&&<button className="btn btn-ind" onClick={addFV}>+ Add Flight Vendor</button>}
+              {deal.flightVendors.length<10&&<button className="btn btn-ind" onClick={addFV}>+ Add Flight Vendor</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(flight.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(flight.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(flight.sell-flight.cost),c:(flight.sell-flight.cost)>=0?"#10b981":"#ef4444"},{l:"Balance to Pay",v:fmtINR(flight.cost-flight.paid),c:(flight.cost-flight.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
@@ -758,7 +775,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>🏨 Hotel Vendors</h2>
-              {deal.hotelVendors.length<8&&<button className="btn btn-ind" onClick={addHV}>+ Add Hotel</button>}
+              {deal.hotelVendors.length<10&&<button className="btn btn-ind" onClick={addHV}>+ Add Hotel</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(hotel.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(hotel.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(hotel.sell-hotel.cost),c:(hotel.sell-hotel.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(hotel.paid),c:"#a5b4fc"},{l:"Balance",v:fmtINR(hotel.cost-hotel.paid),c:(hotel.cost-hotel.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
@@ -845,7 +862,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>🚌 Land Vendors</h2>
-              {deal.landVendors.length<3&&<button className="btn btn-ind" onClick={addLV}>+ Add Land Vendor</button>}
+              {deal.landVendors.length<10&&<button className="btn btn-ind" onClick={addLV}>+ Add Land Vendor</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(land.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(land.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(land.sell-land.cost),c:(land.sell-land.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(land.paid),c:"#a5b4fc"},{l:"Balance",v:fmtINR(land.cost-land.paid),c:(land.cost-land.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
