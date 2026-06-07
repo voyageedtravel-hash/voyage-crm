@@ -212,6 +212,23 @@ const start = async () => {
       }
     });
 
+    // ─── USER MANAGEMENT (admin) ──────────────────────────────────────────────
+    const User = require("./models/User");
+    // List all users (admin only)
+    app.get("/api/users", authMiddleware, async (req, res) => {
+      try {
+        const users = await User.find({}, "-password").sort({ createdAt: -1 });
+        res.json(users);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    // Delete user
+    app.delete("/api/users/:id", authMiddleware, async (req, res) => {
+      try {
+        await User.findByIdAndDelete(req.params.id);
+        res.json({ success: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
     // ─── AI CHAT PROXY ────────────────────────────────────────────────────────
     app.post("/api/chat", async (req, res) => {
       const apiKey = process.env.ANTHROPIC_API_KEY;
