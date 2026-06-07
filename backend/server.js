@@ -123,6 +123,95 @@ const start = async () => {
       }
     });
 
+    // ─── CHAT LOG ROUTES ──────────────────────────────────────────────────────
+    const ChatLog = require("./models/ChatLog");
+
+    // Save chat log (public - no auth needed for website)
+    app.post("/api/chatlogs", async (req, res) => {
+      try {
+        const log = new ChatLog(req.body);
+        await log.save();
+        res.json({ success: true });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Get all chat logs (protected)
+    app.get("/api/chatlogs", authMiddleware, async (req, res) => {
+      try {
+        const filter = {};
+        if (req.query.needsAnswer === "true") filter.needsAnswer = true;
+        if (req.query.unanswered === "true") filter.answered = false;
+        if (req.query.destination) filter.destination = { $regex: req.query.destination, $options: "i" };
+
+        const logs = await ChatLog.find(filter)
+          .sort({ createdAt: -1 })
+          .limit(parseInt(req.query.limit) || 200);
+        res.json(logs);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Get conversation sessions (grouped)
+    app.get("/api/chatlogs/sessions", authMiddleware, async (req, res) => {
+      try {
+        const sessions = await ChatLog.aggregate([
+          { $group: {
+            _id: "$sessionId",
+            clientName: { $first: "$clientName" },
+            clientPhone: { $first: "$clientPhone" },
+            destination: { $first: "$destination" },
+            messages: { $sum: 1 },
+            leadCaptured: { $max: "$leadCaptured" },
+            hasUnanswered: { $max: "$needsAnswer" },
+            startTime: { $min: "$createdAt" },
+            lastTime: { $max: "$createdAt" }
+          }},
+          { $sort: { lastTime: -1 } },
+          { $limit: 100 }
+        ]);
+        res.json(sessions);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Get FAQ suggestions (most common questions)
+    app.get("/api/chatlogs/faqs", authMiddleware, async (req, res) => {
+      try {
+        const faqs = await ChatLog.aggregate([
+          { $group: {
+            _id: { $toLower: "$question" },
+            count: { $sum: 1 },
+            answered: { $max: "$answered" },
+            lastAnswer: { $last: "$answer" },
+            needsAnswer: { $max: "$needsAnswer" }
+          }},
+          { $sort: { count: -1 } },
+          { $limit: 50 }
+        ]);
+        res.json(faqs);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // Admin adds answer to FAQ (adds to knowledge base)
+    app.put("/api/chatlogs/answer", authMiddleware, async (req, res) => {
+      try {
+        const { question, answer } = req.body;
+        await ChatLog.updateMany(
+          { question: { $regex: question, $options: "i" } },
+          { $set: { adminAnswer: answer, needsAnswer: false, addedToKB: true } }
+        );
+        res.json({ success: true, message: "Answer saved to knowledge base" });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // ─── AI CHAT PROXY ────────────────────────────────────────────────────────
     app.post("/api/chat", async (req, res) => {
       const apiKey = process.env.ANTHROPIC_API_KEY;
