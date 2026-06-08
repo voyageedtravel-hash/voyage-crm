@@ -59,8 +59,7 @@ router.post("/reset-password", async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ error: "User not found" });
     const hashed = await bcrypt.hash(newPassword, 10);
-    user.password = hashed;
-    await user.save();
+    await User.updateOne({ email }, { $set: { password: hashed } });
     res.json({ message: "Password reset successful" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -123,8 +122,8 @@ router.post("/reset-password-otp", async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ error: "User not found" });
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await User.updateOne({ email }, { $set: { password: hashed } });
     delete otpStore[email];
     res.json({ message: "Password reset successful" });
   } catch (err) {
