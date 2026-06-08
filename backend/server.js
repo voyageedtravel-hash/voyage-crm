@@ -285,6 +285,7 @@ const start = async () => {
 
     // ─── HEALTH CHECK ─────────────────────────────────────────────────────────
     app.get("/", (req, res) => res.send("Voyage-Ed CRM Backend v2.0 🚀"));
+    app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
     const PORT = process.env.PORT || 5000;
