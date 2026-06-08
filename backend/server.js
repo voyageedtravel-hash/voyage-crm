@@ -285,6 +285,102 @@ const start = async () => {
 
     // ─── HEALTH CHECK ─────────────────────────────────────────────────────────
     app.get("/", (req, res) => res.send("Voyage-Ed CRM Backend v2.0 🚀"));
+    
+    // ─── SEO CRAWLER (runs twice daily) ──────────────────────────────────────
+    const CrawlResult = mongoose.model("CrawlResult", new mongoose.Schema({
+      url: String, title: String, description: String, canonical: String,
+      hasSchema: Boolean, h1Count: Number, wordCount: Number,
+      status: Number, issues: [String], crawledAt: { type: Date, default: Date.now }
+    }));
+
+    const KEY_PAGES = [
+      "https://voyage-ed.com",
+      "https://voyage-ed.com/canada-flights",
+      "https://voyage-ed.com/blog",
+      "https://voyage-ed.com/travel",
+      "https://voyage-ed.com/education",
+      "https://voyage-ed.com/bali-packages",
+      "https://voyage-ed.com/dubai-abu-dhabi-packages",
+      "https://voyage-ed.com/georgia-packages",
+      "https://voyage-ed.com/thailand-packages",
+      "https://voyage-ed.com/visa"
+    ];
+
+    async function crawlSite() {
+      console.log("[SEO Crawler] Starting crawl at", new Date().toISOString());
+      const results = [];
+      for (const url of KEY_PAGES) {
+        try {
+          const r = await fetch(url, { headers: { "User-Agent": "VoyageEd-SEO-Bot/1.0" }, signal: AbortSignal.timeout(15000) });
+          const html = await r.text();
+          const issues = [];
+          const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/si);
+          const descMatch = html.match(/meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/si) ||
+                            html.match(/meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/si);
+          const canonMatch = html.match(/rel=["']canonical["'][^>]+href=["']([^"']+)/si) ||
+                             html.match(/href=["']([^"']+)["'][^>]+rel=["']canonical["']/si);
+          const h1s = (html.match(/<h1[^>]*>/gi) || []).length;
+          const hasSchema = html.includes('application/ld+json');
+          const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g,'').trim() : '';
+          const desc = descMatch ? descMatch[1].trim() : '';
+          const canonical = canonMatch ? canonMatch[1].trim() : '';
+          const wordCount = html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().split(' ').length;
+          if (!title) issues.push('Missing title');
+          if (title.length > 60) issues.push('Title too long ('+title.length+' chars)');
+          if (!desc) issues.push('Missing meta description');
+          if (desc.length > 160) issues.push('Description too long');
+          if (canonical.includes('.html')) issues.push('Canonical has .html');
+          if (h1s === 0) issues.push('No H1 tag');
+          if (h1s > 1) issues.push('Multiple H1 tags ('+h1s+')');
+          if (!hasSchema) issues.push('Missing schema markup');
+          if (wordCount < 300) issues.push('Thin content (<300 words)');
+          results.push({ url, title, description: desc, canonical, hasSchema, h1Count: h1s, wordCount, status: r.status, issues });
+        } catch(e) {
+          results.push({ url, title:'', description:'', canonical:'', hasSchema:false, h1Count:0, wordCount:0, status:0, issues:['Crawl failed: '+e.message] });
+        }
+      }
+      // Save to DB (keep last 10 crawls per URL)
+      for (const r of results) {
+        await CrawlResult.create(r);
+        await CrawlResult.deleteMany({ url: r.url, crawledAt: { $lt: new Date(Date.now() - 5*24*60*60*1000) } });
+      }
+      console.log("[SEO Crawler] Done. Issues found:", results.reduce((s,r) => s + r.issues.length, 0));
+      return results;
+    }
+
+    // Run crawler twice daily (every 12 hours)
+    let crawlInterval = null;
+    function startCrawlScheduler() {
+      crawlSite().catch(e => console.error("[Crawler]", e.message));
+      crawlInterval = setInterval(() => {
+        crawlSite().catch(e => console.error("[Crawler]", e.message));
+      }, 12 * 60 * 60 * 1000);
+    }
+    setTimeout(startCrawlScheduler, 30000); // Start 30s after server boot
+
+    // Manual crawl trigger
+    app.get("/api/seo/crawl", async (req, res) => {
+      try {
+        const results = await crawlSite();
+        res.json({ crawledAt: new Date(), pages: results.length, totalIssues: results.reduce((s,r)=>s+r.issues.length,0), results });
+      } catch(e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Get latest crawl results
+    app.get("/api/seo/results", async (req, res) => {
+      try {
+        const latest = await CrawlResult.aggregate([
+          { $sort: { crawledAt: -1 } },
+          { $group: { _id: "$url", doc: { $first: "$$ROOT" } } },
+          { $replaceRoot: { newRoot: "$doc" } },
+          { $sort: { url: 1 } }
+        ]);
+        const totalIssues = latest.reduce((s,r)=>s+r.issues.length,0);
+        res.json({ lastCrawl: latest[0]?.crawledAt, pages: latest.length, totalIssues, results: latest });
+      } catch(e) { res.status(500).json({ error: e.message }); }
+    });
+
+    
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
