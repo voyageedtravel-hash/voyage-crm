@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String, default: "" },
   role: {
     type: String,
-    enum: ["admin", "agent", "viewer"],
+    enum: ["admin", "agent", "viewer", "sales_manager", "consultant", "accounts"],
     default: "agent"
   },
   isActive: { type: Boolean, default: true },
