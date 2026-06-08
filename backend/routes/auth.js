@@ -66,6 +66,42 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
+// ─── BOOTSTRAP (creates first admin if no users exist) ──────────────────────
+router.post("/bootstrap", async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    
+    // Check if ANY users exist
+    const count = await User.countDocuments();
+    if (count > 0) {
+      // Users exist - just try to reset this user's password if they exist
+      const user = await User.findOne({ email });
+      if (!user) return res.status(400).json({ error: "User not found. Ask existing admin to create your account." });
+      const hashed = await bcrypt.hash(password, 10);
+      await User.updateOne({ email }, { $set: { password: hashed } });
+      return res.json({ message: "Password force-reset successful", action: "reset" });
+    }
+    
+    // No users at all - create first admin
+    const hashed = await bcrypt.hash(password, 10);
+    const user = new User({ email, password: hashed, name: name || "Admin", role: "admin" });
+    await user.save();
+    res.json({ message: "First admin created", action: "created" });
+  } catch (err) {
+    if (err.code === 11000) {
+      // Duplicate email - user exists, force reset password
+      try {
+        const hashed = await bcrypt.hash(req.body.password, 10);
+        await User.updateOne({ email: req.body.email }, { $set: { password: hashed } });
+        res.json({ message: "Password force-reset (duplicate)", action: "reset" });
+      } catch(e2) { res.status(500).json({ error: e2.message }); }
+    } else {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
 // ─── OTP PASSWORD RESET (WhatsApp delivery) ─────────────────────────────────
 // In-memory OTP store (resets on server restart, fine for password reset)
 const otpStore = {};
