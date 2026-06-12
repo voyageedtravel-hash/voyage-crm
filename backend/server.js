@@ -53,6 +53,27 @@ const start = async () => {
       return `VE-${year}-${String(counter.seq).padStart(3, "0")}`;
     }
 
+    // ─── PUBLIC LEAD CAPTURE (Website AI Chat — no auth) ─────────────────────
+    app.post("/api/public/lead", async (req, res) => {
+      try {
+        const { name, phone, source, page } = req.body || {};
+        if (!name || !phone) return res.status(400).json({ error: "name and phone required" });
+        const dealNumber = await getNextDealNumber();
+        const lead = new Lead({
+          dealNumber,
+          client: { name: String(name).slice(0, 80), phone: String(phone).slice(0, 20), destination: "" },
+          source: source || "Website AI Chat",
+          page: page || "",
+          status: "new",
+          notes: `Auto-captured from ${source || "Website AI Chat"} on ${page || "website"}`,
+        });
+        await lead.save();
+        res.json({ ok: true, dealNumber });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // ─── LEAD ROUTES (PROTECTED) ──────────────────────────────────────────────
 
     // CREATE deal
