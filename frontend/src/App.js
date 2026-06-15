@@ -152,6 +152,15 @@ const saveAllDeals = (deals) => { try { localStorage.setItem(DEALS_KEY,JSON.stri
 // ─── API LAYER ────────────────────────────────────────────────────────────────
 const API_BASE = "https://voyage-crm.onrender.com";
 
+const authHeaders = () => {
+  const t = localStorage.getItem("token");
+  return t ? { "Content-Type": "application/json", Authorization: `Bearer ${t}` }
+           : { "Content-Type": "application/json" };
+};
+const getCurrentUser = () => {
+  try { return JSON.parse(localStorage.getItem("ve_user") || "{}"); } catch { return {}; }
+};
+
 const leadsAPI = {
   getAll: async () => {
     const res = await fetch(`${API_BASE}/api/leads`);
@@ -168,6 +177,30 @@ const leadsAPI = {
     return res.json();
   },
 };
+
+const usersAPI = {
+  getAll: async () => {
+    const res = await fetch(`${API_BASE}/api/users`, { headers: authHeaders() });
+    if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || `Failed: ${res.status}`);
+    return res.json();
+  },
+  create: async (u) => {
+    const res = await fetch(`${API_BASE}/api/users`, { method: "POST", headers: authHeaders(), body: JSON.stringify(u) });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(data.error || `Failed: ${res.status}`);
+    return data;
+  },
+  remove: async (id) => {
+    const res = await fetch(`${API_BASE}/api/users/${id}`, { method: "DELETE", headers: authHeaders() });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(data.error || `Failed: ${res.status}`);
+    return data;
+  },
+};
+
+// Deal status options used in dashboard filtering + deal dropdown
+const STATUS_OPTIONS = ["Not Actioned","In Progress","Quoted","Booked","Cancelled","Completed"];
+const uInp = {background:"#0d1117",border:"1px solid #334155",borderRadius:7,color:"#e2e8f0",padding:"10px 12px",fontSize:13,outline:"none"};
 
 // ─── VENDOR AUTOCOMPLETE INPUT ────────────────────────────────────────────────
 function VendorInput({value, onChange, placeholder}) {
@@ -342,6 +375,113 @@ export default function TravelCRM() {
   const [receiptPayment,setReceiptPayment]=useState(null);
   const [saveStatus,setSaveStatus]=useState("");
   const [apiLoading,setApiLoading]=useState(false);
+  // User management
+  const [users,setUsers]=useState([]);
+  const [newUser,setNewUser]=useState({email:"",password:"",name:"",role:"agent"});
+  const [userMsg,setUserMsg]=useState("");
+  const currentUser=getCurrentUser();
+  const isAdmin=currentUser.role==="admin";
+  // Dashboard date range
+  const [dateFrom,setDateFrom]=useState("");
+  const [dateTo,setDateTo]=useState("");
+  // AI itinerary
+  const [aiBusy,setAiBusy]=useState(false);
+  const [aiItinerary,setAiItinerary]=useState("");
+
+  const loadUsers=async()=>{
+    try{ const u=await usersAPI.getAll(); setUsers(u); }
+    catch(e){ setUserMsg("⚠️ "+e.message); }
+  };
+  const handleCreateUser=async()=>{
+    setUserMsg("");
+    if(!newUser.email||!newUser.password){ setUserMsg("⚠️ Email and password required"); return; }
+    if(newUser.password.length<6){ setUserMsg("⚠️ Password must be at least 6 characters"); return; }
+    try{
+      await usersAPI.create(newUser);
+      setUserMsg("✅ User created: "+newUser.email);
+      setNewUser({email:"",password:"",name:"",role:"agent"});
+      loadUsers();
+    }catch(e){ setUserMsg("⚠️ "+e.message); }
+  };
+  const handleDeleteUser=async(id,email)=>{
+    if(!window.confirm("Delete user "+email+"? This cannot be undone."))return;
+    try{ await usersAPI.remove(id); setUserMsg("✅ Deleted "+email); loadUsers(); }
+    catch(e){ setUserMsg("⚠️ "+e.message); }
+  };
+  const handleLogout=()=>{
+    localStorage.removeItem("token"); localStorage.removeItem("ve_user");
+    setIsLoggedIn(false);
+  };
+
+  // ─── AI ITINERARY GENERATOR ───────────────────────────────────────────────
+  const generateAIItinerary=async()=>{
+    setAiBusy(true); setAiItinerary("");
+    try{
+      // Build structured flight summary — differentiate onward / return / multi-city
+      const flightLines=[];
+      (deal.flightVendors||[]).forEach(fv=>{
+        const type=fv.flightType||"one-way";
+        const fmtSector=(s)=>{
+          const air=[s.airlineCode,s.airlineName].filter(Boolean).join(" ");
+          const route=[s.fromName||s.from, s.toName||s.to].filter(Boolean).join(" → ");
+          const when=[s.date,s.depTime&&("dep "+s.depTime),s.arrTime&&("arr "+s.arrTime)].filter(Boolean).join(", ");
+          return [air,route,when].filter(Boolean).join(" | ");
+        };
+        if(type==="multi-city"){
+          (fv.sectors||[]).forEach((s,i)=>{ const t=fmtSector(s); if(t) flightLines.push(`MULTI-CITY leg ${i+1}: ${t}`); });
+        } else if(type==="return"){
+          (fv.sectors||[]).forEach(s=>{ const t=fmtSector(s); if(t) flightLines.push(`ONWARD: ${t}`); });
+          (fv.returnSectors||[]).forEach(s=>{ const t=fmtSector(s); if(t) flightLines.push(`RETURN: ${t}`); });
+        } else {
+          (fv.sectors||[]).forEach(s=>{ const t=fmtSector(s); if(t) flightLines.push(`ONWARD: ${t}`); });
+        }
+      });
+      // Hotels
+      const hotelLines=[];
+      (deal.hotelVendors||[]).forEach(hv=>{
+        const parts=[hv.hotelName||hv.name, hv.city, hv.country, hv.roomCategory,
+          (hv.checkIn&&hv.checkOut)&&(`${hv.checkIn} to ${hv.checkOut}`),
+          hv.nights&&(`${hv.nights} nights`)].filter(Boolean);
+        if(parts.length) hotelLines.push(parts.join(" | "));
+      });
+      // Land/sightseeing notes
+      const landLines=[];
+      (deal.landVendors||[]).forEach(lv=>{ if(lv.itinerary) landLines.push(lv.itinerary); });
+
+      const facts=[
+        `Destination: ${deal.destination||"N/A"}`,
+        `Travel dates: ${deal.travelDates||"N/A"}`,
+        `Travellers: ${deal.adults||0} adults, ${deal.children||0} children, ${deal.infants||0} infants`,
+        flightLines.length?`FLIGHTS:\n${flightLines.join("\n")}`:"FLIGHTS: none specified",
+        hotelLines.length?`HOTELS:\n${hotelLines.join("\n")}`:"HOTELS: none specified",
+        landLines.length?`SIGHTSEEING NOTES:\n${landLines.join("\n")}`:"",
+      ].filter(Boolean).join("\n\n");
+
+      const system="You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. "+
+        "Create a polished, client-ready day-by-day itinerary. RULES: "+
+        "1) Use the EXACT flight details given — clearly label Onward, Return, and Multi-city legs with airline, route, date and times. "+
+        "2) Include a Flights summary section AND a Hotels section with check-in/check-out and meal plan, using ONLY the details provided. "+
+        "3) Then a Day-by-Day plan. Do not invent flights or hotels not listed. "+
+        "4) Warm, premium tone for Indian travellers. Use clear headings. Output plain text (no markdown tables).";
+      const userMsg="Create the itinerary from these confirmed booking details:\n\n"+facts;
+
+      const res=await fetch(`${API_BASE}/api/chat`,{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:2000, system, messages:[{role:"user",content:userMsg}] }),
+      });
+      const data=await res.json();
+      const text=(data.content&&data.content[0]&&data.content[0].text)||data.error||"No response from AI";
+      // Voyage-Ed branded header + footer
+      const branded=
+`✈️  VOYAGE-ED TRAVELS — Learn · Travel · Explore
+────────────────────────────────────────────
+${text}
+────────────────────────────────────────────
+📞 +91 7009659048   |   ✉️ enquiry@voyage-ed.com   |   🌐 www.voyage-ed.com`;
+      setAiItinerary(branded);
+    }catch(e){ setAiItinerary("⚠️ Error: "+e.message); }
+    finally{ setAiBusy(false); }
+  };
   
   // Auto-save to localStorage
   useEffect(()=>{
@@ -482,29 +622,104 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   if (!isLoggedIn) {
     return <Login onLogin={() => setIsLoggedIn(true)} />;
   }
+// ── USERS SCREEN (admin only) ─────────────────────────────────────────────
+  if(screen==="users"){
+    if(!isAdmin){
+      return (
+        <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'Segoe UI',sans-serif"}}>
+          <div style={{fontSize:18,fontWeight:700}}>🔒 Admin access only</div>
+          <button onClick={()=>setScreen("dashboard")} className="btn btn-ind">← Back to Dashboard</button>
+        </div>
+      );
+    }
+    return (
+      <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",fontFamily:"'Segoe UI',sans-serif"}}>
+        <style>{dashStyles}</style>
+        <div style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+          <div>
+            <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · USER MANAGEMENT</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>Team Members</div>
+          </div>
+          <button onClick={()=>setScreen("dashboard")} className="btn btn-sm">← Dashboard</button>
+        </div>
+        <div style={{maxWidth:900,margin:"0 auto",padding:"28px 32px"}}>
+          {userMsg&&<div style={{padding:"10px 14px",borderRadius:8,marginBottom:18,fontSize:13,
+            background:userMsg.startsWith("✅")?"#0f2a1a":"#3b1418",
+            border:userMsg.startsWith("✅")?"1px solid #166534":"1px solid #7f1d1d",
+            color:userMsg.startsWith("✅")?"#86efac":"#fca5a5"}}>{userMsg}</div>}
+
+          {/* Create user */}
+          <div style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:12,padding:"22px 24px",marginBottom:28}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#f8fafc",marginBottom:16}}>➕ Create New User</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:14}}>
+              <input placeholder="Email *" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={uInp}/>
+              <input placeholder="Password * (min 6)" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={uInp}/>
+              <input placeholder="Name" value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})} style={uInp}/>
+              <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})} style={uInp}>
+                <option value="admin">admin</option>
+                <option value="sales_manager">sales_manager</option>
+                <option value="consultant">consultant</option>
+                <option value="agent">agent</option>
+                <option value="accounts">accounts</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </div>
+            <button onClick={handleCreateUser} className="btn btn-ind">Create User</button>
+          </div>
+
+          {/* User list */}
+          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Users ({users.length})</div>
+          {users.length===0&&<div style={{textAlign:"center",padding:30,color:"#475569",background:"#151b27",borderRadius:12,border:"1px dashed #1e293b"}}>No users loaded. They will appear here.</div>}
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {users.map(u=>(
+              <div key={u._id} style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:10,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14}}>{u.name||u.email} {u.email===currentUser.email&&<span style={{fontSize:10,color:"#f97316"}}>(you)</span>}</div>
+                  <div style={{fontSize:12,color:"#64748b"}}>{u.email} · <span style={{color:"#a5b4fc"}}>{u.role}</span></div>
+                </div>
+                {u.email!==currentUser.email&&(
+                  <button onClick={()=>handleDeleteUser(u._id,u.email)} style={{background:"#3b1418",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:600}}>Delete</button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
   if(screen==="dashboard"){
-    const thisMonth=new Date().toISOString().slice(0,7);
-    const monthDeals=allDeals.filter(d=>(d._savedAt||"").startsWith(thisMonth));
-    const mSell=monthDeals.reduce((s,d)=>{
-      const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-      return s+all.reduce((ss,v)=>ss+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-    },0);
-    const mCost=monthDeals.reduce((s,d)=>{
-      const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-      return s+all.reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0);
-    },0);
-    const mGpm=mSell-mCost;
-    const mGst=mGpm>0?mGpm*GST_RATE_PROFIT:0; // Dashboard uses 18% estimate
-    const mNet=mGpm-mGst;
-    const mVendorPaid=monthDeals.reduce((s,d)=>{
-      const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-      return s+all.reduce((ss,v)=>ss+sum(v.payments||[],"amount"),0);
-    },0);
-    const mVendorDue=mCost-mVendorPaid;
-    const mClientReceived=monthDeals.reduce((s,d)=>s+sum(d.clientPayments||[],"amount"),0);
-    const mClientDue=mSell-mClientReceived;
-    const mo=new Date().toLocaleString("en-IN",{month:"long",year:"numeric"});
+    // Date-range filter (defaults to all-time if blank)
+    const inRange=(d)=>{
+      const ds=(d._savedAt||"").slice(0,10);
+      if(dateFrom && ds<dateFrom) return false;
+      if(dateTo && ds>dateTo) return false;
+      return true;
+    };
+    const rangedDeals=allDeals.filter(inRange);
+
+    // Financial roll-up for a given set of deals
+    const rollup=(deals)=>{
+      const all=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
+      const sell=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+toINR(v.sellingPrice,v.currency,v.exchangeRate),0),0);
+      const cost=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0),0);
+      const gpm=sell-cost;
+      const gst=gpm>0?gpm*GST_RATE_PROFIT:0;
+      const net=gpm-gst;
+      const vendorPaid=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+sum(v.payments||[],"amount"),0),0);
+      const vendorDue=cost-vendorPaid;
+      const clientRec=deals.reduce((s,d)=>s+sum(d.clientPayments||[],"amount"),0);
+      const clientDue=sell-clientRec;
+      return {count:deals.length,sell,cost,gpm,gst,net,vendorPaid,vendorDue,clientRec,clientDue};
+    };
+
+    // Split by status — Booked and Cancelled tracked SEPARATELY
+    const bookedDeals=rangedDeals.filter(d=>(d.status||"")==="Booked");
+    const cancelledDeals=rangedDeals.filter(d=>(d.status||"")==="Cancelled");
+    const B=rollup(bookedDeals);
+    const C=rollup(cancelledDeals);
+    const rangeLabel=(dateFrom||dateTo)?`${dateFrom||"start"} → ${dateTo||"today"}`:"All time";
 
     return (
       <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
@@ -515,29 +730,61 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>{(()=>{const h=new Date().getHours();return h<12?"Good morning ☀️":h<17?"Good afternoon 🌤️":"Good evening 🌙"})()} </div>
             <div style={{fontSize:13,color:"#64748b",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
           </div>
-          <div style={{display:"flex",gap:10}}>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
-            <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Current Draft →</button>
+            <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
+            {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
+            <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#7f1d1d",color:"#fca5a5"}}>Logout</button>
           </div>
         </div>
 
         <div style={{maxWidth:1120,margin:"0 auto",padding:"28px 32px"}}>
-          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:16}}>{mo} Summary</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:32}}>
+          {/* Date range filter */}
+          <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:22,background:"#151b27",border:"1px solid #1e293b",borderRadius:12,padding:"14px 18px"}}>
+            <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>From</div>
+              <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#0d1117",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",padding:"7px 10px"}}/></div>
+            <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>To</div>
+              <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#0d1117",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",padding:"7px 10px"}}/></div>
+            {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} className="btn btn-sm">Clear</button>}
+            <div style={{flex:1}}></div>
+            <div style={{fontSize:11,color:"#64748b"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+          </div>
+
+          {/* BOOKED set */}
+          <div style={{fontSize:12,color:"#10b981",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>✅ Booked — {B.count} deals</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:28}}>
             {[
-              {l:"Total Sales",v:fmtINR(mSell),c:"#e2e8f0",sub:`${monthDeals.length} deals`},
-              {l:"Gross Profit (GPM)",v:fmtINR(mGpm),c:mGpm>=0?"#10b981":"#ef4444",sub:`${mSell>0?((mGpm/mSell)*100).toFixed(1):"0"}% margin`},
-              {l:"GST (18%)",v:fmtINR(mGst),c:"#a5b4fc",sub:"On GPM"},
-              {l:"Net Profit",v:fmtINR(mNet),c:mNet>=0?"#f97316":"#ef4444",sub:"After GST"},
-              {l:"Vendor Paid",v:fmtINR(mVendorPaid),c:"#a5b4fc",sub:"This month"},
-              {l:"Vendor Due",v:fmtINR(mVendorDue),c:mVendorDue>0?"#ef4444":"#10b981",sub:"Pending"},
-              {l:"Client Received",v:fmtINR(mClientReceived),c:"#10b981",sub:"This month"},
-              {l:"Client Pending",v:fmtINR(mClientDue),c:mClientDue>0?"#f59e0b":"#10b981",sub:"Balance"},
+              {l:"Sale Price",v:fmtINR(B.sell),c:"#e2e8f0"},
+              {l:"Cost Price",v:fmtINR(B.cost),c:"#cbd5e1"},
+              {l:"Gross Profit",v:fmtINR(B.gpm),c:B.gpm>=0?"#10b981":"#ef4444"},
+              {l:"Net (after GST)",v:fmtINR(B.net),c:B.net>=0?"#f97316":"#ef4444"},
+              {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#a5b4fc"},
+              {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981"},
+              {l:"Client Received",v:fmtINR(B.clientRec),c:"#10b981"},
+              {l:"Client Pending",v:fmtINR(B.clientDue),c:B.clientDue>0?"#f59e0b":"#10b981"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:12,padding:"18px 20px"}}>
+              <div key={i} style={{background:"#151b27",border:"1px solid #14532d",borderRadius:12,padding:"16px 18px"}}>
                 <div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
-                <div style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:s.c}}>{s.v}</div>
-                <div style={{fontSize:11,color:"#475569",marginTop:4}}>{s.sub}</div>
+                <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* CANCELLED set */}
+          <div style={{fontSize:12,color:"#ef4444",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>❌ Cancelled — {C.count} deals</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:32}}>
+            {[
+              {l:"Sale Price",v:fmtINR(C.sell),c:"#cbd5e1"},
+              {l:"Cost Price",v:fmtINR(C.cost),c:"#cbd5e1"},
+              {l:"Lost Profit",v:fmtINR(C.gpm),c:"#ef4444"},
+              {l:"Vendor Paid",v:fmtINR(C.vendorPaid),c:"#a5b4fc"},
+              {l:"Vendor Pending",v:fmtINR(C.vendorDue),c:C.vendorDue>0?"#ef4444":"#10b981"},
+              {l:"Client Received",v:fmtINR(C.clientRec),c:"#10b981"},
+              {l:"Client Refund Due",v:fmtINR(C.clientRec),c:"#f59e0b"},
+            ].map((s,i)=>(
+              <div key={i} style={{background:"#151b27",border:"1px solid #4c1d24",borderRadius:12,padding:"16px 18px"}}>
+                <div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
+                <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
               </div>
             ))}
           </div>
@@ -590,6 +837,14 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>}
+              <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}
+                title="Deal status (used in dashboard Booked/Cancelled totals)"
+                style={{background:(deal.status==="Booked"?"#0f2a1a":deal.status==="Cancelled"?"#3b1418":"#1a2234"),
+                  border:"1px solid "+(deal.status==="Booked"?"#166534":deal.status==="Cancelled"?"#7f1d1d":"#334155"),
+                  color:(deal.status==="Booked"?"#86efac":deal.status==="Cancelled"?"#fca5a5":"#e2e8f0"),
+                  borderRadius:7,padding:"7px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
               <button onClick={newDeal} className="btn btn-sm">+ New</button>
               <button onClick={saveToAllDeals} className="btn btn-ind" disabled={apiLoading}>{apiLoading?"Saving...":"💾 Save Deal"}</button>
             </div>
@@ -1078,6 +1333,43 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         {tab==="summary"&&(
           <div style={{display:"flex",flexDirection:"column",gap:18}}>
             <h2 style={{fontSize:18,fontWeight:800}}>📋 Full Deal Summary</h2>
+
+            {/* AUTO-SUGGEST: full payment received → mark booked */}
+            {(()=>{
+              const recv=sum(deal.clientPayments||[],"amount");
+              const fullyPaid=totalSell>0 && recv>=totalSell;
+              if(fullyPaid && deal.status!=="Booked" && deal.status!=="Cancelled"){
+                return (
+                  <div style={{background:"#0f2a1a",border:"1px solid #166534",borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                    <div style={{fontSize:13,color:"#86efac"}}>💡 Client has fully paid ({fmtINR(recv)}). Mark this deal as <b>Booked</b>?</div>
+                    <button onClick={()=>upd("status","Booked")} className="btn btn-ind">Mark as Booked</button>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {/* AI ITINERARY GENERATOR */}
+            <div className="card">
+              <div className="sec-head" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                <span>✨ AI Itinerary Generator</span>
+                <button onClick={generateAIItinerary} disabled={aiBusy} className="btn btn-ind">
+                  {aiBusy?"Generating...":"✨ Generate Itinerary"}</button>
+              </div>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>
+                Reads your Flights (onward / return / multi-city), Hotels and sightseeing notes, then builds a client-ready Voyage-Ed itinerary.
+              </div>
+              {aiItinerary&&(
+                <div>
+                  <textarea readOnly value={aiItinerary} style={{width:"100%",minHeight:320,background:"#0d1117",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",padding:"14px",fontSize:13,lineHeight:1.6,fontFamily:"'Segoe UI',sans-serif",whiteSpace:"pre-wrap"}}/>
+                  <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
+                    <button onClick={()=>{navigator.clipboard.writeText(aiItinerary);window.veToast&&window.veToast("Itinerary copied!");}} className="btn btn-sm">📋 Copy</button>
+                    <button onClick={()=>{const msg=encodeURIComponent(aiItinerary);window.open(`https://wa.me/?text=${msg}`,"_blank");}} className="btn btn-sm">💬 Share on WhatsApp</button>
+                    <button onClick={()=>setAiItinerary("")} className="btn btn-sm">Clear</button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Client */}
             <div className="card">

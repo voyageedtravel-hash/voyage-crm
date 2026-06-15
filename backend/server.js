@@ -242,9 +242,39 @@ const start = async () => {
         res.json(users);
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
-    // Delete user
+    // Create user (admin only)
+    app.post("/api/users", authMiddleware, async (req, res) => {
+      try {
+        if (req.user.role !== "admin")
+          return res.status(403).json({ error: "Only admin can create users" });
+        const { email, password, name, role } = req.body;
+        if (!email || !password)
+          return res.status(400).json({ error: "Email and password required" });
+        if (password.length < 6)
+          return res.status(400).json({ error: "Password must be at least 6 characters" });
+        const existing = await User.findOne({ email });
+        if (existing) return res.status(400).json({ error: "User with this email already exists" });
+        const bcrypt = require("bcrypt");
+        const hashed = await bcrypt.hash(password, 10);
+        const user = new User({
+          email,
+          password: hashed,
+          name: name || email.split("@")[0],
+          role: role || "agent",
+        });
+        await user.save();
+        const out = user.toObject();
+        delete out.password;
+        res.json({ success: true, user: out });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+    // Delete user (admin only)
     app.delete("/api/users/:id", authMiddleware, async (req, res) => {
       try {
+        if (req.user.role !== "admin")
+          return res.status(403).json({ error: "Only admin can delete users" });
+        if (req.params.id === req.user.id)
+          return res.status(400).json({ error: "You cannot delete your own account" });
         await User.findByIdAndDelete(req.params.id);
         res.json({ success: true });
       } catch (err) { res.status(500).json({ error: err.message }); }
