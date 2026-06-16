@@ -413,6 +413,11 @@ export default function TravelCRM() {
   const [dateTo,setDateTo]=useState("");
   const [dealFilter,setDealFilter]=useState("");
   const [dealSearch,setDealSearch]=useState("");
+  // AI Assistant
+  const [aiOpen,setAiOpen]=useState(false);
+  const [aiInput,setAiInput]=useState("");
+  const [aiChat,setAiChat]=useState([{role:"assistant",text:"Hi! I'm your Voyage-Ed AI assistant. Tell me what to do — e.g. \"create a deal for Rahul to Dubai\", \"show hot leads\", \"how much do I need to collect?\", or \"draft a follow-up for the current client\"."}]);
+  const [aiThinking,setAiThinking]=useState(false);
   // AI itinerary
   const [aiBusy,setAiBusy]=useState(false);
   const [aiItinerary,setAiItinerary]=useState("");
@@ -441,6 +446,114 @@ export default function TravelCRM() {
     localStorage.removeItem("token"); localStorage.removeItem("ve_user");
     setIsLoggedIn(false);
   };
+
+  // ─── AI ASSISTANT (natural-language command center) ───────────────────────
+  const aiContext=()=>{
+    // Compact snapshot of current data for the AI to reason over
+    const dv=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
+    const sellOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const recvOf=(d)=>sum(d.clientPayments||[],"amount");
+    return {
+      totalDeals:allDeals.length,
+      hotLeads:allDeals.filter(d=>(d.priority==="Hot 🔥"||d.priority==="High")&&!["Booked","Cancelled","Lost"].includes(d.stage||"")).map(d=>d.clientName),
+      followUpsDue:allDeals.filter(d=>d.followUpDate&&d.followUpDate<=new Date().toISOString().slice(0,10)).map(d=>({client:d.clientName,date:d.followUpDate})),
+      toCollect:allDeals.filter(d=>(d.status||d.stage)==="Booked").reduce((s,d)=>s+Math.max(0,sellOf(d)-recvOf(d)),0),
+      currentDeal:deal.clientName?{client:deal.clientName,destination:deal.destination,stage:deal.stage,status:deal.status}:null,
+      stages:PIPELINE_STAGES,
+    };
+  };
+
+  const runAI=async()=>{
+    const q=aiInput.trim(); if(!q) return;
+    setAiChat(c=>[...c,{role:"user",text:q}]); setAiInput(""); setAiThinking(true);
+    try{
+      const system=`You are the AI assistant inside Voyage-Ed Travels CRM. You help the owner run their travel business by hand.
+You can either ANSWER a question about their data, or return an ACTION for the app to perform.
+Respond with ONLY a JSON object, no markdown, in this shape:
+{"reply":"short friendly reply in Hinglish or English","action":{"type":"...","payload":{...}}}
+Valid action types (use null if just answering):
+- "create_deal": payload {clientName, contactNo?, destination?, stage?, priority?, leadSource?, followUpDate?(YYYY-MM-DD)} — creates a new deal
+- "open_filter": payload {filter} where filter is one of "followup","hot","collect","pay" — opens that list on dashboard
+- "search_deals": payload {query} — searches deals by name/destination
+- "draft_whatsapp": payload {kind} where kind is "quote","followup","payment","confirm" — drafts a WhatsApp for the CURRENT open deal
+- "generate_itinerary": payload {} — generates AI itinerary for the CURRENT open deal
+- "set_stage": payload {stage} — sets the current open deal's pipeline stage
+- "goto": payload {screen} where screen is "dashboard","users"
+Current CRM data snapshot: ${JSON.stringify(aiContext())}
+Be concise. If asked to do something you have no action for, explain politely in "reply" with action null.`;
+      const res=await fetch(`${API_BASE}/api/chat`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:600,system,messages:[{role:"user",content:q}]}),
+      });
+      const data=await res.json();
+      let text=(data.content&&data.content[0]&&data.content[0].text)||data.error||"";
+      let parsed; try{ parsed=JSON.parse(text.replace(/```json|```/g,"").trim()); }catch{ parsed={reply:text||"Sorry, I couldn't process that.",action:null}; }
+      setAiChat(c=>[...c,{role:"assistant",text:parsed.reply||"Done."}]);
+      if(parsed.action) executeAIAction(parsed.action);
+    }catch(e){
+      setAiChat(c=>[...c,{role:"assistant",text:"⚠️ AI unavailable. Make sure ANTHROPIC_API_KEY is set on the server. ("+e.message+")"}]);
+    }finally{ setAiThinking(false); }
+  };
+
+  const executeAIAction=(action)=>{
+    const {type,payload={}}=action;
+    try{
+      if(type==="create_deal"){
+        const d={...initDeal,...payload,_localId:uid(),clientName:payload.clientName||"New Client",
+          stage:payload.stage||"New Lead",priority:payload.priority||"Normal"};
+        setDeal(d); saveDeal(d); setScreen("deal"); setTab("client");
+        window.veToast&&window.veToast("✨ Deal created — review & save","success");
+      } else if(type==="open_filter"){ setScreen("dashboard"); setDealFilter(payload.filter||""); }
+      else if(type==="search_deals"){ setScreen("dashboard"); setDealSearch(payload.query||""); }
+      else if(type==="draft_whatsapp"){ if(deal.clientName) waMessage(payload.kind||"followup"); else window.veToast&&window.veToast("Open a deal first","warning"); }
+      else if(type==="generate_itinerary"){ if(deal.clientName){ setScreen("deal"); setTab("summary"); generateAIItinerary(); } else window.veToast&&window.veToast("Open a deal first","warning"); }
+      else if(type==="set_stage"){ if(deal.clientName) upd("stage",payload.stage); }
+      else if(type==="goto"){ setScreen(payload.screen==="users"?"users":"dashboard"); if(payload.screen==="users")loadUsers(); }
+    }catch(e){ console.warn("AI action failed:",e?.message); }
+  };
+
+  // ─── AI ASSISTANT OVERLAY (renders on every screen) ───────────────────────
+  const aiWidgetEl=(
+    <>
+      {/* Floating button */}
+      <button onClick={()=>setAiOpen(o=>!o)} aria-label="AI Assistant"
+        style={{position:"fixed",bottom:20,right:20,zIndex:9998,width:60,height:60,borderRadius:"50%",border:"none",cursor:"pointer",
+          background:"linear-gradient(135deg,#7c3aed,#c026d3)",boxShadow:"0 10px 30px -6px rgba(124,58,237,.6)",fontSize:26}}>
+        {aiOpen?"✕":"🤖"}
+      </button>
+      {/* Panel */}
+      {aiOpen&&(
+        <div style={{position:"fixed",bottom:90,right:16,left:16,maxWidth:420,marginLeft:"auto",zIndex:9998,
+          background:"#0f1117",border:"1px solid #4c1d95",borderRadius:16,boxShadow:"0 24px 60px -12px rgba(0,0,0,.7)",
+          display:"flex",flexDirection:"column",maxHeight:"min(560px,75vh)",overflow:"hidden"}}>
+          <div style={{background:"linear-gradient(135deg,#1a1235,#2e1065)",padding:"14px 18px",borderBottom:"1px solid #4c1d95"}}>
+            <div style={{fontSize:14,fontWeight:800,color:"#e9d5ff"}}>🤖 Voyage-Ed AI Assistant</div>
+            <div style={{fontSize:11,color:"#a78bda"}}>Tell me what to do — I'll handle it</div>
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
+            {aiChat.map((m,i)=>(
+              <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
+                background:m.role==="user"?"#6366f1":"#1e1b2e",color:m.role==="user"?"#fff":"#e2e8f0",
+                padding:"10px 14px",borderRadius:12,fontSize:13,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{m.text}</div>
+            ))}
+            {aiThinking&&<div style={{alignSelf:"flex-start",color:"#a78bda",fontSize:13,padding:"6px 10px"}}>thinking…</div>}
+          </div>
+          <div style={{padding:"12px",borderTop:"1px solid #1e293b",display:"flex",gap:8}}>
+            <input value={aiInput} onChange={e=>setAiInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")runAI();}}
+              placeholder="e.g. create a deal for Rahul to Dubai"
+              style={{flex:1,background:"#1a1f2e",border:"1px solid #4c1d95",borderRadius:9,color:"#e2e8f0",padding:"11px 13px",fontSize:14,outline:"none"}}/>
+            <button onClick={runAI} disabled={aiThinking} style={{background:"linear-gradient(135deg,#7c3aed,#c026d3)",border:"none",borderRadius:9,color:"#fff",padding:"0 16px",fontWeight:800,cursor:"pointer",fontSize:14}}>➤</button>
+          </div>
+          {/* Quick suggestion chips */}
+          <div style={{padding:"0 12px 12px",display:"flex",gap:6,flexWrap:"wrap"}}>
+            {["Show hot leads","How much to collect?","Today's follow-ups","Draft a quote"].map(s=>(
+              <span key={s} onClick={()=>{setAiInput(s);}} style={{fontSize:11,background:"#1e1b2e",border:"1px solid #4c1d95",color:"#c4b5fd",padding:"5px 10px",borderRadius:20,cursor:"pointer"}}>{s}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   // ─── ONE-CLICK WHATSAPP FOLLOW-UP ─────────────────────────────────────────
   const waMessage=(kind)=>{
@@ -840,13 +953,14 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     return (
       <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
         <style>{dashStyles}</style>
-        <div style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        {aiWidgetEl}
+        <div className="crm-header" style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
             <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · DASHBOARD</div>
             <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>{(()=>{const h=new Date().getHours();return h<12?"Good morning ☀️":h<17?"Good afternoon 🌤️":"Good evening 🌙"})()} </div>
             <div style={{fontSize:13,color:"#64748b",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
           </div>
-          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <div className="hdr-actions" style={{display:"flex",gap:10,alignItems:"center"}}>
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
             <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
@@ -869,7 +983,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           {/* ═══ TODAY'S COMMAND CENTER ═══ */}
           <div style={{background:"linear-gradient(135deg,#1a1235,#0d1b3e)",border:"1px solid #4c1d95",borderRadius:14,padding:"20px 22px",marginBottom:24}}>
             <div style={{fontSize:13,fontWeight:800,color:"#c4b5fd",letterSpacing:1,marginBottom:14}}>🧠 TODAY'S COMMAND CENTER</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+            <div className="cc-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
               <div onClick={()=>setDealFilter("followup")} style={ccCard(overdueFollowUps.length>0?"#7f1d1d":"#1e293b")}>
                 <div style={ccNum(overdueFollowUps.length>0?"#fca5a5":"#e2e8f0")}>{followUps.length}</div>
                 <div style={ccLbl}>Follow-ups due{overdueFollowUps.length>0?` (${overdueFollowUps.length} overdue)`:""}</div>
@@ -938,7 +1052,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
           {/* BOOKED set */}
           <div style={{fontSize:12,color:"#10b981",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>✅ Booked — {B.count} deals</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:28}}>
+          <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:28}}>
             {[
               {l:"Sale Price",v:fmtINR(B.sell),c:"#e2e8f0"},
               {l:"Cost Price",v:fmtINR(B.cost),c:"#cbd5e1"},
@@ -958,7 +1072,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
           {/* CANCELLED set */}
           <div style={{fontSize:12,color:"#ef4444",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>❌ Cancelled — {C.count} deals</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:32}}>
+          <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:32}}>
             {[
               {l:"Sale Price",v:fmtINR(C.sell),c:"#cbd5e1"},
               {l:"Cost Price",v:fmtINR(C.cost),c:"#cbd5e1"},
@@ -1027,6 +1141,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   return (
     <div style={{minHeight:"100vh",background:"#0f1117",color:"#e2e8f0",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
       <style>{dealStyles}</style>
+      {aiWidgetEl}
 
       {receiptPayment&&<Receipt deal={deal} payment={receiptPayment} onClose={()=>setReceiptPayment(null)} />}
 
@@ -1086,7 +1201,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
       {/* Tabs */}
       <div style={{background:"#0d1117",borderBottom:"1px solid #1e293b",padding:"0 28px",overflowX:"auto"}}>
-        <div style={{maxWidth:1200,margin:"0 auto",display:"flex"}}>
+        <div className="tab-bar" style={{maxWidth:1200,margin:"0 auto",display:"flex"}}>
           {tabs.map(t=><button key={t.id} className={`tab ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}
         </div>
       </div>
@@ -1761,6 +1876,43 @@ const sharedStyles = `
   .tab{padding:10px 16px;border:none;background:none;font-family:'Syne',sans-serif;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s}
   .tab.on{color:#f97316;border-bottom-color:#f97316}
   .tab:hover:not(.on){color:#94a3b8}
+
+  /* ═══════════ MOBILE RESPONSIVE (tablets & phones) ═══════════ */
+  @media(max-width:820px){
+    .grid3{grid-template-columns:1fr 1fr!important;gap:10px!important}
+    .card{padding:16px!important}
+    .crm-header{padding:14px 16px!important}
+    .crm-body{padding:16px!important}
+    .tab-bar{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch}
+    .tab{flex:0 0 auto!important;white-space:nowrap}
+    table{font-size:12px!important}
+    th,td{padding:7px 8px!important}
+  }
+  @media(max-width:560px){
+    .grid3,.grid2{grid-template-columns:1fr!important}
+    .card{padding:14px!important;border-radius:10px!important}
+    .crm-header{flex-direction:column!important;align-items:stretch!important;gap:10px!important}
+    .crm-header .hdr-actions{display:flex;flex-wrap:wrap;gap:8px!important}
+    .crm-header .hdr-actions .btn{flex:1 1 auto;min-height:44px;font-size:13px!important}
+    .btn{min-height:44px}
+    input,select,textarea{font-size:16px!important;padding:11px 12px!important}
+    .sec-head{font-size:11px!important}
+    .dash-cards{grid-template-columns:1fr 1fr!important}
+    .summary-row{flex-direction:column!important}
+    /* scrollable tables on phones */
+    .table-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+    table{min-width:520px}
+    h2{font-size:16px!important}
+  }
+  @media(max-width:380px){
+    .dash-cards{grid-template-columns:1fr!important}
+    .cc-grid{grid-template-columns:1fr 1fr!important}
+  }
+  /* Larger tap targets everywhere on touch devices */
+  @media(hover:none){
+    .btn,.tab,select,button{min-height:42px}
+    a,button{touch-action:manipulation}
+  }
 `;
 const dashStyles = sharedStyles;
 const dealStyles = sharedStyles;
