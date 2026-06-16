@@ -163,17 +163,34 @@ const getCurrentUser = () => {
 
 const leadsAPI = {
   getAll: async () => {
-    const res = await fetch(`${API_BASE}/api/leads`);
+    const res = await fetch(`${API_BASE}/api/leads`, { headers: authHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch leads: ${res.status}`);
     return res.json();
   },
   create: async (dealData) => {
     const res = await fetch(`${API_BASE}/api/leads`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify(dealData),
     });
     if (!res.ok) throw new Error(`Failed to save lead: ${res.status}`);
+    return res.json();
+  },
+  update: async (id, dealData) => {
+    const res = await fetch(`${API_BASE}/api/leads/${id}`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify(dealData),
+    });
+    if (!res.ok) throw new Error(`Failed to update lead: ${res.status}`);
+    return res.json();
+  },
+  remove: async (id) => {
+    const res = await fetch(`${API_BASE}/api/leads/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to delete lead: ${res.status}`);
     return res.json();
   },
 };
@@ -492,8 +509,21 @@ ${text}
   // Fetch all leads from backend on mount
   useEffect(()=>{
     leadsAPI.getAll()
-      .then(data => { setAllDeals(data); saveAllDeals(data); })
-      .catch(err => console.warn("Could not fetch leads from server:", err.message));
+      .then(serverDeals => {
+        if (!Array.isArray(serverDeals)) return;
+        // Merge: server is source of truth, but keep any local-only deals not yet synced.
+        const local = loadAllDeals();
+        const byId = {};
+        serverDeals.forEach(d => { d._localId = d._localId || d._id; byId[d._id] = d; });
+        const localOnly = local.filter(l => !l._id || !byId[l._id]);
+        const merged = [...serverDeals, ...localOnly];
+        setAllDeals(merged); saveAllDeals(merged);
+      })
+      .catch(err => {
+        console.warn("Could not fetch leads from server:", err.message);
+        // Keep showing local deals — never blank the dashboard on a fetch failure.
+        setAllDeals(loadAllDeals());
+      });
   },[]);
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
 
@@ -548,29 +578,44 @@ ${text}
   const saveToAllDeals = async () => {
     if (!deal.clientName) { window.veToast && window.veToast("Please enter client name first", "warning"); return; }
     setApiLoading(true);
-    try {
-      const toSave = { ...deal, _savedAt: new Date().toISOString() };
-      const saved = await leadsAPI.create(toSave);
-      const finalDeal = saved || toSave;
+    // Always keep a local copy first so a deal can NEVER be lost, even if the network fails.
+    const persistLocal = (d) => {
       const all = loadAllDeals();
-      const existIdx = all.findIndex(d => d._id === finalDeal._id);
-      if (existIdx >= 0) all[existIdx] = finalDeal; else all.unshift(finalDeal);
+      const idx = all.findIndex(x => (d._id && x._id === d._id) || (d._localId && x._localId === d._localId));
+      if (idx >= 0) all[idx] = d; else all.unshift(d);
       saveAllDeals(all); setAllDeals(all);
-      setDeal(finalDeal); saveDeal(finalDeal);
+      setDeal(d); saveDeal(d);
+      return d;
+    };
+    try {
+      const toSave = { ...deal, _localId: deal._localId || uid(), _savedAt: new Date().toISOString() };
+      // If this deal already exists on the server (_id present) -> UPDATE; else CREATE.
+      const saved = deal._id
+        ? await leadsAPI.update(deal._id, toSave)
+        : await leadsAPI.create(toSave);
+      // Merge server response (gets real _id) but keep our _localId for matching.
+      const finalDeal = { ...toSave, ...(saved || {}), _localId: toSave._localId };
+      persistLocal(finalDeal);
       window.veToast && window.veToast("✅ Deal saved successfully!", "success");
-    } catch(e) {
-  console.error("Save error:", e?.message);
-  window.veToast && window.veToast("Save failed. Please try again.", "error");
-
-  const all = loadAllDeals();
-  const toSave = { ...deal, _id: deal._id || uid(), _savedAt: new Date().toISOString() };
-  const existIdx = all.findIndex(d => d._id === toSave._id);
-  if (existIdx >= 0) all[existIdx] = toSave; else all.unshift(toSave);
-  saveAllDeals(all); setAllDeals(all);
-  setDeal(toSave); saveDeal(toSave);
-} finally {
+    } catch (e) {
+      console.error("Save error:", e?.message);
+      // Network/auth failed — DO NOT lose the deal. Keep it locally and tell the user clearly.
+      const localCopy = { ...deal, _localId: deal._localId || uid(), _savedAt: new Date().toISOString() };
+      persistLocal(localCopy);
+      window.veToast && window.veToast("⚠️ Saved on this device, but server sync failed. Check login/connection.", "warning");
+    } finally {
       setApiLoading(false);
     }
+  };
+
+  // Delete a deal everywhere (server + local). Used by the dashboard delete button.
+  const deleteDealEverywhere = async (d) => {
+    if (!window.confirm(`Delete deal for "${d.clientName||"this client"}"? This cannot be undone.`)) return;
+    try { if (d._id) await leadsAPI.remove(d._id); }
+    catch(e){ console.warn("Server delete failed:", e?.message); }
+    const all = loadAllDeals().filter(x => !((d._id && x._id===d._id) || (d._localId && x._localId===d._localId)));
+    saveAllDeals(all); setAllDeals(all);
+    window.veToast && window.veToast("Deal deleted", "success");
   };
 
   const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal};setDeal(d);saveDeal(d);setTab("client");} };
@@ -810,7 +855,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                   <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div></div>
                   <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>RECEIVED</div><div style={{fontFamily:"monospace",fontWeight:700,color:"#10b981"}}>{fmtINR(dRec)}</div></div>
                   <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>BALANCE</div><div style={{fontFamily:"monospace",fontWeight:700,color:(dSell-dRec)>0?"#f97316":"#10b981"}}>{fmtINR(dSell-dRec)}</div></div>
-                    <div style={{textAlign:"right",fontSize:11,color:"#475569"}}>{d._savedAt?new Date(d._savedAt).toLocaleDateString("en-IN"):""}</div>
+                    <div style={{textAlign:"right"}}>
+                      {d.status && d.status!=="Not Actioned" && (
+                        <span style={{display:"inline-block",fontSize:9,fontWeight:800,letterSpacing:.5,padding:"3px 8px",borderRadius:20,marginBottom:4,
+                          background:d.status==="Booked"?"#0f2a1a":d.status==="Cancelled"?"#3b1418":"#1a2234",
+                          color:d.status==="Booked"?"#86efac":d.status==="Cancelled"?"#fca5a5":"#94a3b8"}}>{d.status}</span>
+                      )}
+                      <div style={{fontSize:11,color:"#475569"}}>{d._savedAt?new Date(d._savedAt).toLocaleDateString("en-IN"):""}</div>
+                      <button onClick={(e)=>{e.stopPropagation();deleteDealEverywhere(d);}}
+                        style={{marginTop:4,background:"transparent",border:"1px solid #4c1d24",color:"#fca5a5",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:11}}>Delete</button>
+                    </div>
                   </div>
                 );
               })}
