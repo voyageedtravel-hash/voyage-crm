@@ -125,6 +125,10 @@ const initDeal = {
   remarks:"",
   gstMode:"profit",
   status:"Not Actioned",
+  stage:"New Lead",
+  followUpDate:"",
+  leadSource:"",
+  priority:"Normal",
   dealNumber:"",
   hotelVendors:[emptyHotelVendor()],
   flightVendors:[emptyFlightVendor()],
@@ -217,6 +221,12 @@ const usersAPI = {
 
 // Deal status options used in dashboard filtering + deal dropdown
 const STATUS_OPTIONS = ["Not Actioned","In Progress","Quoted","Booked","Cancelled","Completed"];
+const PIPELINE_STAGES = ["New Lead","Contacted","Quoted","Negotiation","Booked","Travelled","Lost"];
+const LEAD_SOURCES = ["WhatsApp","Instagram","Website","Referral","Walk-in","Call","Facebook","Google","Other"];
+const PRIORITIES = ["Low","Normal","High","Hot 🔥"];
+const ccCard=(border)=>({background:"#0f172a",border:"1px solid "+border,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"transform .15s"});
+const ccNum=(c)=>({fontSize:20,fontWeight:800,color:c,fontFamily:"monospace"});
+const ccLbl={fontSize:10,color:"#94a3b8",marginTop:4,letterSpacing:.3};
 const uInp = {background:"#0d1117",border:"1px solid #334155",borderRadius:7,color:"#e2e8f0",padding:"10px 12px",fontSize:13,outline:"none"};
 
 // ─── VENDOR AUTOCOMPLETE INPUT ────────────────────────────────────────────────
@@ -401,6 +411,8 @@ export default function TravelCRM() {
   // Dashboard date range
   const [dateFrom,setDateFrom]=useState("");
   const [dateTo,setDateTo]=useState("");
+  const [dealFilter,setDealFilter]=useState("");
+  const [dealSearch,setDealSearch]=useState("");
   // AI itinerary
   const [aiBusy,setAiBusy]=useState(false);
   const [aiItinerary,setAiItinerary]=useState("");
@@ -428,6 +440,24 @@ export default function TravelCRM() {
   const handleLogout=()=>{
     localStorage.removeItem("token"); localStorage.removeItem("ve_user");
     setIsLoggedIn(false);
+  };
+
+  // ─── ONE-CLICK WHATSAPP FOLLOW-UP ─────────────────────────────────────────
+  const waMessage=(kind)=>{
+    const name=deal.clientName||"there";
+    const dest=deal.destination||"your trip";
+    const sell=[...deal.hotelVendors||[],...deal.flightVendors||[],...deal.landVendors||[],...deal.visaVendors||[]]
+      .reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const templates={
+      quote:`Hi ${name}! 👋 Greetings from Voyage-Ed Travels. Here's your customised quote for ${dest}${sell>0?` — starting at ${fmtINR(sell)} per person`:""}. Shall I share the detailed itinerary? ✈️`,
+      followup:`Hi ${name}! 😊 Just following up on your ${dest} plan. Are you ready to proceed, or do you have any questions? We'd love to make this trip happen for you!`,
+      payment:`Hi ${name}! Thank you for choosing Voyage-Ed for your ${dest} trip. 🌟 A gentle reminder regarding the pending payment to confirm your booking. Let me know if you need any help!`,
+      confirm:`Hi ${name}! 🎉 Your ${dest} booking with Voyage-Ed is confirmed! We'll share all documents shortly. Get ready for an amazing journey! ✈️`,
+    };
+    const phone=(deal.contactNo||"").replace(/[^0-9]/g,"");
+    const num=phone.length===10?"91"+phone:phone;
+    const url=`https://wa.me/${num}?text=${encodeURIComponent(templates[kind]||templates.followup)}`;
+    window.open(url,"_blank");
   };
 
   // ─── AI ITINERARY GENERATOR ───────────────────────────────────────────────
@@ -744,15 +774,56 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     };
     const rangedDeals=allDeals.filter(inRange);
 
-    // Financial roll-up for a given set of deals
+    // ─── SALES INTELLIGENCE (the CRM tells YOU what to do) ───────────────────
+    const todayStr=new Date().toISOString().slice(0,10);
+    const activeDeals=allDeals.filter(d=>!["Booked","Cancelled","Travelled","Lost","Completed"].includes(d.status||"")&&(d.stage!=="Booked"&&d.stage!=="Lost"&&d.stage!=="Travelled"));
+    // Follow-ups due/overdue
+    const followUps=allDeals.filter(d=>d.followUpDate && d.followUpDate<=todayStr && (d.stage!=="Booked"&&d.stage!=="Lost"&&d.stage!=="Travelled"));
+    const overdueFollowUps=followUps.filter(d=>d.followUpDate<todayStr);
+    // Hot leads not yet booked
+    const hotLeads=allDeals.filter(d=>(d.priority==="Hot 🔥"||d.priority==="High")&&!["Booked","Cancelled","Travelled","Lost"].includes(d.stage||""));
+    // Client payments pending on BOOKED deals (money to collect)
+    const dealAll=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
+    const pendingCollections=allDeals.filter(d=>{
+      if((d.status||d.stage)!=="Booked") return false;
+      const sell=dealAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+      const recv=sum(d.clientPayments||[],"amount");
+      return sell-recv>1;
+    }).map(d=>{
+      const sell=dealAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+      const recv=sum(d.clientPayments||[],"amount");
+      return {...d,_due:sell-recv};
+    }).sort((a,b)=>b._due-a._due);
+    const totalToCollect=pendingCollections.reduce((s,d)=>s+d._due,0);
+    // Vendor payments we owe on booked deals
+    const vendorDues=allDeals.filter(d=>(d.status||d.stage)==="Booked").map(d=>{
+      const cost=dealAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+      const paid=dealAll(d).reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
+      return {...d,_owe:cost-paid};
+    }).filter(d=>d._owe>1).sort((a,b)=>b._owe-a._owe);
+    const totalToPay=vendorDues.reduce((s,d)=>s+d._owe,0);
+    // Pipeline funnel counts
+    const funnel=PIPELINE_STAGES.map(st=>({stage:st,count:allDeals.filter(d=>(d.stage||"New Lead")===st).length}));
+    // Conversion rate
+    const totalLeads=allDeals.length;
+    const bookedCount=allDeals.filter(d=>(d.stage==="Booked"||d.status==="Booked")).length;
+    const convRate=totalLeads>0?((bookedCount/totalLeads)*100).toFixed(1):"0";
+
+    // Financial roll-up — per-deal GST mode respected (FIX: was always 18%)
+    const dealVendors=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
+    const dealSell=(d)=>dealVendors(d).reduce((ss,v)=>ss+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const dealCost=(d)=>dealVendors(d).reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+    const dealGst=(d)=>{
+      const s=dealSell(d), c=dealCost(d), g=s-c;
+      return d.gstMode==="package" ? s*GST_RATE_PACKAGE : (g>0?g*GST_RATE_PROFIT:0);
+    };
     const rollup=(deals)=>{
-      const all=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-      const sell=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+toINR(v.sellingPrice,v.currency,v.exchangeRate),0),0);
-      const cost=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0),0);
+      const sell=deals.reduce((s,d)=>s+dealSell(d),0);
+      const cost=deals.reduce((s,d)=>s+dealCost(d),0);
       const gpm=sell-cost;
-      const gst=gpm>0?gpm*GST_RATE_PROFIT:0;
+      const gst=deals.reduce((s,d)=>s+dealGst(d),0);  // per-deal GST, not flat 18%
       const net=gpm-gst;
-      const vendorPaid=deals.reduce((s,d)=>s+all(d).reduce((ss,v)=>ss+sum(v.payments||[],"amount"),0),0);
+      const vendorPaid=deals.reduce((s,d)=>s+dealVendors(d).reduce((ss,v)=>ss+sum(v.payments||[],"amount"),0),0);
       const vendorDue=cost-vendorPaid;
       const clientRec=deals.reduce((s,d)=>s+sum(d.clientPayments||[],"amount"),0);
       const clientDue=sell-clientRec;
@@ -793,6 +864,76 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} className="btn btn-sm">Clear</button>}
             <div style={{flex:1}}></div>
             <div style={{fontSize:11,color:"#64748b"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+          </div>
+
+          {/* ═══ TODAY'S COMMAND CENTER ═══ */}
+          <div style={{background:"linear-gradient(135deg,#1a1235,#0d1b3e)",border:"1px solid #4c1d95",borderRadius:14,padding:"20px 22px",marginBottom:24}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#c4b5fd",letterSpacing:1,marginBottom:14}}>🧠 TODAY'S COMMAND CENTER</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+              <div onClick={()=>setDealFilter("followup")} style={ccCard(overdueFollowUps.length>0?"#7f1d1d":"#1e293b")}>
+                <div style={ccNum(overdueFollowUps.length>0?"#fca5a5":"#e2e8f0")}>{followUps.length}</div>
+                <div style={ccLbl}>Follow-ups due{overdueFollowUps.length>0?` (${overdueFollowUps.length} overdue)`:""}</div>
+              </div>
+              <div onClick={()=>setDealFilter("hot")} style={ccCard("#1e293b")}>
+                <div style={ccNum("#fb923c")}>{hotLeads.length}</div>
+                <div style={ccLbl}>🔥 Hot leads</div>
+              </div>
+              <div onClick={()=>setDealFilter("collect")} style={ccCard("#1e293b")}>
+                <div style={ccNum("#fbbf24")}>{fmtINR(totalToCollect)}</div>
+                <div style={ccLbl}>To collect ({pendingCollections.length})</div>
+              </div>
+              <div onClick={()=>setDealFilter("pay")} style={ccCard("#1e293b")}>
+                <div style={ccNum("#f87171")}>{fmtINR(totalToPay)}</div>
+                <div style={ccLbl}>To pay vendors ({vendorDues.length})</div>
+              </div>
+              <div style={ccCard("#1e293b")}>
+                <div style={ccNum("#34d399")}>{convRate}%</div>
+                <div style={ccLbl}>Conversion ({bookedCount}/{totalLeads})</div>
+              </div>
+            </div>
+            {/* Action list based on filter */}
+            {dealFilter && (()=>{
+              const map={followup:followUps,hot:hotLeads,collect:pendingCollections,pay:vendorDues};
+              const list=map[dealFilter]||[];
+              const titleMap={followup:"📞 Follow-ups due",hot:"🔥 Hot leads",collect:"💰 Pending collections",pay:"🏦 Vendor payments due"};
+              return (
+                <div style={{marginTop:16,borderTop:"1px solid #312e81",paddingTop:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#c4b5fd"}}>{titleMap[dealFilter]} ({list.length})</span>
+                    <span onClick={()=>setDealFilter("")} style={{fontSize:11,color:"#94a3b8",cursor:"pointer"}}>✕ close</span>
+                  </div>
+                  {list.length===0&&<div style={{fontSize:12,color:"#64748b"}}>Nothing here — you're all caught up! 🎉</div>}
+                  <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:280,overflowY:"auto"}}>
+                    {list.slice(0,20).map(d=>(
+                      <div key={d._id||d._localId} onClick={()=>openDeal(d)} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:10,flexWrap:"wrap"}}>
+                        <div>
+                          <span style={{fontWeight:700,fontSize:13}}>{d.clientName||"Unnamed"}</span>
+                          <span style={{fontSize:11,color:"#64748b"}}> · {d.destination||"—"}</span>
+                          {d.followUpDate&&dealFilter==="followup"&&<span style={{fontSize:11,color:d.followUpDate<todayStr?"#fca5a5":"#94a3b8"}}> · 📅 {d.followUpDate}</span>}
+                        </div>
+                        <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:dealFilter==="pay"?"#f87171":"#fbbf24"}}>
+                          {dealFilter==="collect"&&fmtINR(d._due)}
+                          {dealFilter==="pay"&&fmtINR(d._owe)}
+                          {dealFilter==="hot"&&(d.priority||"")}
+                          {dealFilter==="followup"&&"Open →"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* PIPELINE FUNNEL */}
+          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>📊 Sales Pipeline</div>
+          <div style={{display:"flex",gap:8,marginBottom:28,flexWrap:"wrap"}}>
+            {funnel.map(f=>(
+              <div key={f.stage} style={{flex:"1 1 110px",background:"#151b27",border:"1px solid #1e293b",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
+                <div style={{fontSize:22,fontWeight:800,color:f.stage==="Booked"?"#34d399":f.stage==="Lost"?"#ef4444":"#e2e8f0"}}>{f.count}</div>
+                <div style={{fontSize:10,color:"#64748b",marginTop:4}}>{f.stage}</div>
+              </div>
+            ))}
           </div>
 
           {/* BOOKED set */}
@@ -836,8 +977,17 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
           <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Deals ({allDeals.length})</div>
           {allDeals.length===0&&<div style={{textAlign:"center",padding:40,color:"#475569",background:"#151b27",borderRadius:12,border:"1px dashed #1e293b"}}>No deals saved yet. Create a new deal and save it.</div>}
+          <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+            <input value={dealSearch} onChange={e=>setDealSearch(e.target.value)} placeholder="🔍 Search client, destination, deal no..."
+              style={{flex:"1 1 260px",background:"#0d1117",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",padding:"10px 14px",fontSize:13,outline:"none"}}/>
+            <span style={{fontSize:11,color:"#64748b"}}>{(()=>{const q=dealSearch.toLowerCase().trim();return q?allDeals.filter(d=>(`${d.clientName} ${d.destination} ${d.dealNumber} ${d.contactNo}`).toLowerCase().includes(q)).length:allDeals.length;})()} deals</span>
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {allDeals.map(d=>{
+            {allDeals.filter(d=>{
+              const q=dealSearch.toLowerCase().trim();
+              if(!q) return true;
+              return (`${d.clientName||""} ${d.destination||""} ${d.dealNumber||""} ${d.contactNo||""}`).toLowerCase().includes(q);
+            }).map(d=>{
               const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
               const dSell=all.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
               const dCost=all.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
@@ -902,6 +1052,13 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <button onClick={newDeal} className="btn btn-sm">+ New</button>
               <button onClick={saveToAllDeals} className="btn btn-ind" disabled={apiLoading}>{apiLoading?"Saving...":"💾 Save Deal"}</button>
             </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:2}}>
+              <span style={{fontSize:10,color:"#64748b",letterSpacing:1}}>QUICK WHATSAPP:</span>
+              <button onClick={()=>waMessage("quote")} className="btn btn-sm" style={{borderColor:"#166534",color:"#86efac"}} title="Send quote">💬 Quote</button>
+              <button onClick={()=>waMessage("followup")} className="btn btn-sm" style={{borderColor:"#1e40af",color:"#93c5fd"}} title="Follow up">🔔 Follow-up</button>
+              <button onClick={()=>waMessage("payment")} className="btn btn-sm" style={{borderColor:"#92400e",color:"#fcd34d"}} title="Payment reminder">💰 Payment</button>
+              <button onClick={()=>waMessage("confirm")} className="btn btn-sm" style={{borderColor:"#5b21b6",color:"#c4b5fd"}} title="Booking confirmed">🎉 Confirm</button>
+            </div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               {[
                 {l:"Selling",v:fmtINR(totalSell),c:"#e2e8f0"},
@@ -939,6 +1096,30 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         {/* ══ CLIENT TAB ══ */}
         {tab==="client"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div className="card" style={{borderColor:"#4c1d95"}}>
+              <div className="sec-head" style={{color:"#c4b5fd"}}>🎯 Lead Tracking</div>
+              <div className="grid3" style={{marginBottom:6}}>
+                <div><span className="lbl">Pipeline Stage</span>
+                  <select value={deal.stage||"New Lead"} onChange={e=>upd("stage",e.target.value)}>
+                    {PIPELINE_STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select></div>
+                <div><span className="lbl">Priority</span>
+                  <select value={deal.priority||"Normal"} onChange={e=>upd("priority",e.target.value)}>
+                    {PRIORITIES.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select></div>
+                <div><span className="lbl">Next Follow-up Date</span>
+                  <input type="date" value={deal.followUpDate||""} onChange={e=>upd("followUpDate",e.target.value)} /></div>
+                <div><span className="lbl">Lead Source</span>
+                  <select value={deal.leadSource||""} onChange={e=>upd("leadSource",e.target.value)}>
+                    <option value="">— select —</option>
+                    {LEAD_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select></div>
+                <div><span className="lbl">Booking Status</span>
+                  <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}>
+                    {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select></div>
+              </div>
+            </div>
             <div className="card">
               <div className="sec-head">Client Information</div>
               <div className="grid3" style={{marginBottom:14}}>
