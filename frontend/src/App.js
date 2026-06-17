@@ -21,7 +21,7 @@ const CURRENCIES = ["INR","USD","EUR","GBP","SGD","THB","MYR"];
 const CLIENT_MODES = ["UPI","Cash deposited by client in bank","Cash collected by Vishal","Cash collected by Sahitya","Bank Transfer","Cheque","Other"];
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
-const VISA_STATUS_COLORS = {"Not Applied":"#64748b","Not Required":"#94a3b8","In Progress":"#f59e0b","Approved":"#10b981","Rejected":"#ef4444"};
+const VISA_STATUS_COLORS = {"Not Applied":"#6b7a99","Not Required":"#5a6b8c","In Progress":"#f59e0b","Approved":"#10b981","Rejected":"#ef4444"};
 const QUERY_MODES = ["Call","Website","Sahitya Reference","Vishal Reference","Other Reference"];
 const GST_RATE_PROFIT = 0.18;  // 18% on GPM (profit)
 const GST_RATE_PACKAGE = 0.05; // 5% on total selling price (package)
@@ -149,7 +149,32 @@ const saveVendorName = (name) => {
   if(name && !list.includes(name)){ list.push(name); try{localStorage.setItem(VENDORS_KEY,JSON.stringify(list));}catch(e){} }
 };
 const loadAllDeals = () => { try { const d=localStorage.getItem(DEALS_KEY); return d?JSON.parse(d):[]; } catch(e){return[];} };
-const saveAllDeals = (deals) => { try { localStorage.setItem(DEALS_KEY,JSON.stringify(deals)); } catch(e){} };
+const saveAllDeals = (deals) => {
+  try {
+    if (!Array.isArray(deals)) return;
+    // SAFETY: never overwrite a non-empty deal list with an empty one (prevents accidental wipe).
+    const existing = (()=>{ try { return JSON.parse(localStorage.getItem(DEALS_KEY)||"[]"); } catch { return []; } })();
+    if (deals.length === 0 && existing.length > 0) {
+      console.warn("Refused to overwrite", existing.length, "deals with empty list");
+      return;
+    }
+    localStorage.setItem(DEALS_KEY, JSON.stringify(deals));
+    // Rolling backup so data is recoverable even if something goes wrong.
+    localStorage.setItem(DEALS_KEY+"_backup", JSON.stringify({ savedAt:new Date().toISOString(), deals }));
+  } catch(e){}
+};
+// Recover deals from backup if the main store ever ends up emptier than the backup.
+const recoverDealsIfNeeded = () => {
+  try {
+    const main = JSON.parse(localStorage.getItem(DEALS_KEY)||"[]");
+    const bk = JSON.parse(localStorage.getItem(DEALS_KEY+"_backup")||"null");
+    if (bk && Array.isArray(bk.deals) && bk.deals.length > main.length) {
+      localStorage.setItem(DEALS_KEY, JSON.stringify(bk.deals));
+      return bk.deals;
+    }
+  } catch(e){}
+  return null;
+};
 
 // ─── API LAYER ────────────────────────────────────────────────────────────────
 const API_BASE = "https://voyage-crm.onrender.com";
@@ -222,10 +247,10 @@ const STATUS_OPTIONS = ["Not Actioned","In Progress","Quoted","Booked","Cancelle
 const PIPELINE_STAGES = ["New Lead","Contacted","Quoted","Negotiation","Booked","Travelled","Lost"];
 const LEAD_SOURCES = ["WhatsApp","Instagram","Website","Referral","Walk-in","Call","Facebook","Google","Other"];
 const PRIORITIES = ["Low","Normal","High","Hot 🔥"];
-const ccCard=(border)=>({background:"#0f172a",border:"1px solid "+border,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"transform .15s"});
+const ccCard=(border)=>({background:"#f4f7fc",border:"1px solid "+border,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"transform .15s"});
 const ccNum=(c)=>({fontSize:20,fontWeight:800,color:c,fontFamily:"monospace"});
-const ccLbl={fontSize:10,color:"#94a3b8",marginTop:4,letterSpacing:.3};
-const uInp = {background:"#0d1117",border:"1px solid #334155",borderRadius:7,color:"#e2e8f0",padding:"10px 12px",fontSize:13,outline:"none"};
+const ccLbl={fontSize:10,color:"#5a6b8c",marginTop:4,letterSpacing:.3};
+const uInp = {background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:7,color:"#1a2c52",padding:"10px 12px",fontSize:13,outline:"none"};
 
 // ─── VENDOR AUTOCOMPLETE INPUT ────────────────────────────────────────────────
 function VendorInput({value, onChange, placeholder}) {
@@ -242,10 +267,10 @@ function VendorInput({value, onChange, placeholder}) {
         onFocus={()=>setShow(true)} onBlur={()=>setTimeout(()=>setShow(false),150)}
         placeholder={placeholder||"Vendor name..."} />
       {show&&list.length>0&&(
-        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#1a1f2e",border:"1px solid #334155",borderRadius:6,zIndex:50,maxHeight:160,overflowY:"auto"}}>
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:6,zIndex:50,maxHeight:160,overflowY:"auto"}}>
           {list.map(v=>(
-            <div key={v} onMouseDown={()=>onChange(v)} style={{padding:"7px 10px",cursor:"pointer",fontSize:13,color:"#e2e8f0"}}
-              onMouseEnter={e=>e.currentTarget.style.background="#2d3748"}
+            <div key={v} onMouseDown={()=>onChange(v)} style={{padding:"7px 10px",cursor:"pointer",fontSize:13,color:"#1a2c52"}}
+              onMouseEnter={e=>e.currentTarget.style.background="#dde6f5"}
               onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               {v}
             </div>
@@ -261,12 +286,12 @@ function Receipt({deal, payment, onClose}) {
     w.document.write(`<html><head><title>Receipt</title><style>
       body{font-family:'Segoe UI',sans-serif;padding:40px;color:#1a1410;max-width:600px;margin:0 auto}
       .logo{font-size:28px;font-weight:900;color:#f97316;letter-spacing:-1px}
-      .sub{font-size:11px;color:#64748b;letter-spacing:2px;text-transform:uppercase}
+      .sub{font-size:11px;color:#6b7a99;letter-spacing:2px;text-transform:uppercase}
       table{width:100%;border-collapse:collapse;margin-top:16px}
       td{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:13px}
-      .label{color:#64748b;width:50%} .val{font-weight:600;text-align:right}
+      .label{color:#6b7a99;width:50%} .val{font-weight:600;text-align:right}
       .total{font-size:20px;font-weight:800;color:#f97316}
-      .footer{margin-top:32px;text-align:center;font-size:11px;color:#94a3b8}
+      .footer{margin-top:32px;text-align:center;font-size:11px;color:#5a6b8c}
       @media print{body{padding:20px}}
     </style></head><body>
       <div class="logo">✈ Voyage-Ed</div>
@@ -296,13 +321,13 @@ function Receipt({deal, payment, onClose}) {
 
   return (
     <div style={{position:"fixed",inset:0,background:"#000000aa",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,backdropFilter:"blur(4px)"}}>
-      <div style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:16,padding:32,width:480,maxWidth:"95vw"}}>
+      <div style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:16,padding:32,width:480,maxWidth:"95vw"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
           <div>
             <div style={{fontSize:22,fontWeight:900,color:"#f97316",letterSpacing:-1}}>✈ Voyage-Ed</div>
-            <div style={{fontSize:10,color:"#64748b",letterSpacing:2,textTransform:"uppercase"}}>Payment Receipt</div>
+            <div style={{fontSize:10,color:"#6b7a99",letterSpacing:2,textTransform:"uppercase"}}>Payment Receipt</div>
           </div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:20}}>✕</button>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#6b7a99",cursor:"pointer",fontSize:20}}>✕</button>
         </div>
         <div style={{borderTop:"2px solid #f97316",paddingTop:16}}>
           {[
@@ -311,8 +336,8 @@ function Receipt({deal, payment, onClose}) {
             ["Date",payment.date],["Mode",payment.mode],
             ...(payment.note?[["Reference",payment.note]]:[]),
           ].map(([l,v])=>(
-            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #1e293b",fontSize:13}}>
-              <span style={{color:"#64748b"}}>{l}</span><span style={{fontWeight:600}}>{v}</span>
+            <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #d4e0f5",fontSize:13}}>
+              <span style={{color:"#6b7a99"}}>{l}</span><span style={{fontWeight:600}}>{v}</span>
             </div>
           ))}
           <div style={{background:"#1a0e00",border:"2px solid #f97316",borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:16}}>
@@ -322,9 +347,9 @@ function Receipt({deal, payment, onClose}) {
         </div>
         <div style={{display:"flex",gap:10,marginTop:20}}>
           <button onClick={handlePrint} style={{flex:1,background:"linear-gradient(135deg,#f97316,#f59e0b)",color:"#fff",border:"none",borderRadius:8,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:14}}>🖨 Print / Save PDF</button>
-          <button onClick={onClose} style={{padding:"10px 20px",background:"#1e293b",border:"1px solid #334155",color:"#94a3b8",borderRadius:8,cursor:"pointer",fontWeight:600}}>Close</button>
+          <button onClick={onClose} style={{padding:"10px 20px",background:"#d4e0f5",border:"1px solid #c2d2ee",color:"#5a6b8c",borderRadius:8,cursor:"pointer",fontWeight:600}}>Close</button>
         </div>
-        <div style={{textAlign:"center",fontSize:11,color:"#475569",marginTop:12}}>Computer generated receipt — no signature required</div>
+        <div style={{textAlign:"center",fontSize:11,color:"#a9bce0",marginTop:12}}>Computer generated receipt — no signature required</div>
       </div>
     </div>
   );
@@ -346,7 +371,7 @@ function SectorRow({sector, onChange, onRemove, showRemove, label}) {
   };
 
   return (
-    <div style={{background:"#0d1117",border:"1px solid #1e293b",borderRadius:8,padding:12,marginBottom:8}}>
+    <div style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:8,padding:12,marginBottom:8}}>
       {label&&<div style={{fontSize:10,color:"#f97316",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>{label}</div>}
       <div style={{display:"grid",gridTemplateColumns:"0.7fr 1.5fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr auto",gap:8,alignItems:"end"}}>
         <div>
@@ -361,12 +386,12 @@ function SectorRow({sector, onChange, onRemove, showRemove, label}) {
         <div>
           <span className="lbl">From (IATA)</span>
           <input value={sector.from} onChange={e=>updFrom(e.target.value)} placeholder="DEL" style={{textTransform:"uppercase"}} />
-          {sector.fromName&&<div style={{fontSize:10,color:"#6366f1",marginTop:2}}>{sector.fromName}</div>}
+          {sector.fromName&&<div style={{fontSize:10,color:"#4169E1",marginTop:2}}>{sector.fromName}</div>}
         </div>
         <div>
           <span className="lbl">To (IATA)</span>
           <input value={sector.to} onChange={e=>updTo(e.target.value)} placeholder="DXB" style={{textTransform:"uppercase"}} />
-          {sector.toName&&<div style={{fontSize:10,color:"#6366f1",marginTop:2}}>{sector.toName}</div>}
+          {sector.toName&&<div style={{fontSize:10,color:"#4169E1",marginTop:2}}>{sector.toName}</div>}
         </div>
         <div>
           <span className="lbl">Date</span>
@@ -515,36 +540,36 @@ Be concise. If asked to do something you have no action for, explain politely in
       {/* Floating button */}
       <button onClick={()=>setAiOpen(o=>!o)} aria-label="AI Assistant"
         style={{position:"fixed",bottom:20,right:20,zIndex:9998,width:60,height:60,borderRadius:"50%",border:"none",cursor:"pointer",
-          background:"linear-gradient(135deg,#7c3aed,#c026d3)",boxShadow:"0 10px 30px -6px rgba(124,58,237,.6)",fontSize:26}}>
+          background:"linear-gradient(135deg,#4169E1,#5b7fff)",boxShadow:"0 10px 30px -6px rgba(124,58,237,.6)",fontSize:26}}>
         {aiOpen?"✕":"🤖"}
       </button>
       {/* Panel */}
       {aiOpen&&(
         <div style={{position:"fixed",bottom:90,right:16,left:16,maxWidth:420,marginLeft:"auto",zIndex:9998,
-          background:"#0f1117",border:"1px solid #4c1d95",borderRadius:16,boxShadow:"0 24px 60px -12px rgba(0,0,0,.7)",
+          background:"#f4f7fc",border:"1px solid #4169E1",borderRadius:16,boxShadow:"0 24px 60px -12px rgba(0,0,0,.7)",
           display:"flex",flexDirection:"column",maxHeight:"min(560px,75vh)",overflow:"hidden"}}>
-          <div style={{background:"linear-gradient(135deg,#1a1235,#2e1065)",padding:"14px 18px",borderBottom:"1px solid #4c1d95"}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#e9d5ff"}}>🤖 Voyage-Ed AI Assistant</div>
-            <div style={{fontSize:11,color:"#a78bda"}}>Tell me what to do — I'll handle it</div>
+          <div style={{background:"linear-gradient(135deg,#e8efff,#dfe8ff)",padding:"14px 18px",borderBottom:"1px solid #4169E1"}}>
+            <div style={{fontSize:14,fontWeight:800,color:"#1a2c52"}}>🤖 Voyage-Ed AI Assistant</div>
+            <div style={{fontSize:11,color:"#5b7fff"}}>Tell me what to do — I'll handle it</div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
             {aiChat.map((m,i)=>(
               <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
-                background:m.role==="user"?"#6366f1":"#1e1b2e",color:m.role==="user"?"#fff":"#e2e8f0",
+                background:m.role==="user"?"#4169E1":"#eef3fc",color:m.role==="user"?"#fff":"#1a2c52",
                 padding:"10px 14px",borderRadius:12,fontSize:13,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{m.text}</div>
             ))}
-            {aiThinking&&<div style={{alignSelf:"flex-start",color:"#a78bda",fontSize:13,padding:"6px 10px"}}>thinking…</div>}
+            {aiThinking&&<div style={{alignSelf:"flex-start",color:"#5b7fff",fontSize:13,padding:"6px 10px"}}>thinking…</div>}
           </div>
-          <div style={{padding:"12px",borderTop:"1px solid #1e293b",display:"flex",gap:8}}>
+          <div style={{padding:"12px",borderTop:"1px solid #d4e0f5",display:"flex",gap:8}}>
             <input value={aiInput} onChange={e=>setAiInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")runAI();}}
               placeholder="e.g. create a deal for Rahul to Dubai"
-              style={{flex:1,background:"#1a1f2e",border:"1px solid #4c1d95",borderRadius:9,color:"#e2e8f0",padding:"11px 13px",fontSize:14,outline:"none"}}/>
-            <button onClick={runAI} disabled={aiThinking} style={{background:"linear-gradient(135deg,#7c3aed,#c026d3)",border:"none",borderRadius:9,color:"#fff",padding:"0 16px",fontWeight:800,cursor:"pointer",fontSize:14}}>➤</button>
+              style={{flex:1,background:"#eef3fc",border:"1px solid #4169E1",borderRadius:9,color:"#1a2c52",padding:"11px 13px",fontSize:14,outline:"none"}}/>
+            <button onClick={runAI} disabled={aiThinking} style={{background:"linear-gradient(135deg,#4169E1,#5b7fff)",border:"none",borderRadius:9,color:"#fff",padding:"0 16px",fontWeight:800,cursor:"pointer",fontSize:14}}>➤</button>
           </div>
           {/* Quick suggestion chips */}
           <div style={{padding:"0 12px 12px",display:"flex",gap:6,flexWrap:"wrap"}}>
             {["Show hot leads","How much to collect?","Today's follow-ups","Draft a quote"].map(s=>(
-              <span key={s} onClick={()=>{setAiInput(s);}} style={{fontSize:11,background:"#1e1b2e",border:"1px solid #4c1d95",color:"#c4b5fd",padding:"5px 10px",borderRadius:20,cursor:"pointer"}}>{s}</span>
+              <span key={s} onClick={()=>{setAiInput(s);}} style={{fontSize:11,background:"#eef3fc",border:"1px solid #4169E1",color:"#4169E1",padding:"5px 10px",borderRadius:20,cursor:"pointer"}}>{s}</span>
             ))}
           </div>
         </div>
@@ -646,23 +671,49 @@ ${text}
     return ()=>clearTimeout(t);
   },[deal]);
 
-  // Fetch all leads from backend on mount
+  // Fetch all leads from backend on mount.
+  // CRITICAL RULE: localStorage is the DURABLE source of truth. The server can only
+  // ADD deals we don't have locally — it can NEVER remove or overwrite local deals.
+  // This guarantees leads are never lost on reload, even if the server is asleep,
+  // slow, returns an empty list, or errors out.
   useEffect(()=>{
+    // 0. Recover from backup first if main store somehow lost deals.
+    recoverDealsIfNeeded();
+    // 1. Always show local deals immediately (instant, never blank).
+    const local = loadAllDeals();
+    setAllDeals(local);
+
+    // 2. Then try the server and MERGE additively.
     leadsAPI.getAll()
       .then(serverDeals => {
-        if (!Array.isArray(serverDeals)) return;
-        // Merge: server is source of truth, but keep any local-only deals not yet synced.
-        const local = loadAllDeals();
-        const byId = {};
-        serverDeals.forEach(d => { d._localId = d._localId || d._id; byId[d._id] = d; });
-        const localOnly = local.filter(l => !l._id || !byId[l._id]);
-        const merged = [...serverDeals, ...localOnly];
+        if (!Array.isArray(serverDeals)) return;            // bad response → keep local
+        if (serverDeals.length === 0 && local.length > 0) return; // empty server (asleep/new) → NEVER wipe local
+
+        const current = loadAllDeals();
+        // Index local deals by both ids so we can match reliably.
+        const localById = {};
+        const localByLocalId = {};
+        current.forEach(d => { if(d._id) localById[d._id]=d; if(d._localId) localByLocalId[d._localId]=d; });
+
+        // Start from everything we already have locally (nothing is ever dropped).
+        const merged = [...current];
+        serverDeals.forEach(sd => {
+          sd._localId = sd._localId || sd._id;
+          const existing = localById[sd._id] || localByLocalId[sd._localId];
+          if (existing) {
+            // Update in place — but prefer the newer copy by _savedAt so unsynced local edits aren't lost.
+            const idx = merged.indexOf(existing);
+            const localNewer = existing._savedAt && sd._savedAt && existing._savedAt > sd._savedAt;
+            merged[idx] = localNewer ? { ...sd, ...existing } : { ...existing, ...sd, _localId: existing._localId || sd._localId };
+          } else {
+            merged.push(sd); // server has a deal we don't → add it
+          }
+        });
         setAllDeals(merged); saveAllDeals(merged);
       })
       .catch(err => {
         console.warn("Could not fetch leads from server:", err.message);
-        // Keep showing local deals — never blank the dashboard on a fetch failure.
-        setAllDeals(loadAllDeals());
+        // Keep local deals exactly as-is. Never touch localStorage on failure.
       });
   },[]);
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
@@ -811,31 +862,31 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   if(screen==="users"){
     if(!isAdmin){
       return (
-        <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'Segoe UI',sans-serif"}}>
+        <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'Segoe UI',sans-serif"}}>
           <div style={{fontSize:18,fontWeight:700}}>🔒 Admin access only</div>
           <button onClick={()=>setScreen("dashboard")} className="btn btn-ind">← Back to Dashboard</button>
         </div>
       );
     }
     return (
-      <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",fontFamily:"'Segoe UI',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Segoe UI',sans-serif"}}>
         <style>{dashStyles}</style>
-        <div style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
             <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · USER MANAGEMENT</div>
-            <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>Team Members</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#0f2350"}}>Team Members</div>
           </div>
           <button onClick={()=>setScreen("dashboard")} className="btn btn-sm">← Dashboard</button>
         </div>
         <div style={{maxWidth:900,margin:"0 auto",padding:"28px 32px"}}>
           {userMsg&&<div style={{padding:"10px 14px",borderRadius:8,marginBottom:18,fontSize:13,
-            background:userMsg.startsWith("✅")?"#0f2a1a":"#3b1418",
-            border:userMsg.startsWith("✅")?"1px solid #166534":"1px solid #7f1d1d",
-            color:userMsg.startsWith("✅")?"#86efac":"#fca5a5"}}>{userMsg}</div>}
+            background:userMsg.startsWith("✅")?"#e6f7ee":"#fdeaea",
+            border:userMsg.startsWith("✅")?"1px solid #16a34a":"1px solid #dc2626",
+            color:userMsg.startsWith("✅")?"#15803d":"#b91c1c"}}>{userMsg}</div>}
 
           {/* Create user */}
-          <div style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:12,padding:"22px 24px",marginBottom:28}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#f8fafc",marginBottom:16}}>➕ Create New User</div>
+          <div style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:12,padding:"22px 24px",marginBottom:28}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#0f2350",marginBottom:16}}>➕ Create New User</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:14}}>
               <input placeholder="Email *" value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})} style={uInp}/>
               <input placeholder="Password * (min 6)" type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})} style={uInp}/>
@@ -853,17 +904,17 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           </div>
 
           {/* User list */}
-          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Users ({users.length})</div>
-          {users.length===0&&<div style={{textAlign:"center",padding:30,color:"#475569",background:"#151b27",borderRadius:12,border:"1px dashed #1e293b"}}>No users loaded. They will appear here.</div>}
+          <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Users ({users.length})</div>
+          {users.length===0&&<div style={{textAlign:"center",padding:30,color:"#a9bce0",background:"#ffffff",borderRadius:12,border:"1px dashed #d4e0f5"}}>No users loaded. They will appear here.</div>}
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {users.map(u=>(
-              <div key={u._id} style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:10,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div key={u._id} style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:10,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
                 <div>
                   <div style={{fontWeight:700,fontSize:14}}>{u.name||u.email} {u.email===currentUser.email&&<span style={{fontSize:10,color:"#f97316"}}>(you)</span>}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>{u.email} · <span style={{color:"#a5b4fc"}}>{u.role}</span></div>
+                  <div style={{fontSize:12,color:"#6b7a99"}}>{u.email} · <span style={{color:"#4169E1"}}>{u.role}</span></div>
                 </div>
                 {u.email!==currentUser.email&&(
-                  <button onClick={()=>handleDeleteUser(u._id,u.email)} style={{background:"#3b1418",border:"1px solid #7f1d1d",color:"#fca5a5",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:600}}>Delete</button>
+                  <button onClick={()=>handleDeleteUser(u._id,u.email)} style={{background:"#fdeaea",border:"1px solid #dc2626",color:"#b91c1c",borderRadius:7,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:600}}>Delete</button>
                 )}
               </div>
             ))}
@@ -947,57 +998,57 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const rangeLabel=(dateFrom||dateTo)?`${dateFrom||"start"} → ${dateTo||"today"}`:"All time";
 
     return (
-      <div style={{minHeight:"100vh",background:"#0a0d13",color:"#e2e8f0",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
         <style>{dashStyles}</style>
         {aiWidgetEl}
-        <div className="crm-header" style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div className="crm-header" style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
             <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · DASHBOARD</div>
-            <div style={{fontSize:22,fontWeight:800,color:"#f8fafc"}}>{(()=>{const h=new Date().getHours();return h<12?"Good morning ☀️":h<17?"Good afternoon 🌤️":"Good evening 🌙"})()} </div>
-            <div style={{fontSize:13,color:"#64748b",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#0f2350"}}>{(()=>{const h=new Date().getHours();return h<12?"Good morning ☀️":h<17?"Good afternoon 🌤️":"Good evening 🌙"})()} </div>
+            <div style={{fontSize:13,color:"#6b7a99",marginTop:2}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
           </div>
           <div className="hdr-actions" style={{display:"flex",gap:10,alignItems:"center"}}>
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
             <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
-            <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#7f1d1d",color:"#fca5a5"}}>Logout</button>
+            <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
           </div>
         </div>
 
         <div style={{maxWidth:1120,margin:"0 auto",padding:"28px 32px"}}>
           {/* Date range filter */}
-          <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:22,background:"#151b27",border:"1px solid #1e293b",borderRadius:12,padding:"14px 18px"}}>
-            <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>From</div>
-              <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#0d1117",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",padding:"7px 10px"}}/></div>
-            <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>To</div>
-              <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#0d1117",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",padding:"7px 10px"}}/></div>
+          <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:22,background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:12,padding:"14px 18px"}}>
+            <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>From</div>
+              <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:6,color:"#1a2c52",padding:"7px 10px"}}/></div>
+            <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>To</div>
+              <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:6,color:"#1a2c52",padding:"7px 10px"}}/></div>
             {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} className="btn btn-sm">Clear</button>}
             <div style={{flex:1}}></div>
-            <div style={{fontSize:11,color:"#64748b"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+            <div style={{fontSize:11,color:"#6b7a99"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
           </div>
 
           {/* ═══ TODAY'S COMMAND CENTER ═══ */}
-          <div style={{background:"linear-gradient(135deg,#1a1235,#0d1b3e)",border:"1px solid #4c1d95",borderRadius:14,padding:"20px 22px",marginBottom:24}}>
-            <div style={{fontSize:13,fontWeight:800,color:"#c4b5fd",letterSpacing:1,marginBottom:14}}>🧠 TODAY'S COMMAND CENTER</div>
+          <div style={{background:"linear-gradient(135deg,#e8efff,#4169E1)",border:"1px solid #4169E1",borderRadius:14,padding:"20px 22px",marginBottom:24}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#4169E1",letterSpacing:1,marginBottom:14}}>🧠 TODAY'S COMMAND CENTER</div>
             <div className="cc-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
-              <div onClick={()=>setDealFilter("followup")} style={ccCard(overdueFollowUps.length>0?"#7f1d1d":"#1e293b")}>
-                <div style={ccNum(overdueFollowUps.length>0?"#fca5a5":"#e2e8f0")}>{followUps.length}</div>
+              <div onClick={()=>setDealFilter("followup")} style={ccCard(overdueFollowUps.length>0?"#dc2626":"#d4e0f5")}>
+                <div style={ccNum(overdueFollowUps.length>0?"#b91c1c":"#1a2c52")}>{followUps.length}</div>
                 <div style={ccLbl}>Follow-ups due{overdueFollowUps.length>0?` (${overdueFollowUps.length} overdue)`:""}</div>
               </div>
-              <div onClick={()=>setDealFilter("hot")} style={ccCard("#1e293b")}>
-                <div style={ccNum("#fb923c")}>{hotLeads.length}</div>
+              <div onClick={()=>setDealFilter("hot")} style={ccCard("#d4e0f5")}>
+                <div style={ccNum("#c2410c")}>{hotLeads.length}</div>
                 <div style={ccLbl}>🔥 Hot leads</div>
               </div>
-              <div onClick={()=>setDealFilter("collect")} style={ccCard("#1e293b")}>
-                <div style={ccNum("#fbbf24")}>{fmtINR(totalToCollect)}</div>
+              <div onClick={()=>setDealFilter("collect")} style={ccCard("#d4e0f5")}>
+                <div style={ccNum("#b45309")}>{fmtINR(totalToCollect)}</div>
                 <div style={ccLbl}>To collect ({pendingCollections.length})</div>
               </div>
-              <div onClick={()=>setDealFilter("pay")} style={ccCard("#1e293b")}>
-                <div style={ccNum("#f87171")}>{fmtINR(totalToPay)}</div>
+              <div onClick={()=>setDealFilter("pay")} style={ccCard("#d4e0f5")}>
+                <div style={ccNum("#b91c1c")}>{fmtINR(totalToPay)}</div>
                 <div style={ccLbl}>To pay vendors ({vendorDues.length})</div>
               </div>
-              <div style={ccCard("#1e293b")}>
-                <div style={ccNum("#34d399")}>{convRate}%</div>
+              <div style={ccCard("#d4e0f5")}>
+                <div style={ccNum("#15803d")}>{convRate}%</div>
                 <div style={ccLbl}>Conversion ({bookedCount}/{totalLeads})</div>
               </div>
             </div>
@@ -1007,21 +1058,21 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const list=map[dealFilter]||[];
               const titleMap={followup:"📞 Follow-ups due",hot:"🔥 Hot leads",collect:"💰 Pending collections",pay:"🏦 Vendor payments due"};
               return (
-                <div style={{marginTop:16,borderTop:"1px solid #312e81",paddingTop:14}}>
+                <div style={{marginTop:16,borderTop:"1px solid #c2d2ee",paddingTop:14}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{fontSize:12,fontWeight:700,color:"#c4b5fd"}}>{titleMap[dealFilter]} ({list.length})</span>
-                    <span onClick={()=>setDealFilter("")} style={{fontSize:11,color:"#94a3b8",cursor:"pointer"}}>✕ close</span>
+                    <span style={{fontSize:12,fontWeight:700,color:"#4169E1"}}>{titleMap[dealFilter]} ({list.length})</span>
+                    <span onClick={()=>setDealFilter("")} style={{fontSize:11,color:"#5a6b8c",cursor:"pointer"}}>✕ close</span>
                   </div>
-                  {list.length===0&&<div style={{fontSize:12,color:"#64748b"}}>Nothing here — you're all caught up! 🎉</div>}
+                  {list.length===0&&<div style={{fontSize:12,color:"#6b7a99"}}>Nothing here — you're all caught up! 🎉</div>}
                   <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:280,overflowY:"auto"}}>
                     {list.slice(0,20).map(d=>(
-                      <div key={d._id||d._localId} onClick={()=>openDeal(d)} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:10,flexWrap:"wrap"}}>
+                      <div key={d._id||d._localId} onClick={()=>openDeal(d)} style={{background:"#f4f7fc",border:"1px solid #d4e0f5",borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",gap:10,flexWrap:"wrap"}}>
                         <div>
                           <span style={{fontWeight:700,fontSize:13}}>{d.clientName||"Unnamed"}</span>
-                          <span style={{fontSize:11,color:"#64748b"}}> · {d.destination||"—"}</span>
-                          {d.followUpDate&&dealFilter==="followup"&&<span style={{fontSize:11,color:d.followUpDate<todayStr?"#fca5a5":"#94a3b8"}}> · 📅 {d.followUpDate}</span>}
+                          <span style={{fontSize:11,color:"#6b7a99"}}> · {d.destination||"—"}</span>
+                          {d.followUpDate&&dealFilter==="followup"&&<span style={{fontSize:11,color:d.followUpDate<todayStr?"#b91c1c":"#5a6b8c"}}> · 📅 {d.followUpDate}</span>}
                         </div>
-                        <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:dealFilter==="pay"?"#f87171":"#fbbf24"}}>
+                        <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:dealFilter==="pay"?"#b91c1c":"#b45309"}}>
                           {dealFilter==="collect"&&fmtINR(d._due)}
                           {dealFilter==="pay"&&fmtINR(d._owe)}
                           {dealFilter==="hot"&&(d.priority||"")}
@@ -1036,12 +1087,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           </div>
 
           {/* PIPELINE FUNNEL */}
-          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>📊 Sales Pipeline</div>
+          <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>📊 Sales Pipeline</div>
           <div style={{display:"flex",gap:8,marginBottom:28,flexWrap:"wrap"}}>
             {funnel.map(f=>(
-              <div key={f.stage} style={{flex:"1 1 110px",background:"#151b27",border:"1px solid #1e293b",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
-                <div style={{fontSize:22,fontWeight:800,color:f.stage==="Booked"?"#34d399":f.stage==="Lost"?"#ef4444":"#e2e8f0"}}>{f.count}</div>
-                <div style={{fontSize:10,color:"#64748b",marginTop:4}}>{f.stage}</div>
+              <div key={f.stage} style={{flex:"1 1 110px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:10,padding:"12px 10px",textAlign:"center"}}>
+                <div style={{fontSize:22,fontWeight:800,color:f.stage==="Booked"?"#15803d":f.stage==="Lost"?"#ef4444":"#1a2c52"}}>{f.count}</div>
+                <div style={{fontSize:10,color:"#6b7a99",marginTop:4}}>{f.stage}</div>
               </div>
             ))}
           </div>
@@ -1050,17 +1101,17 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div style={{fontSize:12,color:"#10b981",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>✅ Booked — {B.count} deals</div>
           <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:28}}>
             {[
-              {l:"Sale Price",v:fmtINR(B.sell),c:"#e2e8f0"},
-              {l:"Cost Price",v:fmtINR(B.cost),c:"#cbd5e1"},
+              {l:"Sale Price",v:fmtINR(B.sell),c:"#1a2c52"},
+              {l:"Cost Price",v:fmtINR(B.cost),c:"#33446b"},
               {l:"Gross Profit",v:fmtINR(B.gpm),c:B.gpm>=0?"#10b981":"#ef4444"},
               {l:"Net (after GST)",v:fmtINR(B.net),c:B.net>=0?"#f97316":"#ef4444"},
-              {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#a5b4fc"},
+              {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#4169E1"},
               {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981"},
               {l:"Client Received",v:fmtINR(B.clientRec),c:"#10b981"},
               {l:"Client Pending",v:fmtINR(B.clientDue),c:B.clientDue>0?"#f59e0b":"#10b981"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#151b27",border:"1px solid #14532d",borderRadius:12,padding:"16px 18px"}}>
-                <div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
+              <div key={i} style={{background:"#ffffff",border:"1px solid #15803d",borderRadius:12,padding:"16px 18px"}}>
+                <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
                 <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
               </div>
             ))}
@@ -1070,27 +1121,27 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div style={{fontSize:12,color:"#ef4444",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>❌ Cancelled — {C.count} deals</div>
           <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:32}}>
             {[
-              {l:"Sale Price",v:fmtINR(C.sell),c:"#cbd5e1"},
-              {l:"Cost Price",v:fmtINR(C.cost),c:"#cbd5e1"},
+              {l:"Sale Price",v:fmtINR(C.sell),c:"#33446b"},
+              {l:"Cost Price",v:fmtINR(C.cost),c:"#33446b"},
               {l:"Lost Profit",v:fmtINR(C.gpm),c:"#ef4444"},
-              {l:"Vendor Paid",v:fmtINR(C.vendorPaid),c:"#a5b4fc"},
+              {l:"Vendor Paid",v:fmtINR(C.vendorPaid),c:"#4169E1"},
               {l:"Vendor Pending",v:fmtINR(C.vendorDue),c:C.vendorDue>0?"#ef4444":"#10b981"},
               {l:"Client Received",v:fmtINR(C.clientRec),c:"#10b981"},
               {l:"Client Refund Due",v:fmtINR(C.clientRec),c:"#f59e0b"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#151b27",border:"1px solid #4c1d24",borderRadius:12,padding:"16px 18px"}}>
-                <div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
+              <div key={i} style={{background:"#ffffff",border:"1px solid #fdeaea",borderRadius:12,padding:"16px 18px"}}>
+                <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
                 <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
               </div>
             ))}
           </div>
 
-          <div style={{fontSize:12,color:"#64748b",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Deals ({allDeals.length})</div>
-          {allDeals.length===0&&<div style={{textAlign:"center",padding:40,color:"#475569",background:"#151b27",borderRadius:12,border:"1px dashed #1e293b"}}>No deals saved yet. Create a new deal and save it.</div>}
+          <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Deals ({allDeals.length})</div>
+          {allDeals.length===0&&<div style={{textAlign:"center",padding:40,color:"#a9bce0",background:"#ffffff",borderRadius:12,border:"1px dashed #d4e0f5"}}>No deals saved yet. Create a new deal and save it.</div>}
           <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
             <input value={dealSearch} onChange={e=>setDealSearch(e.target.value)} placeholder="🔍 Search client, destination, deal no..."
-              style={{flex:"1 1 260px",background:"#0d1117",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",padding:"10px 14px",fontSize:13,outline:"none"}}/>
-            <span style={{fontSize:11,color:"#64748b"}}>{(()=>{const q=dealSearch.toLowerCase().trim();return q?allDeals.filter(d=>(`${d.clientName} ${d.destination} ${d.dealNumber} ${d.contactNo}`).toLowerCase().includes(q)).length:allDeals.length;})()} deals</span>
+              style={{flex:"1 1 260px",background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:8,color:"#1a2c52",padding:"10px 14px",fontSize:13,outline:"none"}}/>
+            <span style={{fontSize:11,color:"#6b7a99"}}>{(()=>{const q=dealSearch.toLowerCase().trim();return q?allDeals.filter(d=>(`${d.clientName} ${d.destination} ${d.dealNumber} ${d.contactNo}`).toLowerCase().includes(q)).length:allDeals.length;})()} deals</span>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {allDeals.filter(d=>{
@@ -1104,26 +1155,26 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const dGpm=dSell-dCost;
               const dRec=sum(d.clientPayments||[],"amount");
               return (
-                <div key={d._id} onClick={()=>openDeal(d)} style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:10,padding:"14px 20px",cursor:"pointer",display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:12,alignItems:"center",transition:"border .2s"}}
+                <div key={d._id} onClick={()=>openDeal(d)} style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:10,padding:"14px 20px",cursor:"pointer",display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:12,alignItems:"center",transition:"border .2s"}}
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#f97316"}
-                  onMouseLeave={e=>e.currentTarget.style.borderColor="#1e293b"}>
+                  onMouseLeave={e=>e.currentTarget.style.borderColor="#d4e0f5"}>
                   <div>
                     <div style={{fontWeight:700,fontSize:14}}>{d.clientName||"Unnamed Client"}</div>
-                    <div style={{fontSize:12,color:"#64748b"}}>{d.destination||"No destination"} · {d.travelDates||"No dates"}</div>
+                    <div style={{fontSize:12,color:"#6b7a99"}}>{d.destination||"No destination"} · {d.travelDates||"No dates"}</div>
                   </div>
-                  <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>SELLING</div><div style={{fontFamily:"monospace",fontWeight:700}}>{fmtINR(dSell)}</div></div>
-                  <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div></div>
-                  <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>RECEIVED</div><div style={{fontFamily:"monospace",fontWeight:700,color:"#10b981"}}>{fmtINR(dRec)}</div></div>
-                  <div><div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>BALANCE</div><div style={{fontFamily:"monospace",fontWeight:700,color:(dSell-dRec)>0?"#f97316":"#10b981"}}>{fmtINR(dSell-dRec)}</div></div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>SELLING</div><div style={{fontFamily:"monospace",fontWeight:700}}>{fmtINR(dSell)}</div></div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div></div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>RECEIVED</div><div style={{fontFamily:"monospace",fontWeight:700,color:"#10b981"}}>{fmtINR(dRec)}</div></div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div><div style={{fontFamily:"monospace",fontWeight:700,color:(dSell-dRec)>0?"#f97316":"#10b981"}}>{fmtINR(dSell-dRec)}</div></div>
                     <div style={{textAlign:"right"}}>
                       {d.status && d.status!=="Not Actioned" && (
                         <span style={{display:"inline-block",fontSize:9,fontWeight:800,letterSpacing:.5,padding:"3px 8px",borderRadius:20,marginBottom:4,
-                          background:d.status==="Booked"?"#0f2a1a":d.status==="Cancelled"?"#3b1418":"#1a2234",
-                          color:d.status==="Booked"?"#86efac":d.status==="Cancelled"?"#fca5a5":"#94a3b8"}}>{d.status}</span>
+                          background:d.status==="Booked"?"#e6f7ee":d.status==="Cancelled"?"#fdeaea":"#eef3fc",
+                          color:d.status==="Booked"?"#15803d":d.status==="Cancelled"?"#b91c1c":"#5a6b8c"}}>{d.status}</span>
                       )}
-                      <div style={{fontSize:11,color:"#475569"}}>{d._savedAt?new Date(d._savedAt).toLocaleDateString("en-IN"):""}</div>
+                      <div style={{fontSize:11,color:"#a9bce0"}}>{d._savedAt?new Date(d._savedAt).toLocaleDateString("en-IN"):""}</div>
                       <button onClick={(e)=>{e.stopPropagation();deleteDealEverywhere(d);}}
-                        style={{marginTop:4,background:"transparent",border:"1px solid #4c1d24",color:"#fca5a5",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:11}}>Delete</button>
+                        style={{marginTop:4,background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:11}}>Delete</button>
                     </div>
                   </div>
                 );
@@ -1135,28 +1186,28 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     }
     // ── DEAL SCREEN ───────────────────────────────────────────────────────────
   return (
-    <div style={{minHeight:"100vh",background:"#0f1117",color:"#e2e8f0",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
       <style>{dealStyles}</style>
       {aiWidgetEl}
 
       {receiptPayment&&<Receipt deal={deal} payment={receiptPayment} onClose={()=>setReceiptPayment(null)} />}
 
       {/* Header */}
-      <div style={{background:"linear-gradient(135deg,#0d1117,#151b27)",borderBottom:"1px solid #1e293b",padding:"16px 28px"}}>
+      <div style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"16px 28px"}}>
         <div style={{maxWidth:1200,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"1px solid #334155",borderRadius:6,color:"#94a3b8",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:600}}>← Dashboard</button>
+            <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"1px solid #c2d2ee",borderRadius:6,color:"#5a6b8c",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:600}}>← Dashboard</button>
             <div style={{flex:1}}>
               <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:3}}>VOYAGE-ED CRM · DEAL P&L</div>
-              <input value={deal.destination||""} onChange={e=>upd("destination",e.target.value)} placeholder="Destination / Package Name..." style={{background:"transparent",border:"none",borderBottom:"1px solid #334155",borderRadius:0,color:"#f8fafc",fontSize:18,fontWeight:800,padding:"2px 0",width:300,outline:"none"}} />
+              <input value={deal.destination||""} onChange={e=>upd("destination",e.target.value)} placeholder="Destination / Package Name..." style={{background:"transparent",border:"none",borderBottom:"1px solid #c2d2ee",borderRadius:0,color:"#0f2350",fontSize:18,fontWeight:800,padding:"2px 0",width:300,outline:"none"}} />
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>}
               <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}
                 title="Deal status (used in dashboard Booked/Cancelled totals)"
-                style={{background:(deal.status==="Booked"?"#0f2a1a":deal.status==="Cancelled"?"#3b1418":"#1a2234"),
-                  border:"1px solid "+(deal.status==="Booked"?"#166534":deal.status==="Cancelled"?"#7f1d1d":"#334155"),
-                  color:(deal.status==="Booked"?"#86efac":deal.status==="Cancelled"?"#fca5a5":"#e2e8f0"),
+                style={{background:(deal.status==="Booked"?"#e6f7ee":deal.status==="Cancelled"?"#fdeaea":"#eef3fc"),
+                  border:"1px solid "+(deal.status==="Booked"?"#16a34a":deal.status==="Cancelled"?"#dc2626":"#c2d2ee"),
+                  color:(deal.status==="Booked"?"#15803d":deal.status==="Cancelled"?"#b91c1c":"#1a2c52"),
                   borderRadius:7,padding:"7px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                 {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
@@ -1164,21 +1215,21 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <button onClick={saveToAllDeals} className="btn btn-ind" disabled={apiLoading}>{apiLoading?"Saving...":"💾 Save Deal"}</button>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:2}}>
-              <span style={{fontSize:10,color:"#64748b",letterSpacing:1}}>QUICK WHATSAPP:</span>
-              <button onClick={()=>waMessage("quote")} className="btn btn-sm" style={{borderColor:"#166534",color:"#86efac"}} title="Send quote">💬 Quote</button>
-              <button onClick={()=>waMessage("followup")} className="btn btn-sm" style={{borderColor:"#1e40af",color:"#93c5fd"}} title="Follow up">🔔 Follow-up</button>
-              <button onClick={()=>waMessage("payment")} className="btn btn-sm" style={{borderColor:"#92400e",color:"#fcd34d"}} title="Payment reminder">💰 Payment</button>
-              <button onClick={()=>waMessage("confirm")} className="btn btn-sm" style={{borderColor:"#5b21b6",color:"#c4b5fd"}} title="Booking confirmed">🎉 Confirm</button>
+              <span style={{fontSize:10,color:"#6b7a99",letterSpacing:1}}>QUICK WHATSAPP:</span>
+              <button onClick={()=>waMessage("quote")} className="btn btn-sm" style={{borderColor:"#16a34a",color:"#15803d"}} title="Send quote">💬 Quote</button>
+              <button onClick={()=>waMessage("followup")} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#1d4ed8"}} title="Follow up">🔔 Follow-up</button>
+              <button onClick={()=>waMessage("payment")} className="btn btn-sm" style={{borderColor:"#f59e0b",color:"#b45309"}} title="Payment reminder">💰 Payment</button>
+              <button onClick={()=>waMessage("confirm")} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#4169E1"}} title="Booking confirmed">🎉 Confirm</button>
             </div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               {[
-                {l:"Selling",v:fmtINR(totalSell),c:"#e2e8f0"},
+                {l:"Selling",v:fmtINR(totalSell),c:"#1a2c52"},
                 {l:"GPM",v:fmtINR(gpm),c:gpm>=0?"#10b981":"#ef4444"},
-                {l:`GST (${deal.gstMode==="package"?"5% pkg":"18% profit"})`,v:fmtINR(gst),c:"#a5b4fc"},
+                {l:`GST (${deal.gstMode==="package"?"5% pkg":"18% profit"})`,v:fmtINR(gst),c:"#4169E1"},
                 {l:"Net Profit",v:fmtINR(netProfit),c:netProfit>=0?"#f97316":"#ef4444"},
               ].map((s,i)=>(
-                <div key={i} style={{textAlign:"center",padding:"6px 12px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:7}}>
-                  <div style={{fontSize:9,color:"#475569",letterSpacing:1.5,textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
+                <div key={i} style={{textAlign:"center",padding:"6px 12px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:7}}>
+                  <div style={{fontSize:9,color:"#a9bce0",letterSpacing:1.5,textTransform:"uppercase",marginBottom:2}}>{s.l}</div>
                   <div style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:s.c}}>{s.v}</div>
                 </div>
               ))}
@@ -1188,15 +1239,15 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       </div>
 
       {/* Remarks bar */}
-      <div style={{background:"#0d1117",borderBottom:"1px solid #1e293b",padding:"8px 28px"}}>
+      <div style={{background:"#ffffff",borderBottom:"1px solid #d4e0f5",padding:"8px 28px"}}>
         <div style={{maxWidth:1200,margin:"0 auto",display:"flex",gap:10,alignItems:"center"}}>
           <span style={{fontSize:11,color:"#f97316",fontWeight:700,whiteSpace:"nowrap"}}>📝 Remarks:</span>
-          <input value={deal.remarks||""} onChange={e=>upd("remarks",e.target.value)} placeholder="Add remarks / special notes about this query..." style={{background:"transparent",border:"none",borderBottom:"1px dashed #334155",borderRadius:0,color:"#94a3b8",fontSize:12,flex:1,outline:"none",padding:"3px 0"}} />
+          <input value={deal.remarks||""} onChange={e=>upd("remarks",e.target.value)} placeholder="Add remarks / special notes about this query..." style={{background:"transparent",border:"none",borderBottom:"1px dashed #c2d2ee",borderRadius:0,color:"#5a6b8c",fontSize:12,flex:1,outline:"none",padding:"3px 0"}} />
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{background:"#0d1117",borderBottom:"1px solid #1e293b",padding:"0 28px",overflowX:"auto"}}>
+      <div style={{background:"#ffffff",borderBottom:"1px solid #d4e0f5",padding:"0 28px",overflowX:"auto"}}>
         <div className="tab-bar" style={{maxWidth:1200,margin:"0 auto",display:"flex"}}>
           {tabs.map(t=><button key={t.id} className={`tab ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}
         </div>
@@ -1207,8 +1258,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         {/* ══ CLIENT TAB ══ */}
         {tab==="client"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div className="card" style={{borderColor:"#4c1d95"}}>
-              <div className="sec-head" style={{color:"#c4b5fd"}}>🎯 Lead Tracking</div>
+            <div className="card" style={{borderColor:"#4169E1"}}>
+              <div className="sec-head" style={{color:"#4169E1"}}>🎯 Lead Tracking</div>
               <div className="grid3" style={{marginBottom:6}}>
                 <div><span className="lbl">Pipeline Stage</span>
                   <select value={deal.stage||"New Lead"} onChange={e=>upd("stage",e.target.value)}>
@@ -1262,8 +1313,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               {deal.flightVendors.length<10&&<button className="btn btn-ind" onClick={addFV}>+ Add Flight Vendor</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-              {[{l:"Total Cost",v:fmtINR(flight.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(flight.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(flight.sell-flight.cost),c:(flight.sell-flight.cost)>=0?"#10b981":"#ef4444"},{l:"Balance to Pay",v:fmtINR(flight.cost-flight.paid),c:(flight.cost-flight.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
-                <div key={i} className="stat"><div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
+              {[{l:"Total Cost",v:fmtINR(flight.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(flight.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(flight.sell-flight.cost),c:(flight.sell-flight.cost)>=0?"#10b981":"#ef4444"},{l:"Balance to Pay",v:fmtINR(flight.cost-flight.paid),c:(flight.cost-flight.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
+                <div key={i} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
               ))}
             </div>
 
@@ -1271,7 +1322,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const {costINR,sellINR,paidINR}=vendorINR(fv);
               const isExp=expandedVendor===fv.id;
               return (
-                <div key={fv.id} className="vrow" style={{border:isExp?"1px solid #6366f144":"1px solid #1e293b"}}>
+                <div key={fv.id} className="vrow" style={{border:isExp?"1px solid #4169E144":"1px solid #d4e0f5"}}>
                   <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
                     <div style={{width:26,height:26,background:"linear-gradient(135deg,#f97316,#f59e0b)",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:12,flexShrink:0}}>{fi+1}</div>
                     <div style={{flex:1}}><span className="lbl">Vendor Name</span><VendorInput value={fv.name} onChange={v=>{updF(fv.id,"name",v);saveVendorName(v);}} placeholder="Vendor name..." /></div>
@@ -1284,12 +1335,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                       <input className="mono" type="number" value={fv.sellingPrice} onChange={e=>updF(fv.id,"sellingPrice",e.target.value)} placeholder="0" />
                     </div>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <div style={{textAlign:"center",padding:"4px 10px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:6,minWidth:80}}>
-                        <div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>PROFIT</div>
+                      <div style={{textAlign:"center",padding:"4px 10px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:6,minWidth:80}}>
+                        <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PROFIT</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(sellINR-costINR)>=0?"#10b981":"#ef4444"}}>{fmtINR(sellINR-costINR)}</div>
                       </div>
-                      <div style={{textAlign:"center",padding:"4px 10px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:6,minWidth:80}}>
-                        <div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>BALANCE</div>
+                      <div style={{textAlign:"center",padding:"4px 10px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:6,minWidth:80}}>
+                        <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>{fmtINR(costINR-paidINR)}</div>
                       </div>
                       <button onClick={()=>setExpandedVendor(isExp?null:fv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
@@ -1300,7 +1351,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                   {/* Flight type selector */}
                   <div style={{display:"flex",gap:8,marginBottom:14}}>
                     {["one-way","return","multi-city"].map(ft=>(
-                      <button key={ft} onClick={()=>updF(fv.id,"flightType",ft)} style={{padding:"6px 14px",border:"1px solid",borderRadius:20,cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit",borderColor:fv.flightType===ft?"#f97316":"#334155",color:fv.flightType===ft?"#f97316":"#64748b",background:fv.flightType===ft?"#f9731610":"transparent",transition:"all .2s"}}>
+                      <button key={ft} onClick={()=>updF(fv.id,"flightType",ft)} style={{padding:"6px 14px",border:"1px solid",borderRadius:20,cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit",borderColor:fv.flightType===ft?"#f97316":"#c2d2ee",color:fv.flightType===ft?"#f97316":"#6b7a99",background:fv.flightType===ft?"#f9731610":"transparent",transition:"all .2s"}}>
                         {ft==="one-way"?"→ One Way":ft==="return"?"⇄ Return":"⊞ Multi City"}
                       </button>
                     ))}
@@ -1325,8 +1376,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                         <SectorRow key={sec.id} sector={sec} onChange={s=>updSector(fv.id,si,"sectors",s)} onRemove={()=>rmSector(fv.id,si,"sectors")} showRemove={fv.sectors.length>1} />
                       ))}
                       <button className="btn btn-dashed" onClick={()=>addSector(fv.id,"sectors")}>+ Add Outbound Sector</button>
-                      <div style={{borderTop:"1px dashed #334155",margin:"14px 0"}} />
-                      <div style={{fontSize:10,color:"#a5b4fc",fontWeight:700,letterSpacing:1.5,marginBottom:8}}>RETURN</div>
+                      <div style={{borderTop:"1px dashed #c2d2ee",margin:"14px 0"}} />
+                      <div style={{fontSize:10,color:"#4169E1",fontWeight:700,letterSpacing:1.5,marginBottom:8}}>RETURN</div>
                       {fv.returnSectors.map((sec,si)=>(
                         <SectorRow key={sec.id} sector={sec} onChange={s=>updSector(fv.id,si,"returnSectors",s)} onRemove={()=>rmSector(fv.id,si,"returnSectors")} showRemove={fv.returnSectors.length>1} />
                       ))}
@@ -1347,8 +1398,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
                   {/* Payments */}
                   {isExp&&(
-                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #1e293b"}}>
-                      <div style={{fontSize:11,color:"#6366f1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
+                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
+                      <div style={{fontSize:11,color:"#4169E1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
                         Payments to {fv.name||"Vendor"} · <span className="mono">Paid: {fmtINR(paidINR)}</span> · <span className="mono" style={{color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>Balance: {fmtINR(costINR-paidINR)}</span>
                       </div>
                       {fv.payments.map((pmt,pi)=>(
@@ -1379,8 +1430,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               {deal.hotelVendors.length<10&&<button className="btn btn-ind" onClick={addHV}>+ Add Hotel</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
-              {[{l:"Total Cost",v:fmtINR(hotel.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(hotel.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(hotel.sell-hotel.cost),c:(hotel.sell-hotel.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(hotel.paid),c:"#a5b4fc"},{l:"Balance",v:fmtINR(hotel.cost-hotel.paid),c:(hotel.cost-hotel.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
-                <div key={i} className="stat"><div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
+              {[{l:"Total Cost",v:fmtINR(hotel.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(hotel.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(hotel.sell-hotel.cost),c:(hotel.sell-hotel.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(hotel.paid),c:"#4169E1"},{l:"Balance",v:fmtINR(hotel.cost-hotel.paid),c:(hotel.cost-hotel.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
+                <div key={i} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
               ))}
             </div>
 
@@ -1389,7 +1440,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const isExp=expandedVendor===hv.id;
               const needsRate=hv.currency!=="INR";
               return (
-                <div key={hv.id} className="vrow" style={{border:isExp?"1px solid #6366f144":"1px solid #1e293b"}}>
+                <div key={hv.id} className="vrow" style={{border:isExp?"1px solid #4169E144":"1px solid #d4e0f5"}}>
                   {/* Row 1: Vendor details */}
                   <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:12,flexWrap:"wrap"}}>
                     <div style={{width:26,height:26,background:"linear-gradient(135deg,#f97316,#f59e0b)",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:12,flexShrink:0,marginBottom:2}}>{hi+1}</div>
@@ -1407,12 +1458,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                       {needsRate&&hv.sellingPrice&&hv.exchangeRate&&<div style={{fontSize:10,color:"#f59e0b",marginTop:2}}>= {fmtINR(sellINR)}</div>}
                     </div>
                     <div style={{display:"flex",gap:6,marginLeft:"auto",alignItems:"center"}}>
-                      <div style={{textAlign:"center",padding:"4px 10px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:6,minWidth:80}}>
-                        <div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>PROFIT</div>
+                      <div style={{textAlign:"center",padding:"4px 10px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:6,minWidth:80}}>
+                        <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PROFIT</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(sellINR-costINR)>=0?"#10b981":"#ef4444"}}>{fmtINR(sellINR-costINR)}</div>
                       </div>
-                      <div style={{textAlign:"center",padding:"4px 10px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:6,minWidth:80}}>
-                        <div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>BALANCE</div>
+                      <div style={{textAlign:"center",padding:"4px 10px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:6,minWidth:80}}>
+                        <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>{fmtINR(costINR-paidINR)}</div>
                       </div>
                       <button onClick={()=>setExpandedVendor(isExp?null:hv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
@@ -1433,11 +1484,11 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
                   {/* Payments */}
                   {isExp&&(
-                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #1e293b"}}>
-                      <div style={{fontSize:11,color:"#6366f1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
+                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
+                      <div style={{fontSize:11,color:"#4169E1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
                         Payments to {hv.hotelName||hv.name||"Hotel"} · <span className="mono">Paid: {fmtINR(paidINR)}</span> · <span className="mono" style={{color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>Bal: {fmtINR(costINR-paidINR)}</span>
                       </div>
-                      <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>⚠ All vendor payments entered in INR</div>
+                      <div style={{fontSize:11,color:"#6b7a99",marginBottom:8}}>⚠ All vendor payments entered in INR</div>
                       {hv.payments.map((pmt,pi)=>(
                         <div key={pmt.id} className="prow">
                           <div style={{display:"grid",gridTemplateColumns:"1fr 1.8fr 1fr 1.5fr auto",gap:8,alignItems:"end"}}>
@@ -1466,8 +1517,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               {deal.landVendors.length<10&&<button className="btn btn-ind" onClick={addLV}>+ Add Land Vendor</button>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
-              {[{l:"Total Cost",v:fmtINR(land.cost),c:"#94a3b8"},{l:"Total Selling",v:fmtINR(land.sell),c:"#e2e8f0"},{l:"Profit",v:fmtINR(land.sell-land.cost),c:(land.sell-land.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(land.paid),c:"#a5b4fc"},{l:"Balance",v:fmtINR(land.cost-land.paid),c:(land.cost-land.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
-                <div key={i} className="stat"><div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
+              {[{l:"Total Cost",v:fmtINR(land.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(land.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(land.sell-land.cost),c:(land.sell-land.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(land.paid),c:"#4169E1"},{l:"Balance",v:fmtINR(land.cost-land.paid),c:(land.cost-land.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
+                <div key={i} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:14,fontWeight:700,color:s.c}}>{s.v}</div></div>
               ))}
             </div>
 
@@ -1476,7 +1527,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const isExp=expandedVendor===lv.id;
               const needsRate=lv.currency!=="INR";
               return (
-                <div key={lv.id} className="vrow" style={{border:isExp?"1px solid #6366f144":"1px solid #1e293b"}}>
+                <div key={lv.id} className="vrow" style={{border:isExp?"1px solid #4169E144":"1px solid #d4e0f5"}}>
                   <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:12,flexWrap:"wrap"}}>
                     <div style={{width:26,height:26,background:"linear-gradient(135deg,#f97316,#f59e0b)",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:12,flexShrink:0,marginBottom:2}}>{li+1}</div>
                     <div style={{flex:"0 0 200px"}}><span className="lbl">Vendor Name</span><VendorInput value={lv.name} onChange={v=>{updL(lv.id,"name",v);saveVendorName(v);}} /></div>
@@ -1493,8 +1544,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                       {needsRate&&lv.sellingPrice&&lv.exchangeRate&&<div style={{fontSize:10,color:"#f59e0b",marginTop:2}}>= {fmtINR(sellINR)}</div>}
                     </div>
                     <div style={{display:"flex",gap:6,marginLeft:"auto",alignItems:"center"}}>
-                      <div style={{textAlign:"center",padding:"4px 10px",background:"#0d1117",border:"1px solid #1e293b",borderRadius:6,minWidth:80}}>
-                        <div style={{fontSize:9,color:"#64748b",letterSpacing:1}}>PROFIT</div>
+                      <div style={{textAlign:"center",padding:"4px 10px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:6,minWidth:80}}>
+                        <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PROFIT</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(sellINR-costINR)>=0?"#10b981":"#ef4444"}}>{fmtINR(sellINR-costINR)}</div>
                       </div>
                       <button onClick={()=>setExpandedVendor(isExp?null:lv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
@@ -1510,8 +1561,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
                   {/* Payments */}
                   {isExp&&(
-                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #1e293b"}}>
-                      <div style={{fontSize:11,color:"#6366f1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
+                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
+                      <div style={{fontSize:11,color:"#4169E1",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
                         Payments to {lv.name||"Vendor"} · Paid: {fmtINR(paidINR)} · Balance: {fmtINR(costINR-paidINR)}
                       </div>
                       {lv.payments.map((pmt,pi)=>(
@@ -1545,7 +1596,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const isExp=expandedVendor===vv.id;
               const needsRate=vv.currency!=="INR";
               return (
-                <div key={vv.id} className="vrow" style={{border:isExp?"1px solid #6366f144":"1px solid #1e293b"}}>
+                <div key={vv.id} className="vrow" style={{border:isExp?"1px solid #4169E144":"1px solid #d4e0f5"}}>
                   <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:4}}>
                     <div style={{width:26,height:26,background:"linear-gradient(135deg,#f97316,#f59e0b)",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:12,flexShrink:0,marginBottom:2}}>{vi+1}</div>
                     <div style={{flex:"0 0 180px"}}><span className="lbl">Vendor Name</span><VendorInput value={vv.name} onChange={v=>{updVisa(vv.id,"name",v);saveVendorName(v);}} /></div>
@@ -1561,7 +1612,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                     </div>
                   </div>
                   {isExp&&(
-                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #1e293b"}}>
+                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
                       {vv.payments.map((pmt,pi)=>(
                         <div key={pmt.id} className="prow">
                           <div style={{display:"grid",gridTemplateColumns:"1fr 1.8fr 1fr 1.5fr auto",gap:8,alignItems:"end"}}>
@@ -1590,15 +1641,15 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <button className="btn btn-ind" onClick={addCPmt}>+ Add Payment</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-              {[{l:"Total to Receive",v:fmtINR(totalSell),c:"#e2e8f0"},{l:"Received",v:fmtINR(totalClientReceived),c:"#10b981"},{l:"Balance Pending",v:fmtINR(balanceFromClient),c:balanceFromClient>0?"#f97316":"#10b981"}].map((s,i)=>(
-                <div key={i} className="stat"><div style={{fontSize:9,color:"#64748b",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:20,fontWeight:800,color:s.c}}>{s.v}</div></div>
+              {[{l:"Total to Receive",v:fmtINR(totalSell),c:"#1a2c52"},{l:"Received",v:fmtINR(totalClientReceived),c:"#10b981"},{l:"Balance Pending",v:fmtINR(balanceFromClient),c:balanceFromClient>0?"#f97316":"#10b981"}].map((s,i)=>(
+                <div key={i} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:20,fontWeight:800,color:s.c}}>{s.v}</div></div>
               ))}
             </div>
             <div className="card">
               <div className="sec-head">Payment Entries — {deal.clientName||"Client"}</div>
-              {deal.clientPayments.length===0&&<div style={{textAlign:"center",padding:30,color:"#475569"}}>No payments recorded yet.</div>}
+              {deal.clientPayments.length===0&&<div style={{textAlign:"center",padding:30,color:"#a9bce0"}}>No payments recorded yet.</div>}
               {deal.clientPayments.map((pmt,i)=>(
-                <div key={pmt.id} className="prow" style={{border:"1px solid #1e293b",marginBottom:10}}>
+                <div key={pmt.id} className="prow" style={{border:"1px solid #d4e0f5",marginBottom:10}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                     <span style={{fontSize:12,color:"#f97316",fontWeight:700}}>Payment #{i+1}</span>
                     <div style={{display:"flex",gap:6}}>
@@ -1615,7 +1666,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 </div>
               ))}
               {deal.clientPayments.length>0&&(
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0d1117",borderRadius:8,padding:"12px 16px",marginTop:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#ffffff",borderRadius:8,padding:"12px 16px",marginTop:10}}>
                   <span style={{fontWeight:700}}>Total Received</span>
                   <span className="mono" style={{fontSize:18,fontWeight:800,color:"#10b981"}}>{fmtINR(totalClientReceived)}</span>
                 </div>
@@ -1633,37 +1684,37 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif" style={{display:"none"}} onChange={e=>handleFiles(e.target.files)} />
 
-            <div style={{background:"#0d1117",border:"2px dashed #334155",borderRadius:12,padding:32,textAlign:"center",cursor:"pointer"}}
+            <div style={{background:"#ffffff",border:"2px dashed #c2d2ee",borderRadius:12,padding:32,textAlign:"center",cursor:"pointer"}}
               onClick={()=>fileInputRef.current.click()}
               onDragOver={e=>e.preventDefault()}
               onDrop={e=>{e.preventDefault();handleFiles(e.dataTransfer.files);}}>
               <div style={{fontSize:32,marginBottom:8}}>📁</div>
               <div style={{fontWeight:700,marginBottom:4}}>Drop files here or click to browse</div>
-              <div style={{fontSize:12,color:"#64748b"}}>Supports: PDF, DOC, DOCX, JPG, JPEG, PNG · Passports, email threads, quotations</div>
+              <div style={{fontSize:12,color:"#6b7a99"}}>Supports: PDF, DOC, DOCX, JPG, JPEG, PNG · Passports, email threads, quotations</div>
             </div>
 
-            {deal.attachments.length===0&&<div style={{textAlign:"center",color:"#475569",fontSize:13}}>No files attached yet.</div>}
+            {deal.attachments.length===0&&<div style={{textAlign:"center",color:"#a9bce0",fontSize:13}}>No files attached yet.</div>}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
               {deal.attachments.map(att=>{
                 const isImg=att.type.startsWith("image/");
                 const isPdf=att.type==="application/pdf";
                 const sizeKb=(att.size/1024).toFixed(0);
                 return (
-                  <div key={att.id} style={{background:"#151b27",border:"1px solid #1e293b",borderRadius:10,overflow:"hidden"}}>
+                  <div key={att.id} style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:10,overflow:"hidden"}}>
                     {isImg?(
-                      <div style={{height:120,overflow:"hidden",background:"#0d1117"}}>
+                      <div style={{height:120,overflow:"hidden",background:"#ffffff"}}>
                         <img src={att.data} alt={att.name} style={{width:"100%",height:"100%",objectFit:"cover"}} />
                       </div>
                     ):(
-                      <div style={{height:80,display:"flex",alignItems:"center",justifyContent:"center",background:"#0d1117",fontSize:36}}>
+                      <div style={{height:80,display:"flex",alignItems:"center",justifyContent:"center",background:"#ffffff",fontSize:36}}>
                         {isPdf?"📄":"📝"}
                       </div>
                     )}
                     <div style={{padding:"10px 12px"}}>
                       <div style={{fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{att.name}</div>
-                      <div style={{fontSize:10,color:"#64748b",marginTop:2}}>{sizeKb} KB</div>
+                      <div style={{fontSize:10,color:"#6b7a99",marginTop:2}}>{sizeKb} KB</div>
                       <div style={{display:"flex",gap:6,marginTop:8}}>
-                        <a href={att.data} download={att.name} style={{flex:1,textAlign:"center",background:"#1e293b",border:"1px solid #334155",borderRadius:5,padding:"4px 0",fontSize:11,color:"#94a3b8",textDecoration:"none",fontWeight:600}}>Download</a>
+                        <a href={att.data} download={att.name} style={{flex:1,textAlign:"center",background:"#d4e0f5",border:"1px solid #c2d2ee",borderRadius:5,padding:"4px 0",fontSize:11,color:"#5a6b8c",textDecoration:"none",fontWeight:600}}>Download</a>
                         <button onClick={()=>rmAttachment(att.id)} className="btn btn-danger" style={{fontSize:11,padding:"4px 10px"}}>✕</button>
                       </div>
                     </div>
@@ -1685,8 +1736,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               const fullyPaid=totalSell>0 && recv>=totalSell;
               if(fullyPaid && deal.status!=="Booked" && deal.status!=="Cancelled"){
                 return (
-                  <div style={{background:"#0f2a1a",border:"1px solid #166534",borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-                    <div style={{fontSize:13,color:"#86efac"}}>💡 Client has fully paid ({fmtINR(recv)}). Mark this deal as <b>Booked</b>?</div>
+                  <div style={{background:"#e6f7ee",border:"1px solid #16a34a",borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                    <div style={{fontSize:13,color:"#15803d"}}>💡 Client has fully paid ({fmtINR(recv)}). Mark this deal as <b>Booked</b>?</div>
                     <button onClick={()=>upd("status","Booked")} className="btn btn-ind">Mark as Booked</button>
                   </div>
                 );
@@ -1701,12 +1752,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 <button onClick={generateAIItinerary} disabled={aiBusy} className="btn btn-ind">
                   {aiBusy?"Generating...":"✨ Generate Itinerary"}</button>
               </div>
-              <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>
+              <div style={{fontSize:11,color:"#6b7a99",marginBottom:10}}>
                 Reads your Flights (onward / return / multi-city), Hotels and sightseeing notes, then builds a client-ready Voyage-Ed itinerary.
               </div>
               {aiItinerary&&(
                 <div>
-                  <textarea readOnly value={aiItinerary} style={{width:"100%",minHeight:320,background:"#0d1117",border:"1px solid #334155",borderRadius:8,color:"#e2e8f0",padding:"14px",fontSize:13,lineHeight:1.6,fontFamily:"'Segoe UI',sans-serif",whiteSpace:"pre-wrap"}}/>
+                  <textarea readOnly value={aiItinerary} style={{width:"100%",minHeight:320,background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:8,color:"#1a2c52",padding:"14px",fontSize:13,lineHeight:1.6,fontFamily:"'Segoe UI',sans-serif",whiteSpace:"pre-wrap"}}/>
                   <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
                     <button onClick={()=>{navigator.clipboard.writeText(aiItinerary);window.veToast&&window.veToast("Itinerary copied!");}} className="btn btn-sm">📋 Copy</button>
                     <button onClick={()=>{const msg=encodeURIComponent(aiItinerary);window.open(`https://wa.me/?text=${msg}`,"_blank");}} className="btn btn-sm">💬 Share on WhatsApp</button>
@@ -1721,10 +1772,10 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <div className="sec-head">Client Details</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
                 {[["Name",deal.clientName||"—"],["Contact",deal.contactNo||"—"],["Email",deal.email||"—"],["Destination",deal.destination||"—"],["Dates",deal.travelDates||"—"],["Query Via",deal.modeOfQuery],["Adults",deal.adults],["Children",deal.children],["Infants",deal.infants],["Total Pax",n(deal.adults)+n(deal.children)+n(deal.infants)],["Rooms",deal.rooms]].map(([l,v])=>(
-                  <div key={l} className="stat"><div style={{fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>{l}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>
+                  <div key={l} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>{l}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>
                 ))}
               </div>
-              {deal.remarks&&<div style={{marginTop:12,padding:"10px 14px",background:"#0d1117",borderRadius:8,fontSize:13,color:"#94a3b8",borderLeft:"3px solid #f97316"}}>📝 {deal.remarks}</div>}
+              {deal.remarks&&<div style={{marginTop:12,padding:"10px 14px",background:"#ffffff",borderRadius:8,fontSize:13,color:"#5a6b8c",borderLeft:"3px solid #f97316"}}>📝 {deal.remarks}</div>}
             </div>
 
             {/* P&L */}
@@ -1734,8 +1785,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 <div className="mono" style={{fontSize:24,fontWeight:800,color:gpm>=0?"#10b981":"#ef4444"}}>{fmtINR(gpm)}</div>
                 <div style={{fontSize:12,color:"#6ee7b7",marginTop:4}}>{marginPct}% of selling price · Before GST</div>
               </div>
-              <div style={{background:"linear-gradient(135deg,#1e1b4b50,#312e8130)",border:"1px solid #6366f133",borderRadius:10,padding:18}}>
-                <div style={{fontSize:10,color:"#a5b4fc",letterSpacing:2,marginBottom:6}}>GST TYPE</div>
+              <div style={{background:"linear-gradient(135deg,#1e1b4b50,#c2d2ee30)",border:"1px solid #4169E133",borderRadius:10,padding:18}}>
+                <div style={{fontSize:10,color:"#4169E1",letterSpacing:2,marginBottom:6}}>GST TYPE</div>
                 <div style={{display:"flex",gap:6,margin:"8px 0"}}>
                   {[
                     {mode:"profit",label:"18% on Profit",desc:"Applicable on GPM"},
@@ -1744,17 +1795,17 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                     <button key={opt.mode}
                       onClick={()=>upd("gstMode",opt.mode)}
                       style={{flex:1,padding:"8px 6px",borderRadius:8,border:"1px solid",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,transition:"all .15s",
-                        borderColor:deal.gstMode===opt.mode?"#6366f1":"#334155",
-                        background:deal.gstMode===opt.mode?"#6366f120":"transparent",
-                        color:deal.gstMode===opt.mode?"#a5b4fc":"#64748b"
+                        borderColor:deal.gstMode===opt.mode?"#4169E1":"#c2d2ee",
+                        background:deal.gstMode===opt.mode?"#4169E120":"transparent",
+                        color:deal.gstMode===opt.mode?"#4169E1":"#6b7a99"
                       }}>
                       <div>{opt.label}</div>
                       <div style={{fontSize:9,fontWeight:400,marginTop:2,opacity:.7}}>{opt.desc}</div>
                     </button>
                   ))}
                 </div>
-                <div className="mono" style={{fontSize:24,fontWeight:800,color:"#a5b4fc"}}>{fmtINR(gst)}</div>
-                <div style={{fontSize:12,color:"#a5b4fc",marginTop:4}}>
+                <div className="mono" style={{fontSize:24,fontWeight:800,color:"#4169E1"}}>{fmtINR(gst)}</div>
+                <div style={{fontSize:12,color:"#4169E1",marginTop:4}}>
                   {deal.gstMode==="package"
                     ? `5% × Selling ${fmtINR(totalSell)}`
                     : `18% × GPM ${fmtINR(gpm)}`}
@@ -1771,27 +1822,27 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             <div className="card">
               <div className="sec-head">Section-wise P&L (all converted to INR)</div>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                <thead><tr style={{background:"#0d1117"}}>{["Section","Vendors","Cost (INR)","Selling (INR)","Profit","Paid","Balance"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"#475569",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <thead><tr style={{background:"#ffffff"}}>{["Section","Vendors","Cost (INR)","Selling (INR)","Profit","Paid","Balance"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:"#a9bce0",fontWeight:700,letterSpacing:.8,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
                 <tbody>
                   {[{label:"🏨 Hotels",c:hotel},{label:"✈️ Flights",c:flight},{label:"🚌 Land",c:land},{label:"🛂 Visa",c:visa}].map(({label,c})=>{
                     const profit=c.sell-c.cost; const bal=c.cost-c.paid;
-                    return <tr key={label} style={{borderTop:"1px solid #1e293b"}}>
+                    return <tr key={label} style={{borderTop:"1px solid #d4e0f5"}}>
                       <td style={{padding:"10px 12px",fontWeight:600}}>{label}</td>
-                      <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#64748b"}}>—</td>
+                      <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#6b7a99"}}>—</td>
                       <td className="mono" style={{padding:"10px 12px",textAlign:"right"}}>{fmtINR(c.cost)}</td>
                       <td className="mono" style={{padding:"10px 12px",textAlign:"right"}}>{fmtINR(c.sell)}</td>
                       <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:profit>=0?"#10b981":"#ef4444",fontWeight:700}}>{fmtINR(profit)}</td>
-                      <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#a5b4fc"}}>{fmtINR(c.paid)}</td>
+                      <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#4169E1"}}>{fmtINR(c.paid)}</td>
                       <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:bal>0?"#ef4444":"#10b981",fontWeight:700}}>{fmtINR(bal)}</td>
                     </tr>;
                   })}
-                  <tr style={{borderTop:"2px solid #334155",background:"#0d1117",fontWeight:800}}>
+                  <tr style={{borderTop:"2px solid #c2d2ee",background:"#ffffff",fontWeight:800}}>
                     <td style={{padding:"10px 12px"}}>TOTAL</td>
-                    <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#64748b"}}>—</td>
+                    <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#6b7a99"}}>—</td>
                     <td className="mono" style={{padding:"10px 12px",textAlign:"right"}}>{fmtINR(totalCost)}</td>
                     <td className="mono" style={{padding:"10px 12px",textAlign:"right"}}>{fmtINR(totalSell)}</td>
                     <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:gpm>=0?"#10b981":"#ef4444"}}>{fmtINR(gpm)}</td>
-                    <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#a5b4fc"}}>{fmtINR(totalPaidToVendors)}</td>
+                    <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:"#4169E1"}}>{fmtINR(totalPaidToVendors)}</td>
                     <td className="mono" style={{padding:"10px 12px",textAlign:"right",color:balanceToVendors>0?"#ef4444":"#10b981"}}>{fmtINR(balanceToVendors)}</td>
                   </tr>
                 </tbody>
@@ -1802,16 +1853,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
               <div className="card">
                 <div className="sec-head">Client Cash Flow</div>
-                {[["Total to Receive",fmtINR(totalSell),"#e2e8f0"],["Total Received",fmtINR(totalClientReceived),"#10b981"],["Balance Pending",fmtINR(balanceFromClient),balanceFromClient>0?"#f97316":"#10b981"]].map(([l,v,c])=>(
-                  <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #1e293b"}}>
+                {[["Total to Receive",fmtINR(totalSell),"#1a2c52"],["Total Received",fmtINR(totalClientReceived),"#10b981"],["Balance Pending",fmtINR(balanceFromClient),balanceFromClient>0?"#f97316":"#10b981"]].map(([l,v,c])=>(
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #d4e0f5"}}>
                     <span style={{fontSize:13}}>{l}</span><span className="mono" style={{fontSize:16,fontWeight:800,color:c}}>{v}</span>
                   </div>
                 ))}
               </div>
               <div className="card">
                 <div className="sec-head">Vendor Cash Flow</div>
-                {[["Total to Pay",fmtINR(totalCost),"#e2e8f0"],["Total Paid",fmtINR(totalPaidToVendors),"#a5b4fc"],["Balance to Pay",fmtINR(balanceToVendors),balanceToVendors>0?"#ef4444":"#10b981"]].map(([l,v,c])=>(
-                  <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #1e293b"}}>
+                {[["Total to Pay",fmtINR(totalCost),"#1a2c52"],["Total Paid",fmtINR(totalPaidToVendors),"#4169E1"],["Balance to Pay",fmtINR(balanceToVendors),balanceToVendors>0?"#ef4444":"#10b981"]].map(([l,v,c])=>(
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #d4e0f5"}}>
                     <span style={{fontSize:13}}>{l}</span><span className="mono" style={{fontSize:16,fontWeight:800,color:c}}>{v}</span>
                   </div>
                 ))}
@@ -1827,7 +1878,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                     <div key={v.id} className="stat" style={{minWidth:160}}>
                       <div style={{fontWeight:700,marginBottom:6,fontSize:13}}>{v.name||"Unnamed"}</div>
                       <span style={{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:700,background:VISA_STATUS_COLORS[v.visaStatus||"Not Applied"]+"22",color:VISA_STATUS_COLORS[v.visaStatus||"Not Applied"]}}>{v.visaStatus||"Not Applied"}</span>
-                      <div className="mono" style={{fontSize:12,color:"#64748b",marginTop:6}}>{fmtINR(vendorINR(v).costINR)}</div>
+                      <div className="mono" style={{fontSize:12,color:"#6b7a99",marginTop:6}}>{fmtINR(vendorINR(v).costINR)}</div>
                     </div>
                   ))}
                 </div>
@@ -1845,32 +1896,32 @@ const sharedStyles = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   ::-webkit-scrollbar{width:4px;height:4px}
-  ::-webkit-scrollbar-thumb{background:#2d3748;border-radius:4px}
-  input,select,textarea{font-family:'Syne',sans-serif;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;padding:8px 10px;font-size:13px;color:#e2e8f0;outline:none;width:100%;transition:border .18s,box-shadow .18s}
-  input:focus,select:focus,textarea:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
-  select option{background:#1a1f2e}
+  ::-webkit-scrollbar-thumb{background:#dde6f5;border-radius:4px}
+  input,select,textarea{font-family:'Syne',sans-serif;background:#eef3fc;border:1px solid #dde6f5;border-radius:6px;padding:8px 10px;font-size:13px;color:#1a2c52;outline:none;width:100%;transition:border .18s,box-shadow .18s}
+  input:focus,select:focus,textarea:focus{border-color:#4169E1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+  select option{background:#eef3fc}
   .mono{font-family:'IBM Plex Mono',monospace}
   .btn{border:none;border-radius:6px;cursor:pointer;font-family:'Syne',sans-serif;font-weight:600;transition:all .18s}
   .btn-ind{background:linear-gradient(135deg,#f97316,#f59e0b);color:#fff;padding:8px 18px;font-size:13px}
   .btn-ind:hover{opacity:.88;transform:translateY(-1px)}
-  .btn-sm{background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:5px 12px;font-size:12px}
-  .btn-sm:hover{border-color:#6366f1;color:#a5b4fc}
+  .btn-sm{background:#d4e0f5;border:1px solid #c2d2ee;color:#5a6b8c;padding:5px 12px;font-size:12px}
+  .btn-sm:hover{border-color:#4169E1;color:#4169E1}
   .btn-danger{background:transparent;border:1px solid #ef444433;color:#ef4444;padding:4px 10px;font-size:11px}
   .btn-danger:hover{background:#ef444410}
-  .btn-dashed{background:transparent;border:1px dashed #334155;color:#6366f1;padding:7px;font-size:12px;width:100%;margin-top:8px}
-  .btn-dashed:hover{border-color:#6366f1;background:#6366f108}
-  .card{background:#151b27;border:1px solid #1e293b;border-radius:12px;padding:20px}
-  .sec-head{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#6366f1;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #1e293b}
-  .lbl{font-size:11px;color:#64748b;font-weight:600;letter-spacing:.3px;display:block;margin-bottom:4px}
-  .stat{background:#0d1117;border:1px solid #1e293b;border-radius:10px;padding:14px 18px}
-  .vrow{background:#0d1117;border:1px solid #1e293b;border-radius:10px;padding:16px;margin-bottom:10px;transition:border .2s}
-  .prow{background:#151b27;border:1px solid #1e293b;border-radius:6px;padding:10px;margin-bottom:6px}
+  .btn-dashed{background:transparent;border:1px dashed #c2d2ee;color:#4169E1;padding:7px;font-size:12px;width:100%;margin-top:8px}
+  .btn-dashed:hover{border-color:#4169E1;background:#4169E108}
+  .card{background:#ffffff;border:1px solid #d4e0f5;border-radius:12px;padding:20px}
+  .sec-head{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#4169E1;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #d4e0f5}
+  .lbl{font-size:11px;color:#6b7a99;font-weight:600;letter-spacing:.3px;display:block;margin-bottom:4px}
+  .stat{background:#ffffff;border:1px solid #d4e0f5;border-radius:10px;padding:14px 18px}
+  .vrow{background:#ffffff;border:1px solid #d4e0f5;border-radius:10px;padding:16px;margin-bottom:10px;transition:border .2s}
+  .prow{background:#ffffff;border:1px solid #d4e0f5;border-radius:6px;padding:10px;margin-bottom:6px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
   .grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
-  .tab{padding:10px 16px;border:none;background:none;font-family:'Syne',sans-serif;font-size:13px;font-weight:600;cursor:pointer;color:#475569;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s}
+  .tab{padding:10px 16px;border:none;background:none;font-family:'Syne',sans-serif;font-size:13px;font-weight:600;cursor:pointer;color:#a9bce0;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s}
   .tab.on{color:#f97316;border-bottom-color:#f97316}
-  .tab:hover:not(.on){color:#94a3b8}
+  .tab:hover:not(.on){color:#5a6b8c}
 
   /* ═══════════ MOBILE RESPONSIVE (tablets & phones) ═══════════ */
   @media(max-width:820px){

@@ -72,18 +72,18 @@ function Login({ onLogin }) {
 
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
-      background:"linear-gradient(135deg,#0a0d13,#0d1b3e 60%,#13265c)",fontFamily:"'Segoe UI',system-ui,sans-serif",padding:20}}>
-      <div style={{width:"100%",maxWidth:400,background:"#151b27",border:"1px solid #1e293b",
+      background:"linear-gradient(135deg,#f4f7fc,#4169E1 60%,#5b7fff)",fontFamily:"'Segoe UI',system-ui,sans-serif",padding:20}}>
+      <div style={{width:"100%",maxWidth:400,background:"#ffffff",border:"1px solid #d4e0f5",
         borderRadius:18,padding:"40px 34px",boxShadow:"0 30px 80px -20px rgba(0,0,0,.6)"}}>
         <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{fontSize:11,letterSpacing:4,color:"#c9961a",fontWeight:800}}>VOYAGE-ED</div>
-          <div style={{fontSize:22,fontWeight:800,color:"#f8fafc",marginTop:4}}>CRM Login</div>
-          <div style={{fontSize:12,color:"#64748b",marginTop:4}}>Learn · Travel · Explore</div>
+          <div style={{fontSize:11,letterSpacing:4,color:"#4169E1",fontWeight:800}}>VOYAGE-ED</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#0f2350",marginTop:4}}>CRM Login</div>
+          <div style={{fontSize:12,color:"#6b7a99",marginTop:4}}>Learn · Travel · Explore</div>
         </div>
 
-        {err && <div style={{background:"#3b1418",border:"1px solid #7f1d1d",color:"#fca5a5",
+        {err && <div style={{background:"#fdeaea",border:"1px solid #dc2626",color:"#b91c1c",
           padding:"10px 14px",borderRadius:8,fontSize:13,marginBottom:16}}>{err}</div>}
-        {info && <div style={{background:"#0f2a1a",border:"1px solid #166534",color:"#86efac",
+        {info && <div style={{background:"#e6f7ee",border:"1px solid #16a34a",color:"#15803d",
           padding:"10px 14px",borderRadius:8,fontSize:13,marginBottom:16}}>{info}</div>}
 
         {mode === "login" && (
@@ -96,7 +96,7 @@ function Login({ onLogin }) {
               {loading ? "Logging in..." : "Login"}</button>
             <div style={{textAlign:"center",marginTop:16}}>
               <span onClick={()=>{setMode("reset");setErr("");setInfo("");}}
-                style={{color:"#c9961a",fontSize:13,cursor:"pointer",fontWeight:600}}>Forgot password?</span>
+                style={{color:"#4169E1",fontSize:13,cursor:"pointer",fontWeight:600}}>Forgot password?</span>
             </div>
           </>
         )}
@@ -118,7 +118,7 @@ function Login({ onLogin }) {
             )}
             <div style={{textAlign:"center",marginTop:16}}>
               <span onClick={()=>{setMode("login");setErr("");setInfo("");setResetStep(1);}}
-                style={{color:"#94a3b8",fontSize:13,cursor:"pointer"}}>← Back to login</span>
+                style={{color:"#5a6b8c",fontSize:13,cursor:"pointer"}}>← Back to login</span>
             </div>
           </>
         )}
@@ -127,9 +127,9 @@ function Login({ onLogin }) {
   );
 }
 
-const inp = {width:"100%",background:"#0d1117",border:"1px solid #334155",borderRadius:9,
-  color:"#f8fafc",padding:"13px 15px",fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"};
-const btn = {width:"100%",background:"linear-gradient(135deg,#c9961a,#f0c842)",border:"none",borderRadius:9,
-  color:"#0a0d13",padding:"13px",fontSize:15,fontWeight:800,cursor:"pointer",marginTop:4};
+const inp = {width:"100%",background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:9,
+  color:"#0f2350",padding:"13px 15px",fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"};
+const btn = {width:"100%",background:"linear-gradient(135deg,#4169E1,#5b7fff)",border:"none",borderRadius:9,
+  color:"#f4f7fc",padding:"13px",fontSize:15,fontWeight:800,cursor:"pointer",marginTop:4};
 
 export default Login;
