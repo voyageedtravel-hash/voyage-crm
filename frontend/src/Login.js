@@ -68,7 +68,7 @@ function Login({ onLogin }) {
     finally { setLoading(false); }
   };
 
-  const onKey = (e) => { if (e.key === "Enter") (mode === "login" ? handleLogin() : null); };
+  const onKey = (e) => { if (e.key === "Enter" && mode === "login") handleLogin(); };
 
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
