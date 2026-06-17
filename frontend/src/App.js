@@ -440,6 +440,9 @@ export default function TravelCRM() {
   const [aiInput,setAiInput]=useState("");
   const [aiChat,setAiChat]=useState([{role:"assistant",text:"Hi! I'm your Voyage-Ed AI assistant. Tell me what to do — e.g. \"create a deal for Rahul to Dubai\", \"show hot leads\", \"how much do I need to collect?\", or \"draft a follow-up for the current client\"."}]);
   const [aiThinking,setAiThinking]=useState(false);
+  // AI Daily Brief
+  const [briefText,setBriefText]=useState("");
+  const [briefBusy,setBriefBusy]=useState(false);
   // AI itinerary
   const [aiBusy,setAiBusy]=useState(false);
   const [aiItinerary,setAiItinerary]=useState("");
@@ -576,6 +579,46 @@ Be concise. If asked to do something you have no action for, explain politely in
       )}
     </>
   );
+
+  // ─── AI DAILY BUSINESS BRIEF (the CRM briefs YOU every morning) ────────────
+  const generateDailyBrief=async()=>{
+    setBriefBusy(true); setBriefText("");
+    try{
+      const dv=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
+      const sellOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+      const costOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+      const recvOf=(d)=>sum(d.clientPayments||[],"amount");
+      const paidVOf=(d)=>dv(d).reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
+      const today=new Date().toISOString().slice(0,10);
+
+      const booked=allDeals.filter(d=>(d.status||d.stage)==="Booked");
+      const snapshot={
+        date:today,
+        totalLeads:allDeals.length,
+        bookedCount:booked.length,
+        conversionPct: allDeals.length?((booked.length/allDeals.length)*100).toFixed(1):"0",
+        revenueBooked: booked.reduce((s,d)=>s+sellOf(d),0),
+        grossProfitBooked: booked.reduce((s,d)=>s+(sellOf(d)-costOf(d)),0),
+        toCollect: booked.reduce((s,d)=>s+Math.max(0,sellOf(d)-recvOf(d)),0),
+        toPayVendors: booked.reduce((s,d)=>s+Math.max(0,costOf(d)-paidVOf(d)),0),
+        followUpsDueToday: allDeals.filter(d=>d.followUpDate&&d.followUpDate<=today&&!["Booked","Lost","Cancelled","Travelled"].includes(d.stage||"")).map(d=>({client:d.clientName,dest:d.destination,date:d.followUpDate,priority:d.priority})),
+        hotLeads: allDeals.filter(d=>(d.priority==="Hot 🔥"||d.priority==="High")&&!["Booked","Lost","Cancelled"].includes(d.stage||"")).map(d=>({client:d.clientName,dest:d.destination,stage:d.stage})),
+        stuckInNegotiation: allDeals.filter(d=>d.stage==="Negotiation").map(d=>({client:d.clientName,dest:d.destination})),
+        bySource: LEAD_SOURCES.map(s=>({source:s,count:allDeals.filter(d=>d.leadSource===s).length})).filter(x=>x.count>0),
+      };
+
+      const system=`You are the Chief of Staff for Voyage-Ed Travels, an Indian travel agency. Read the business data and write a sharp, motivating DAILY BRIEF for the owner (Vishal). Be specific and action-oriented — name clients, amounts, and exactly what to do today. Use short sections with emojis as headers. Keep it under 250 words. Write in friendly Hinglish (mix Hindi+English naturally). Prioritise: money to collect, hot leads to close, follow-ups due, and one smart strategic observation. End with a one-line motivational push.`;
+      const userMsg="Here is today's business data:\n"+JSON.stringify(snapshot,null,1);
+      const res=await fetch(`${API_BASE}/api/chat`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:900,system,messages:[{role:"user",content:userMsg}]}),
+      });
+      const data=await res.json();
+      const text=(data.content&&data.content[0]&&data.content[0].text)||data.error||"No response";
+      setBriefText(text);
+    }catch(e){ setBriefText("⚠️ Brief unavailable — make sure ANTHROPIC_API_KEY is set on the server. ("+e.message+")"); }
+    finally{ setBriefBusy(false); }
+  };
 
   // ─── ONE-CLICK WHATSAPP FOLLOW-UP ─────────────────────────────────────────
   const waMessage=(kind)=>{
@@ -1025,6 +1068,22 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} className="btn btn-sm">Clear</button>}
             <div style={{flex:1}}></div>
             <div style={{fontSize:11,color:"#6b7a99"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+          </div>
+
+          {/* ═══ AI DAILY BRIEF ═══ */}
+          <div style={{background:"linear-gradient(135deg,#4169E1,#5b7fff)",borderRadius:14,padding:"18px 22px",marginBottom:18,color:"#fff",boxShadow:"0 12px 30px -10px rgba(65,105,225,.5)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+              <div>
+                <div style={{fontSize:15,fontWeight:800,letterSpacing:.3}}>☀️ Aaj ka Business Brief</div>
+                <div style={{fontSize:12,opacity:.9}}>AI tumhara poora business padh ke bataye aaj kya zaroori hai</div>
+              </div>
+              <button onClick={generateDailyBrief} disabled={briefBusy}
+                style={{background:"#fff",color:"#4169E1",border:"none",borderRadius:9,padding:"11px 20px",fontWeight:800,cursor:"pointer",fontSize:14}}>
+                {briefBusy?"Analysing…":"✨ Generate Brief"}</button>
+            </div>
+            {briefText&&(
+              <div style={{marginTop:16,background:"rgba(255,255,255,.14)",borderRadius:10,padding:"16px 18px",fontSize:14,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{briefText}</div>
+            )}
           </div>
 
           {/* ═══ TODAY'S COMMAND CENTER ═══ */}
