@@ -432,6 +432,41 @@ const start = async () => {
     });
 
     
+    // ─── LIVE FX RATES (with Voyage-Ed markup) ──────────────────────────────
+    // USD/EUR/GBP/NZD/AUD/SGD → +1.50 ; all other currencies → +0.50
+    let fxCache = { date: null, rates: null };
+    const FX_HIGH = ["USD","EUR","GBP","NZD","AUD","SGD"];
+    app.get("/api/fx-rates", async (req, res) => {
+      try {
+        const today = new Date().toISOString().slice(0,10);
+        if (fxCache.date === today && fxCache.rates) {
+          return res.json({ date: today, cached: true, rates: fxCache.rates });
+        }
+        // Free, no-key, mid-market rates (same headline number as Google/xe), base = INR
+        const r = await fetch("https://open.er-api.com/v6/latest/INR");
+        const data = await r.json();
+        if (!data || data.result !== "success" || !data.rates) {
+          // Fall back to last good cache if available
+          if (fxCache.rates) return res.json({ date: fxCache.date, stale: true, rates: fxCache.rates });
+          return res.status(502).json({ error: "FX source unavailable" });
+        }
+        // data.rates gives INR→foreign. We need foreign→INR = 1 / rate. Then add markup.
+        const out = {};
+        for (const [cur, perINR] of Object.entries(data.rates)) {
+          if (!perINR) continue;
+          const inrPerUnit = 1 / perINR;                 // e.g. 1 USD = 95 INR (mid-market)
+          const markup = FX_HIGH.includes(cur) ? 1.50 : 0.50;
+          out[cur] = Math.round((inrPerUnit + markup) * 100) / 100; // e.g. 96.50
+        }
+        out.INR = 1;
+        fxCache = { date: today, rates: out };
+        res.json({ date: today, cached: false, rates: out });
+      } catch (e) {
+        if (fxCache.rates) return res.json({ date: fxCache.date, stale: true, rates: fxCache.rates });
+        res.status(500).json({ error: e.message });
+      }
+    });
+
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 

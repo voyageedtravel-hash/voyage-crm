@@ -18,6 +18,41 @@ window.veToast = (msg, type="success") => {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCIES = ["INR","USD","EUR","GBP","SGD","THB","MYR"];
+const CITY_COUNTRY = {
+  // Thailand
+  bangkok:"Thailand",phuket:"Thailand","chiang mai":"Thailand","koh samui":"Thailand",pattaya:"Thailand",krabi:"Thailand",
+  // Indonesia
+  bali:"Indonesia",denpasar:"Indonesia",jakarta:"Indonesia",ubud:"Indonesia",
+  // Malaysia / Singapore
+  "kuala lumpur":"Malaysia",langkawi:"Malaysia",penang:"Malaysia",singapore:"Singapore",
+  // Vietnam / Cambodia
+  hanoi:"Vietnam","ho chi minh":"Vietnam","ho chi minh city":"Vietnam","da nang":"Vietnam","ha long":"Vietnam","siem reap":"Cambodia","phnom penh":"Cambodia",
+  // UAE / Gulf
+  dubai:"UAE","abu dhabi":"UAE",sharjah:"UAE",doha:"Qatar",muscat:"Oman",
+  // Caucasus / Central Asia
+  tbilisi:"Georgia",batumi:"Georgia",kazbegi:"Georgia",baku:"Azerbaijan",yerevan:"Armenia",
+  almaty:"Kazakhstan",astana:"Kazakhstan",tashkent:"Uzbekistan",samarkand:"Uzbekistan",
+  // Maldives / Sri Lanka / Nepal
+  male:"Maldives",maldives:"Maldives",colombo:"Sri Lanka",kandy:"Sri Lanka",kathmandu:"Nepal",pokhara:"Nepal",
+  // Europe
+  london:"UK",paris:"France",rome:"Italy",venice:"Italy",milan:"Italy",florence:"Italy",
+  barcelona:"Spain",madrid:"Spain",amsterdam:"Netherlands",frankfurt:"Germany",munich:"Germany",
+  zurich:"Switzerland",interlaken:"Switzerland",geneva:"Switzerland",vienna:"Austria",prague:"Czechia",
+  istanbul:"Turkey",athens:"Greece",santorini:"Greece",lisbon:"Portugal",
+  // Far East
+  "hong kong":"Hong Kong",tokyo:"Japan",osaka:"Japan",kyoto:"Japan",seoul:"South Korea",
+  shanghai:"China",beijing:"China",taipei:"Taiwan",
+  // India (for domestic hotels)
+  goa:"India",jaipur:"India",udaipur:"India",manali:"India",shimla:"India",leh:"India",srinagar:"India",
+};
+
+
+// ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
+const AIRPORT_BY_CITY = (() => { const m={}; for(const [code,city] of Object.entries(AIRPORT_MAP)){ const k=city.toLowerCase().replace(/\s*\(.*\)/,"").trim(); if(!m[k]) m[k]=code; } return m; })();
+const lookupCountry = (city) => CITY_COUNTRY[(city||"").toLowerCase().trim()] || "";
+// Currencies that get +1.50 markup; all others +0.50
+
+
 const CLIENT_MODES = ["UPI","Cash deposited by client in bank","Cash collected by Vishal","Cash collected by Sahitya","Bank Transfer","Cheque","Other"];
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
@@ -35,6 +70,13 @@ const AIRLINE_MAP = {
   "CX":"Cathay Pacific","MH":"Malaysia Airlines","GA":"Garuda Indonesia",
   "TG":"Thai Airways","VN":"Vietnam Airlines","MU":"China Eastern",
   "CA":"Air China","NH":"ANA","JL":"Japan Airlines","OZ":"Asiana Airlines",
+  "AK":"AirAsia","FD":"Thai AirAsia","TR":"Scoot","VJ":"VietJet Air","QZ":"Indonesia AirAsia",
+  "PG":"Bangkok Airways","BR":"EVA Air","CI":"China Airlines","CZ":"China Southern",
+  "KE":"Korean Air","UL":"SriLankan Airlines","KC":"Air Astana","HY":"Uzbekistan Airways",
+  "J2":"Azerbaijan Airlines","GF":"Gulf Air","SV":"Saudia","J9":"Jazeera Airways",
+  "LX":"Swiss","OS":"Austrian Airlines","AZ":"ITA Airways","IB":"Iberia","TP":"TAP Air Portugal",
+  "AY":"Finnair","SK":"SAS","EI":"Aer Lingus","SU":"Aeroflot","AC":"Air Canada","WS":"WestJet",
+  "ET":"Ethiopian Airlines","MS":"EgyptAir","KQ":"Kenya Airways",
 };
 
 const AIRPORT_MAP = {
@@ -50,6 +92,13 @@ const AIRPORT_MAP = {
   "JNB":"Johannesburg","NBO":"Nairobi","CMB":"Colombo","DAC":"Dhaka","KTM":"Kathmandu",
   "MLE":"Male","SYD":"Sydney","MEL":"Melbourne","LAX":"Los Angeles","JFK":"New York (JFK)",
   "ORD":"Chicago","YYZ":"Toronto","YVR":"Vancouver","GRU":"Sao Paulo",
+  "TBS":"Tbilisi","BUS":"Batumi","GYD":"Baku","EVN":"Yerevan","ALA":"Almaty","NQZ":"Astana",
+  "TAS":"Tashkent","HKT":"Phuket","CNX":"Chiang Mai","USM":"Koh Samui","DPS":"Bali (Denpasar)",
+  "CGK":"Jakarta","SGN":"Ho Chi Minh City","HAN":"Hanoi","DAD":"Da Nang","REP":"Siem Reap",
+  "PNH":"Phnom Penh","SHJ":"Sharjah","MCT":"Muscat","BAH":"Bahrain","KWI":"Kuwait","RUH":"Riyadh",
+  "JED":"Jeddah","MUC":"Munich","PRG":"Prague","LIS":"Lisbon","DUB":"Dublin","VCE":"Venice",
+  "GVA":"Geneva","PVG":"Shanghai","PEK":"Beijing","TPE":"Taipei","AKL":"Auckland","SXR":"Srinagar",
+  "IXL":"Leh","PNQ":"Pune","TRV":"Thiruvananthapuram","RGN":"Yangon","PER":"Perth","BNE":"Brisbane",
 };
 
 const ROOM_CATEGORIES = ["Deluxe Room","Superior Room","Standard Room","Junior Suite","Suite","Executive Suite","Presidential Suite","Pool View Room","Sea View Room","Garden View","Mountain View","Studio","Apartment","Villa","Chalet","Bungalow","Tent/Glamping","Other"];
@@ -361,13 +410,23 @@ function SectorRow({sector, onChange, onRemove, showRemove, label}) {
     const upper = code.toUpperCase();
     onChange({...sector, airlineCode:upper, airlineName:AIRLINE_MAP[upper]||sector.airlineName});
   };
-  const updFrom = (code) => {
-    const upper = code.toUpperCase();
-    onChange({...sector, from:upper, fromName:AIRPORT_MAP[upper]||sector.fromName});
+  const resolveAirport = (input) => {
+    const raw = (input||"").trim();
+    const upper = raw.toUpperCase();
+    // If it's a known 3-letter code → fill city name
+    if (AIRPORT_MAP[upper]) return { code: upper, name: AIRPORT_MAP[upper] };
+    // Otherwise treat as a city name → reverse-lookup the code
+    const code = AIRPORT_BY_CITY[raw.toLowerCase()];
+    if (code) return { code, name: AIRPORT_MAP[code] };
+    return { code: upper, name: "" };
   };
-  const updTo = (code) => {
-    const upper = code.toUpperCase();
-    onChange({...sector, to:upper, toName:AIRPORT_MAP[upper]||sector.toName});
+  const updFrom = (input) => {
+    const r = resolveAirport(input);
+    onChange({...sector, from:r.code, fromName:r.name||sector.fromName});
+  };
+  const updTo = (input) => {
+    const r = resolveAirport(input);
+    onChange({...sector, to:r.code, toName:r.name||sector.toName});
   };
 
   return (
@@ -448,6 +507,8 @@ export default function TravelCRM() {
   // AI call script
   const [callScript,setCallScript]=useState("");
   const [callBusy,setCallBusy]=useState(false);
+  // Live FX rates (foreign→INR, with markup)
+  const [fxRates,setFxRates]=useState(()=>{ try{return JSON.parse(localStorage.getItem("ve_fx")||"null")?.rates||null;}catch{return null;} });
   const [aiItinerary,setAiItinerary]=useState("");
 
   const loadUsers=async()=>{
@@ -801,20 +862,42 @@ ${text}
         console.warn("Could not fetch leads from server:", err.message);
         // Keep local deals exactly as-is. Never touch localStorage on failure.
       });
+    },[]);
+
+  // Fetch live FX rates once per day (foreign→INR incl. markup)
+  useEffect(()=>{
+    fetch(`${API_BASE}/api/fx-rates`)
+      .then(r=>r.json())
+      .then(d=>{ if(d&&d.rates){ setFxRates(d.rates); try{localStorage.setItem("ve_fx",JSON.stringify(d));}catch{} } })
+      .catch(()=>{ /* keep cached localStorage rates */ });
   },[]);
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
 
   const updH=(id,key,val)=>
     setDeal(d=>({...d,hotelVendors:d.hotelVendors.map(v=>{
       if(v.id!==id) return v;
-      const updated={...v,[key]:val};
+      let updated={...v,[key]:val};
       if(key==="checkIn"||key==="checkOut") updated.nights=nightsBetween(updated.checkIn,updated.checkOut);
+      if(key==="city"){ const c=lookupCountry(val); if(c) updated.country=c; }
+      if(key==="currency"){ const r=rateFor(val); if(r) updated.exchangeRate=r; if(val==="INR") updated.exchangeRate=""; }
       return updated;
     })}));
   const addHV=()=>setDeal(d=>({...d,hotelVendors:[...d.hotelVendors,emptyHotelVendor()]}));
   const rmHV=(id)=>setDeal(d=>({...d,hotelVendors:d.hotelVendors.filter(v=>v.id!==id)}));
 
-  const updF=(id,key,val)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===id?{...v,[key]:val}:v)}));
+  // When currency changes, auto-fill the live exchange rate (foreign→INR incl. markup).
+  // User can still manually override the rate afterwards.
+  const rateFor=(curr)=>{
+    if(!curr||curr==="INR") return "";
+    if(fxRates && fxRates[curr]) return String(fxRates[curr]);
+    return "";
+  };
+  const withCurrencyRate=(v,key,val)=>{
+    const updated={...v,[key]:val};
+    if(key==="currency"){ const r=rateFor(val); if(r) updated.exchangeRate=r; if(val==="INR") updated.exchangeRate=""; }
+    return updated;
+  };
+  const updF=(id,key,val)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===id?withCurrencyRate(v,key,val):v)}));
   const updSector=(vid,idx,sec,sectorData)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>{
     if(v.id!==vid) return v;
     const arr=[...v[sec]]; arr[idx]=sectorData; return {...v,[sec]:arr};
@@ -824,11 +907,11 @@ ${text}
   const addFV=()=>setDeal(d=>({...d,flightVendors:[...d.flightVendors,emptyFlightVendor()]}));
   const rmFV=(id)=>setDeal(d=>({...d,flightVendors:d.flightVendors.filter(v=>v.id!==id)}));
 
-  const updL=(id,key,val)=>setDeal(d=>({...d,landVendors:d.landVendors.map(v=>v.id===id?{...v,[key]:val}:v)}));
+  const updL=(id,key,val)=>setDeal(d=>({...d,landVendors:d.landVendors.map(v=>v.id===id?withCurrencyRate(v,key,val):v)}));
   const addLV=()=>setDeal(d=>({...d,landVendors:[...d.landVendors,emptyLandVendor()]}));
   const rmLV=(id)=>setDeal(d=>({...d,landVendors:d.landVendors.filter(v=>v.id!==id)}));
 
-  const updVisa=(id,key,val)=>setDeal(d=>({...d,visaVendors:d.visaVendors.map(v=>v.id===id?{...v,[key]:val}:v)}));
+  const updVisa=(id,key,val)=>setDeal(d=>({...d,visaVendors:d.visaVendors.map(v=>v.id===id?withCurrencyRate(v,key,val):v)}));
   const addVisaV=()=>setDeal(d=>({...d,visaVendors:[...d.visaVendors,emptyVisaVendor()]}));
   const rmVisaV=(id)=>setDeal(d=>({...d,visaVendors:d.visaVendors.filter(v=>v.id!==id)}));
 
