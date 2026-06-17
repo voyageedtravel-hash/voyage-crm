@@ -50,6 +50,157 @@ const CITY_COUNTRY = {
 // ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
 const AIRPORT_BY_CITY = (() => { const m={}; for(const [code,city] of Object.entries(AIRPORT_MAP)){ const k=city.toLowerCase().replace(/\s*\(.*\)/,"").trim(); if(!m[k]) m[k]=code; } return m; })();
 const lookupCountry = (city) => CITY_COUNTRY[(city||"").toLowerCase().trim()] || "";
+
+// ─── BRANDED QUOTATION HTML TEMPLATE (print-ready, matches Voyage-Ed PDF) ────
+const FIXED_TERMS = [
+  "Rates are subject to change without prior notice until booking is confirmed with advance payment.",
+  "To confirm the booking, 30% of total tour cost must be paid in advance. Balance to be cleared before/on arrival.",
+  "Payment Mode: Bank Transfer / UPI preferred. Credit Card payments may attract a surcharge.",
+  "Check-in is typically 14:00 hrs and Check-out 12:00 noon (subject to hotel policy). Early check-in / late check-out subject to availability.",
+  "Quotation is valid for the mentioned travel dates only. Any change in dates may affect pricing.",
+  "Carry valid government-issued photo ID for all travellers as required at hotels, airports and permits.",
+  "Any cost arising due to natural calamities, landslides, road blockages or strikes shall be borne directly by the guests.",
+];
+const FIXED_CANCELLATION = [
+  ["30+ Days from Date of Booking","Communication Charges Only"],
+  ["21–30 Days Prior to Departure","25% of Total Tour Cost"],
+  ["11–20 Days Prior to Departure","50% of Total Tour Cost"],
+  ["Within 10 Days of Departure","100% – Full Cancellation (No Refund)"],
+];
+
+const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
+  const esc = (s)=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const onward = flights.filter(f=>f.kind==="Onward");
+  const ret = flights.filter(f=>f.kind==="Return");
+  const other = flights.filter(f=>f.kind!=="Onward"&&f.kind!=="Return");
+  const dv=[...deal.hotelVendors||[],...deal.flightVendors||[],...deal.landVendors||[],...deal.visaVendors||[]];
+  const totalSell = dv.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+  const perPax = meta.pax>0 ? Math.round(totalSell/meta.pax) : totalSell;
+  const inr = (n)=>"INR "+Math.round(n).toLocaleString("en-IN")+"/-";
+
+  const flightCol = (f)=> f ? `
+    <div style="font-weight:700;color:#0f2350">${esc(f.airline)||"—"}</div>
+    <div style="color:#33446b;margin:4px 0">${esc(f.fromName||f.from)} (${esc(f.from)}) &rarr; ${esc(f.toName||f.to)} (${esc(f.to)})</div>
+    <div style="font-size:12px;color:#5a6b8c">${esc(f.date)} ${f.depTime?("| "+esc(f.depTime)):""} ${f.arrTime?("&rarr; "+esc(f.arrTime)):""}</div>` : "<div style='color:#999'>—</div>";
+
+  const hotelCards = hotels.map(h=>`
+    <div style="border:1px solid #d4e0f5;border-radius:8px;padding:14px 16px;margin-bottom:10px;background:#fff">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">
+        <div style="font-weight:800;color:#4169E1;font-size:15px">${esc(h.name)}</div>
+        <div style="color:#5a6b8c;font-size:13px">${esc(h.city)}${h.country?(", "+esc(h.country)):""}</div>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:8px;font-size:13px;color:#33446b">
+        <span><b>Check-in:</b> ${esc(h.checkIn)}</span>
+        <span><b>Check-out:</b> ${esc(h.checkOut)}</span>
+        <span><b>Nights:</b> ${esc(h.nights)}</span>
+      </div>
+      ${h.room?`<div style="margin-top:6px;font-size:13px;color:#33446b"><b>Room:</b> ${esc(h.room)}</div>`:""}
+    </div>`).join("");
+
+  const dayRows = (ai.days||[]).map(d=>`
+    <div style="border-left:3px solid #4169E1;padding:10px 0 10px 16px;margin-bottom:14px">
+      <div style="font-weight:800;color:#0f2350">DAY ${esc(d.day)}${d.date?(" • "+esc(d.date)):""}${d.title?(" — "+esc(d.title)):""}</div>
+      <div style="color:#33446b;margin-top:6px;line-height:1.6;font-size:14px">${esc(d.desc)}</div>
+      <div style="margin-top:6px;font-size:12px;color:#5a6b8c">
+        ${d.hotel?("🏨 "+esc(d.hotel)+"  "):""}${d.meals?("🍽 "+esc(d.meals)):""}
+      </div>
+      ${d.note?`<div style="margin-top:4px;font-size:12px;color:#6b7a99;font-style:italic">Note: ${esc(d.note)}</div>`:""}
+    </div>`).join("");
+
+  const incl = (ai.inclusions||[]).map(i=>`<li style="margin-bottom:6px;color:#15803d">✔ ${esc(i)}</li>`).join("");
+  const excl = (ai.exclusions||[]).map(i=>`<li style="margin-bottom:6px;color:#b91c1c">✖ ${esc(i)}</li>`).join("");
+  const terms = FIXED_TERMS.map((t,i)=>`<li style="margin-bottom:6px;color:#33446b">${esc(t)}</li>`).join("");
+  const cancel = FIXED_CANCELLATION.map(([k,v])=>`<tr><td style="padding:9px 12px;border:1px solid #d4e0f5;color:#33446b">${esc(k)}</td><td style="padding:9px 12px;border:1px solid #d4e0f5;color:#33446b">${esc(v)}</td></tr>`).join("");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Quotation — ${esc(deal.clientName)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif}
+  body{background:#eef3fc;color:#1a2c52;padding:0}
+  .page{max-width:820px;margin:0 auto;background:#fff}
+  .bar{position:sticky;top:0;background:#0f2350;padding:12px 20px;display:flex;gap:10px;justify-content:flex-end;z-index:10}
+  .bar button{background:#4169E1;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px}
+  .bar button.sec{background:#fff;color:#0f2350}
+  .hd{background:linear-gradient(135deg,#0f2350,#4169E1);color:#fff;padding:30px 36px}
+  .hd h1{font-size:30px;letter-spacing:1px}
+  .hd .sub{color:#cdd9f5;font-weight:700;font-size:12px;letter-spacing:2px;margin-top:4px}
+  .hd .route{color:#e8efff;margin-top:8px;font-size:14px}
+  .sec-title{background:#0f2350;color:#fff;padding:10px 36px;font-weight:700;letter-spacing:1px;font-size:14px;margin-top:0}
+  .body{padding:22px 36px}
+  table.info{width:100%;border-collapse:collapse;margin-bottom:6px}
+  table.info th{background:#0f2350;color:#fff;padding:10px;font-size:12px;letter-spacing:.5px}
+  table.info td{padding:11px;text-align:center;border:1px solid #d4e0f5;color:#33446b;font-size:14px}
+  .flt{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .flt .col{border:1px solid #d4e0f5;border-radius:8px;padding:14px 16px;background:#fff}
+  .flt .lbl{font-size:11px;letter-spacing:1px;color:#4169E1;font-weight:800;margin-bottom:8px}
+  .price{border:2px solid #4169E1;border-radius:10px;padding:18px 20px;margin-bottom:14px;background:#f4f7fc}
+  .price .opt{font-size:13px;color:#4169E1;font-weight:800;letter-spacing:1px}
+  .price .amt{font-size:26px;font-weight:800;color:#0f2350;margin-top:4px}
+  .price .per{font-size:13px;color:#5a6b8c}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  ul{list-style:none;font-size:13px} ol{margin-left:18px;font-size:13px}
+  .foot{background:#0f2350;color:#fff;padding:22px 36px;text-align:center;margin-top:20px}
+  .foot a{color:#9db8f5}
+  @media print{.bar{display:none}body{background:#fff}.page{max-width:100%}}
+  @media(max-width:600px){.flt,.twocol{grid-template-columns:1fr}.hd h1{font-size:22px}}
+</style></head><body>
+<div class="bar">
+  <button onclick="window.print()">⬇ Save as PDF / Print</button>
+  <button class="sec" onclick="window.close()">Close</button>
+</div>
+<div class="page">
+  <div class="hd">
+    <h1>${esc((deal.destination||"TRAVEL").toUpperCase())}</h1>
+    <div class="sub">TAILORED ITINERARY &amp; QUOTATION</div>
+    <div class="route">${esc(ai.subtitle||"")}</div>
+  </div>
+  <div class="body">
+    <table class="info">
+      <tr><th>GUEST</th><th>DESTINATION</th><th>TRAVEL DATES</th><th>DURATION</th><th>PAX</th></tr>
+      <tr><td>${esc(deal.clientName)}</td><td>${esc(deal.destination)}</td><td>${esc(deal.travelDates)}</td><td>${esc(meta.totalNights)} Nights / ${esc(meta.totalNights+1)} Days</td><td>${esc(meta.pax)} Pax</td></tr>
+    </table>
+  </div>
+  ${(onward.length||ret.length||other.length)?`
+  <div class="sec-title">✈ FLIGHT DETAILS</div>
+  <div class="body">
+    ${(onward.length||ret.length)?`<div class="flt">
+      <div class="col"><div class="lbl">ONWARD FLIGHT</div>${flightCol(onward[0])}</div>
+      <div class="col"><div class="lbl">RETURN FLIGHT</div>${flightCol(ret[0])}</div>
+    </div>`:""}
+    ${other.length?other.map((f,i)=>`<div class="col" style="margin-top:10px"><div class="lbl">FLIGHT ${i+1}</div>${flightCol(f)}</div>`).join(""):""}
+  </div>`:""}
+  ${hotels.length?`<div class="sec-title">■ HOTEL DETAILS</div><div class="body">${hotelCards}</div>`:""}
+  ${(ai.days&&ai.days.length)?`<div class="sec-title">■ DAY-BY-DAY ITINERARY</div><div class="body">${dayRows}</div>`:""}
+  <div class="sec-title">■ PRICING SUMMARY</div>
+  <div class="body">
+    <div class="price">
+      <div class="opt">TOTAL PACKAGE PRICE</div>
+      <div class="amt">${inr(totalSell)}</div>
+      <div class="per">${meta.pax>0?("Approx "+inr(perPax)+" per person × "+meta.pax+" pax"):""}</div>
+    </div>
+    <div style="font-size:12px;color:#6b7a99">* GST extra as applicable. Quotation valid for mentioned travel dates only.</div>
+  </div>
+  ${(incl||excl)?`<div class="sec-title">■ INCLUSIONS &amp; EXCLUSIONS</div>
+  <div class="body"><div class="twocol">
+    <div><div style="font-weight:800;color:#15803d;margin-bottom:8px">✔ INCLUSIONS</div><ul>${incl}</ul></div>
+    <div><div style="font-weight:800;color:#b91c1c;margin-bottom:8px">✖ EXCLUSIONS</div><ul>${excl}</ul></div>
+  </div></div>`:""}
+  <div class="sec-title">■ TERMS &amp; CONDITIONS</div>
+  <div class="body"><ol>${terms}</ol></div>
+  <div class="sec-title">■ CANCELLATION POLICY</div>
+  <div class="body"><table style="width:100%;border-collapse:collapse">
+    <tr><th style="background:#0f2350;color:#fff;padding:10px;text-align:left">Cancellation Timeline</th><th style="background:#0f2350;color:#fff;padding:10px;text-align:left">Charges Applicable</th></tr>
+    ${cancel}
+  </table></div>
+  <div class="foot">
+    <div style="font-weight:800;letter-spacing:1px">VOYAGE-ED TRAVELS</div>
+    <div style="color:#9db8f5;font-size:13px;margin-top:4px">Your Journey, Our Passion</div>
+    <div style="font-size:13px;margin-top:8px">enquiry@voyage-ed.com &nbsp;|&nbsp; www.voyage-ed.com &nbsp;|&nbsp; +91 7009659048</div>
+    <div style="font-size:11px;color:#7e94c8;margin-top:8px">Quotation Date: ${new Date().toLocaleDateString("en-GB")}</div>
+  </div>
+</div>
+</body></html>`;
+};
+
 // Currencies that get +1.50 markup; all others +0.50
 
 
@@ -507,6 +658,8 @@ export default function TravelCRM() {
   // AI call script
   const [callScript,setCallScript]=useState("");
   const [callBusy,setCallBusy]=useState(false);
+  // Quotation builder
+  const [quoteBusy,setQuoteBusy]=useState(false);
   // Live FX rates (foreign→INR, with markup)
   const [fxRates,setFxRates]=useState(()=>{ try{return JSON.parse(localStorage.getItem("ve_fx")||"null")?.rates||null;}catch{return null;} });
   const [aiItinerary,setAiItinerary]=useState("");
@@ -684,6 +837,58 @@ Be concise. If asked to do something you have no action for, explain politely in
       setBriefText(text);
     }catch(e){ setBriefText("⚠️ Brief unavailable — make sure ANTHROPIC_API_KEY is set on the server. ("+e.message+")"); }
     finally{ setBriefBusy(false); }
+  };
+
+  // ─── PROFESSIONAL QUOTATION / ITINERARY BUILDER (print-to-PDF) ────────────
+  const generateQuotation = async () => {
+    if(!deal.clientName){ window.veToast && window.veToast("Add client name first","warning"); return; }
+    setQuoteBusy(true);
+    try {
+      // 1. Gather structured data from the deal
+      const fmtDate = (d)=>{ if(!d) return ""; try{ return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }catch{return d;} };
+      const flights = (deal.flightVendors||[]).flatMap(fv=>{
+        const legs=[];
+        const sec=(s,kind)=>({kind,airline:[s.airlineCode,s.airlineName||AIRLINE_MAP[(s.airlineCode||"").toUpperCase()]||""].filter(Boolean).join(" "),
+          from:s.from,fromName:s.fromName||AIRPORT_MAP[(s.from||"").toUpperCase()]||"",to:s.to,toName:s.toName||"",
+          date:s.date,depTime:s.depTime,arrTime:s.arrTime});
+        (fv.sectors||[]).forEach(s=>{ if(s.from||s.to) legs.push(sec(s, fv.flightType==="multi-city"?"Flight":"Onward")); });
+        if(fv.flightType==="return") (fv.returnSectors||[]).forEach(s=>{ if(s.from||s.to) legs.push(sec(s,"Return")); });
+        return legs;
+      });
+      const hotels = (deal.hotelVendors||[]).filter(h=>h.hotelName||h.city).map(h=>({
+        name:h.hotelName||"Hotel", city:h.city, country:h.country, room:h.roomCategory,
+        checkIn:fmtDate(h.checkIn), checkOut:fmtDate(h.checkOut), nights:h.nights||nightsBetween(h.checkIn,h.checkOut),
+      }));
+      const totalNights = hotels.reduce((s,h)=>s+(Number(h.nights)||0),0);
+      const pax = (Number(deal.adults)||0)+(Number(deal.children)||0);
+
+      // 2. Ask AI for day-by-day + trip-specific inclusions/exclusions (JSON)
+      const aiInput = {
+        destination: deal.destination, travelDates: deal.travelDates,
+        nights: totalNights, days: totalNights+1, pax,
+        hotels: hotels.map(h=>({name:h.name,city:h.city,nights:h.nights})),
+        flights: flights.map(f=>({kind:f.kind,route:`${f.fromName||f.from} to ${f.toName||f.to}`})),
+      };
+      const system = `You are a senior itinerary writer for Voyage-Ed Travels (India). Given trip data, produce ONLY a JSON object (no markdown) with this exact shape:
+{"subtitle":"short tagline e.g. city names separated by bullets","days":[{"day":1,"date":"","title":"short title","desc":"2-3 sentence vivid description of that day's sightseeing/transfers","hotel":"hotel name for that night or empty","meals":"e.g. Breakfast + Dinner","note":"one practical tip"}],"inclusions":["...","..."],"exclusions":["...","..."]}
+Rules: Create exactly ${aiInput.days} days covering the hotels/cities given. Use real attractions for the destination. Match hotel nights to the right days. Keep descriptions premium and specific. 5-7 inclusions, 5-7 exclusions relevant to this trip.`;
+      const res = await fetch(`${API_BASE}/api/chat`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2500,system,messages:[{role:"user",content:JSON.stringify(aiInput)}]}),
+      });
+      const data = await res.json();
+      let parsed;
+      try { parsed = JSON.parse(((data.content&&data.content[0]&&data.content[0].text)||"{}").replace(/```json|```/g,"").trim()); }
+      catch { parsed = {subtitle:deal.destination,days:[],inclusions:[],exclusions:[]}; }
+
+      // 3. Build branded print-ready HTML and open in new window
+      const html = buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate});
+      const w = window.open("","_blank");
+      if(!w){ window.veToast && window.veToast("Allow popups to view the quotation","warning"); setQuoteBusy(false); return; }
+      w.document.write(html); w.document.close();
+    } catch(e){
+      window.veToast && window.veToast("Quotation failed: "+e.message,"error");
+    } finally { setQuoteBusy(false); }
   };
 
   // ─── ONE-CLICK WHATSAPP FOLLOW-UP ─────────────────────────────────────────
@@ -1945,9 +2150,13 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             {/* AI ITINERARY GENERATOR */}
             <div className="card">
               <div className="sec-head" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-                <span>✨ AI Itinerary Generator</span>
-                <button onClick={generateAIItinerary} disabled={aiBusy} className="btn btn-ind">
-                  {aiBusy?"Generating...":"✨ Generate Itinerary"}</button>
+                <span>✨ AI Itinerary &amp; Quotation</span>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={generateAIItinerary} disabled={aiBusy} className="btn btn-ind">
+                    {aiBusy?"Generating...":"✨ Quick Itinerary"}</button>
+                  <button onClick={generateQuotation} disabled={quoteBusy} className="btn btn-ind" style={{background:"linear-gradient(135deg,#4169E1,#5b7fff)"}}>
+                    {quoteBusy?"Building PDF...":"📄 Generate Quotation PDF"}</button>
+                </div>
               </div>
               <div style={{fontSize:11,color:"#6b7a99",marginBottom:10}}>
                 Reads your Flights (onward / return / multi-city), Hotels and sightseeing notes, then builds a client-ready Voyage-Ed itinerary.
