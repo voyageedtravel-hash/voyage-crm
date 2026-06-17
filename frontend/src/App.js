@@ -445,6 +445,9 @@ export default function TravelCRM() {
   const [briefBusy,setBriefBusy]=useState(false);
   // AI itinerary
   const [aiBusy,setAiBusy]=useState(false);
+  // AI call script
+  const [callScript,setCallScript]=useState("");
+  const [callBusy,setCallBusy]=useState(false);
   const [aiItinerary,setAiItinerary]=useState("");
 
   const loadUsers=async()=>{
@@ -502,6 +505,7 @@ Valid action types (use null if just answering):
 - "search_deals": payload {query} — searches deals by name/destination
 - "draft_whatsapp": payload {kind} where kind is "quote","followup","payment","confirm" — drafts a WhatsApp for the CURRENT open deal
 - "generate_itinerary": payload {} — generates AI itinerary for the CURRENT open deal
+- "call_script": payload {} — prepares an AI phone-call script for the CURRENT open deal
 - "set_stage": payload {stage} — sets the current open deal's pipeline stage
 - "goto": payload {screen} where screen is "dashboard","users"
 Current CRM data snapshot: ${JSON.stringify(aiContext())}
@@ -532,6 +536,7 @@ Be concise. If asked to do something you have no action for, explain politely in
       else if(type==="search_deals"){ setScreen("dashboard"); setDealSearch(payload.query||""); }
       else if(type==="draft_whatsapp"){ if(deal.clientName) waMessage(payload.kind||"followup"); else window.veToast&&window.veToast("Open a deal first","warning"); }
       else if(type==="generate_itinerary"){ if(deal.clientName){ setScreen("deal"); setTab("summary"); generateAIItinerary(); } else window.veToast&&window.veToast("Open a deal first","warning"); }
+      else if(type==="call_script"){ if(deal.clientName){ setScreen("deal"); setTab("client"); generateCallScript(); } else window.veToast&&window.veToast("Open a deal first","warning"); }
       else if(type==="set_stage"){ if(deal.clientName) upd("stage",payload.stage); }
       else if(type==="goto"){ setScreen(payload.screen==="users"?"users":"dashboard"); if(payload.screen==="users")loadUsers(); }
     }catch(e){ console.warn("AI action failed:",e?.message); }
@@ -636,6 +641,44 @@ Be concise. If asked to do something you have no action for, explain politely in
     const num=phone.length===10?"91"+phone:phone;
     const url=`https://wa.me/${num}?text=${encodeURIComponent(templates[kind]||templates.followup)}`;
     window.open(url,"_blank");
+  };
+
+  // ─── AI CALL SCRIPT (prep before you dial the client) ─────────────────────
+  const generateCallScript=async()=>{
+    setCallBusy(true); setCallScript("");
+    try{
+      const dv=[...deal.hotelVendors||[],...deal.flightVendors||[],...deal.landVendors||[],...deal.visaVendors||[]];
+      const sell=dv.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+      const recv=sum(deal.clientPayments||[],"amount");
+      const ctx={
+        client:deal.clientName||"the client",
+        destination:deal.destination||"their trip",
+        stage:deal.stage||"New Lead",
+        priority:deal.priority||"Normal",
+        leadSource:deal.leadSource||"unknown",
+        travelDates:deal.travelDates||"",
+        adults:deal.adults,children:deal.children,
+        quotedPrice: sell>0?sell:null,
+        amountReceived: recv>0?recv:null,
+        balance: sell-recv>0?sell-recv:null,
+        remarks:deal.remarks||"",
+      };
+      const system=`You are a top travel-sales coach for Voyage-Ed Travels (India). Prepare the owner for a phone call with this client. Output a tight, practical CALL SCRIPT in friendly Hinglish with these sections (use emoji headers):
+🎯 Goal of this call (1 line, based on the pipeline stage)
+👋 Opening line (warm, personalised)
+💬 Key talking points (3-4 bullets using the actual trip + price details)
+🛡️ Likely objections & how to answer (2-3, e.g. price, thinking about it, comparing)
+✅ Closing / next step (clear ask)
+Keep it under 200 words. Be specific with names, destination and amounts. Don't invent facts not given.`;
+      const res=await fetch(`${API_BASE}/api/chat`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:800,system,messages:[{role:"user",content:"Client data:\n"+JSON.stringify(ctx,null,1)}]}),
+      });
+      const data=await res.json();
+      const text=(data.content&&data.content[0]&&data.content[0].text)||data.error||"No response";
+      setCallScript(text);
+    }catch(e){ setCallScript("⚠️ Unavailable — ensure ANTHROPIC_API_KEY is set on the server. ("+e.message+")"); }
+    finally{ setCallBusy(false); }
   };
 
   // ─── AI ITINERARY GENERATOR ───────────────────────────────────────────────
@@ -1279,7 +1322,19 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <button onClick={()=>waMessage("followup")} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#1d4ed8"}} title="Follow up">🔔 Follow-up</button>
               <button onClick={()=>waMessage("payment")} className="btn btn-sm" style={{borderColor:"#f59e0b",color:"#b45309"}} title="Payment reminder">💰 Payment</button>
               <button onClick={()=>waMessage("confirm")} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#4169E1"}} title="Booking confirmed">🎉 Confirm</button>
+              <button onClick={()=>{const p=(deal.contactNo||"").replace(/[^0-9]/g,"");if(p)window.open("tel:+"+(p.length===10?"91"+p:p));}} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#4169E1"}} title="Call client now">📞 Call Now</button>
+              <button onClick={generateCallScript} disabled={callBusy} className="btn btn-sm" style={{borderColor:"#4169E1",color:"#4169E1"}} title="AI call prep">{callBusy?"Prepping…":"🎯 Call Prep"}</button>
             </div>
+            {callScript&&(
+              <div style={{marginTop:10,background:"#eef3fc",border:"1px solid #4169E1",borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:800,color:"#4169E1"}}>🎯 AI Call Script — {deal.clientName||"Client"}</span>
+                  <span onClick={()=>setCallScript("")} style={{fontSize:12,color:"#6b7a99",cursor:"pointer"}}>✕</span>
+                </div>
+                <div style={{fontSize:13,lineHeight:1.6,color:"#1a2c52",whiteSpace:"pre-wrap"}}>{callScript}</div>
+                <button onClick={()=>{navigator.clipboard.writeText(callScript);window.veToast&&window.veToast("Script copied!");}} className="btn btn-sm" style={{marginTop:10,borderColor:"#4169E1",color:"#4169E1"}}>📋 Copy</button>
+              </div>
+            )}
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               {[
                 {l:"Selling",v:fmtINR(totalSell),c:"#1a2c52"},
