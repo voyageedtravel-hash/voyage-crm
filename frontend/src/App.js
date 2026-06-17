@@ -18,7 +18,6 @@ window.veToast = (msg, type="success") => {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CURRENCIES = ["INR","USD","EUR","GBP","SGD","THB","MYR"];
-const CURRENCY_SYMBOLS = {INR:"₹",USD:"$",EUR:"€",GBP:"£",SGD:"S$",THB:"฿",MYR:"RM"};
 const CLIENT_MODES = ["UPI","Cash deposited by client in bank","Cash collected by Vishal","Cash collected by Sahitya","Bank Transfer","Cheque","Other"];
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
@@ -60,7 +59,6 @@ const n = (v) => Number(v)||0;
 const sum = (arr, key) => (arr || []).reduce((s, i) => s + (Number(i[key]) || 0), 0);
 const toINR = (amount,currency,rate) => currency==="INR"?n(amount):n(amount)*n(rate);
 const fmtINR = (val) => "₹"+(Math.round(n(val))).toLocaleString("en-IN");
-const fmtFC = (val,curr) => (CURRENCY_SYMBOLS[curr]||curr)+n(val).toLocaleString("en-IN",{maximumFractionDigits:2});
 const today = () => new Date().toISOString().split("T")[0];
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -258,7 +256,6 @@ function VendorInput({value, onChange, placeholder}) {
   );
 }// ─── RECEIPT COMPONENT ────────────────────────────────────────────────────────
 function Receipt({deal, payment, onClose}) {
-  const receiptRef=useRef();
   const handlePrint=()=>{
     const w=window.open("","_blank");
     w.document.write(`<html><head><title>Receipt</title><style>
@@ -889,7 +886,6 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
     // ─── SALES INTELLIGENCE (the CRM tells YOU what to do) ───────────────────
     const todayStr=new Date().toISOString().slice(0,10);
-    const activeDeals=allDeals.filter(d=>!["Booked","Cancelled","Travelled","Lost","Completed"].includes(d.status||"")&&(d.stage!=="Booked"&&d.stage!=="Lost"&&d.stage!=="Travelled"));
     // Follow-ups due/overdue
     const followUps=allDeals.filter(d=>d.followUpDate && d.followUpDate<=todayStr && (d.stage!=="Booked"&&d.stage!=="Lost"&&d.stage!=="Travelled"));
     const overdueFollowUps=followUps.filter(d=>d.followUpDate<todayStr);
@@ -1546,7 +1542,6 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <button className="btn btn-ind" onClick={addVisaV}>+ Add Visa Vendor</button>
             </div>
             {deal.visaVendors.map((vv,vi)=>{
-              const {costINR,sellINR,paidINR}=vendorINR(vv);
               const isExp=expandedVendor===vv.id;
               const needsRate=vv.currency!=="INR";
               return (
