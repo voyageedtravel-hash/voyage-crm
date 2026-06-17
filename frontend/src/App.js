@@ -855,23 +855,48 @@ Be concise. If asked to do something you have no action for, explain politely in
         if(fv.flightType==="return") (fv.returnSectors||[]).forEach(s=>{ if(s.from||s.to) legs.push(sec(s,"Return")); });
         return legs;
       });
-      const hotels = (deal.hotelVendors||[]).filter(h=>h.hotelName||h.city).map(h=>({
+      const rawHotels = (deal.hotelVendors||[]).filter(h=>h.hotelName||h.city).map(h=>({
         name:h.hotelName||"Hotel", city:h.city, country:h.country, room:h.roomCategory,
-        checkIn:fmtDate(h.checkIn), checkOut:fmtDate(h.checkOut), nights:h.nights||nightsBetween(h.checkIn,h.checkOut),
+        checkInRaw:h.checkIn, checkOutRaw:h.checkOut,
+        checkIn:fmtDate(h.checkIn), checkOut:fmtDate(h.checkOut), nights:Number(h.nights)||nightsBetween(h.checkIn,h.checkOut),
       }));
+      const hotels = rawHotels;
       const totalNights = hotels.reduce((s,h)=>s+(Number(h.nights)||0),0);
       const pax = (Number(deal.adults)||0)+(Number(deal.children)||0);
 
-      // 2. Ask AI for day-by-day + trip-specific inclusions/exclusions (JSON)
+      // ── Build a DETERMINISTIC day skeleton so days can NEVER mismatch ──
+      // Find trip start: earliest hotel check-in, or first flight date.
+      const allDates = [...rawHotels.map(h=>h.checkInRaw).filter(Boolean)];
+      let tripStart = allDates.sort()[0] || "";
+      const totalDays = totalNights>0 ? totalNights+1 : (hotels.length||1);
+      const dayMs = 86400000;
+      // Map each calendar day → which hotel the guest sleeps in that night (by date range).
+      const skeleton = [];
+      for(let i=0;i<totalDays;i++){
+        let dateStr="", iso="";
+        if(tripStart){ const d=new Date(new Date(tripStart).getTime()+i*dayMs); iso=d.toISOString().slice(0,10); dateStr=d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"}); }
+        // Hotel for THIS night: check-in <= iso < check-out
+        let stayHotel="";
+        for(const h of rawHotels){ if(h.checkInRaw && h.checkOutRaw && iso>=h.checkInRaw && iso<h.checkOutRaw){ stayHotel=h.name+(h.city?(", "+h.city):""); break; } }
+        skeleton.push({ day:i+1, date:dateStr, hotelTonight: i===totalDays-1 ? "" : stayHotel });
+      }
+
+      // Vendor raw itineraries (land vendors often paste the day-wise plan from the supplier)
+      const rawItinerary = (deal.landVendors||[]).map(l=>l.itinerary).filter(Boolean).join("\n\n").trim();
+
+      // 2. Ask AI to FILL the fixed skeleton (it must not change day count or hotels)
       const aiInput = {
-        destination: deal.destination, travelDates: deal.travelDates,
-        nights: totalNights, days: totalNights+1, pax,
-        hotels: hotels.map(h=>({name:h.name,city:h.city,nights:h.nights})),
-        flights: flights.map(f=>({kind:f.kind,route:`${f.fromName||f.from} to ${f.toName||f.to}`})),
+        destination: deal.destination, travelDates: deal.travelDates, pax,
+        daySkeleton: skeleton,   // exact days + dates + which hotel each night — AI MUST keep these
+        hotels: hotels.map(h=>({name:h.name,city:h.city,nights:h.nights,checkIn:h.checkIn,checkOut:h.checkOut})),
+        flights: flights.map(f=>({kind:f.kind,route:`${f.fromName||f.from} to ${f.toName||f.to}`,date:f.date,dep:f.depTime,arr:f.arrTime})),
+        vendorRawItinerary: rawItinerary || "(none provided — generate from destination knowledge)",
       };
-      const system = `You are a senior itinerary writer for Voyage-Ed Travels (India). Given trip data, produce ONLY a JSON object (no markdown) with this exact shape:
-{"subtitle":"short tagline e.g. city names separated by bullets","days":[{"day":1,"date":"","title":"short title","desc":"2-3 sentence vivid description of that day's sightseeing/transfers","hotel":"hotel name for that night or empty","meals":"e.g. Breakfast + Dinner","note":"one practical tip"}],"inclusions":["...","..."],"exclusions":["...","..."]}
-Rules: Create exactly ${aiInput.days} days covering the hotels/cities given. Use real attractions for the destination. Match hotel nights to the right days. Keep descriptions premium and specific. 5-7 inclusions, 5-7 exclusions relevant to this trip.`;
+      const system = `You are a senior itinerary writer for Voyage-Ed Travels (India). You are given a FIXED day skeleton (daySkeleton) with exact day numbers, dates and which hotel the guest stays each night. You MUST return exactly one entry per skeleton day, keeping the same "day", "date" and "hotel" values — DO NOT add, remove, reorder or renumber days, and DO NOT change which hotel is on which day.
+If vendorRawItinerary is provided, USE IT as the source of truth for each day's activities and any timings (pickup times, etc.) — split that raw text across the correct days. Only use your own destination knowledge to fill gaps. NEVER invent specific pickup timings that aren't in the raw itinerary; if no timing is given, omit it.
+Return ONLY a JSON object (no markdown), exact shape:
+{"subtitle":"city names separated by •","days":[{"day":1,"date":"<from skeleton>","title":"short title","desc":"2-3 vivid sentences of that day's plan","hotel":"<from skeleton hotelTonight>","meals":"e.g. Breakfast + Dinner","note":"practical tip or timing if known"}],"inclusions":["..."],"exclusions":["..."]}
+The days array length MUST equal ${skeleton.length}. Inclusions/exclusions: 5-7 each, specific to this trip (flights included?, meal plan, transfers, permits, etc.).`;
       const res = await fetch(`${API_BASE}/api/chat`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2500,system,messages:[{role:"user",content:JSON.stringify(aiInput)}]}),
@@ -880,6 +905,22 @@ Rules: Create exactly ${aiInput.days} days covering the hotels/cities given. Use
       let parsed;
       try { parsed = JSON.parse(((data.content&&data.content[0]&&data.content[0].text)||"{}").replace(/```json|```/g,"").trim()); }
       catch { parsed = {subtitle:deal.destination,days:[],inclusions:[],exclusions:[]}; }
+
+      // ── ENFORCE the skeleton: guarantee correct day count, dates and hotels ──
+      // AI fills content, but day/date/hotel come from our deterministic skeleton so they can never mismatch.
+      const aiDays = Array.isArray(parsed.days)?parsed.days:[];
+      parsed.days = skeleton.map((sk,i)=>{
+        const a = aiDays[i] || {};
+        return {
+          day: sk.day,
+          date: sk.date,                                  // always our date
+          title: a.title || "",
+          desc: a.desc || "",
+          hotel: sk.hotelTonight,                         // always our hotel for that night
+          meals: a.meals || (sk.hotelTonight?"Breakfast + Dinner":""),
+          note: a.note || "",
+        };
+      });
 
       // 3. Build branded print-ready HTML and open in new window
       const html = buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate});
