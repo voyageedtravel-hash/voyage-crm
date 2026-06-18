@@ -48,7 +48,8 @@ const CITY_COUNTRY = {
 
 
 // ─── LOOKUP HELPERS ───────────────────────────────────────────────────────────
-const AIRPORT_BY_CITY = (() => { const m={}; for(const [code,city] of Object.entries(AIRPORT_MAP)){ const k=city.toLowerCase().replace(/\s*\(.*\)/,"").trim(); if(!m[k]) m[k]=code; } return m; })();
+let _abcCache=null;
+const getAirportByCity = () => { if(!_abcCache){_abcCache={};for(const [code,city] of Object.entries(AIRPORT_MAP)){const k=city.toLowerCase().replace(/\s*\(.*\)/,"").trim();if(!_abcCache[k])_abcCache[k]=code;}} return _abcCache; };
 const lookupCountry = (city) => CITY_COUNTRY[(city||"").toLowerCase().trim()] || "";
 
 // ─── BRANDED QUOTATION HTML TEMPLATE (print-ready, matches Voyage-Ed PDF) ────
@@ -567,7 +568,7 @@ function SectorRow({sector, onChange, onRemove, showRemove, label}) {
     // If it's a known 3-letter code → fill city name
     if (AIRPORT_MAP[upper]) return { code: upper, name: AIRPORT_MAP[upper] };
     // Otherwise treat as a city name → reverse-lookup the code
-    const code = AIRPORT_BY_CITY[raw.toLowerCase()];
+    const code = getAirportByCity()[raw.toLowerCase()];
     if (code) return { code, name: AIRPORT_MAP[code] };
     return { code: upper, name: "" };
   };
@@ -1249,8 +1250,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const totalSell=hotel.sell+flight.sell+land.sell+visa.sell;
   const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
   const gpm=totalSell-totalCost;
-  const gst = deal.gstMode === "package"
-    ? totalSell * GST_RATE_PACKAGE
+  const gst = deal.gstMode === "none" ? 0
+    : deal.gstMode === "package" ? totalSell * GST_RATE_PACKAGE
     : (gpm > 0 ? gpm * GST_RATE_PROFIT : 0);
   const netProfit=gpm-gst;
   const marginPct=totalSell>0?((gpm/totalSell)*100).toFixed(1):"0.0";
@@ -1389,6 +1390,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const dealSell=(d)=>dealVendors(d).reduce((ss,v)=>ss+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
     const dealCost=(d)=>dealVendors(d).reduce((ss,v)=>ss+toINR(v.costPrice,v.currency,v.exchangeRate),0);
     const dealGst=(d)=>{
+      if(d.gstMode==="none") return 0;
       const s=dealSell(d), c=dealCost(d), g=s-c;
       return d.gstMode==="package" ? s*GST_RATE_PACKAGE : (g>0?g*GST_RATE_PROFIT:0);
     };
@@ -1668,7 +1670,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               {[
                 {l:"Selling",v:fmtINR(totalSell),c:"#1a2c52"},
                 {l:"GPM",v:fmtINR(gpm),c:gpm>=0?"#10b981":"#ef4444"},
-                {l:`GST (${deal.gstMode==="package"?"5% pkg":"18% profit"})`,v:fmtINR(gst),c:"#4169E1"},
+                {l:`GST (${deal.gstMode==="none"?"No GST":deal.gstMode==="package"?"5% pkg":"18% profit"})`,v:fmtINR(gst),c:"#4169E1"},
                 {l:"Net Profit",v:fmtINR(netProfit),c:netProfit>=0?"#f97316":"#ef4444"},
               ].map((s,i)=>(
                 <div key={i} style={{textAlign:"center",padding:"6px 12px",background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:7}}>
@@ -2238,6 +2240,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                   {[
                     {mode:"profit",label:"18% on Profit",desc:"Applicable on GPM"},
                     {mode:"package",label:"5% on Package",desc:"Applicable on Total Sell"},
+                    {mode:"none",label:"No GST",desc:"Remove GST fully"},
                   ].map(opt=>(
                     <button key={opt.mode}
                       onClick={()=>upd("gstMode",opt.mode)}
@@ -2253,7 +2256,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 </div>
                 <div className="mono" style={{fontSize:24,fontWeight:800,color:"#4169E1"}}>{fmtINR(gst)}</div>
                 <div style={{fontSize:12,color:"#4169E1",marginTop:4}}>
-                  {deal.gstMode==="package"
+                  {deal.gstMode==="none"
+                    ? "GST removed from this deal"
+                    : deal.gstMode==="package"
                     ? `5% × Selling ${fmtINR(totalSell)}`
                     : `18% × GPM ${fmtINR(gpm)}`}
                 </div>
