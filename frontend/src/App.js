@@ -323,6 +323,7 @@ const initDeal = {
   modeOfQuery:"Call", travelDates:"", destination:"",
   remarks:"",
   gstMode:"profit",
+  gstExemptSections:[],
   status:"Not Actioned",
   stage:"New Lead",
   followUpDate:"",
@@ -1250,9 +1251,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const totalSell=hotel.sell+flight.sell+land.sell+visa.sell;
   const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
   const gpm=totalSell-totalCost;
+  // Per-component GST exclusion: exempt sections' amounts are subtracted from GST base
+  const exempt = deal.gstExemptSections || [];
+  const gstSell = totalSell - (exempt.includes("flights")?flight.sell:0) - (exempt.includes("hotels")?hotel.sell:0)
+    - (exempt.includes("land")?land.sell:0) - (exempt.includes("visa")?visa.sell:0);
+  const gstCost = totalCost - (exempt.includes("flights")?flight.cost:0) - (exempt.includes("hotels")?hotel.cost:0)
+    - (exempt.includes("land")?land.cost:0) - (exempt.includes("visa")?visa.cost:0);
+  const gstGpm = gstSell - gstCost;
   const gst = deal.gstMode === "none" ? 0
-    : deal.gstMode === "package" ? totalSell * GST_RATE_PACKAGE
-    : (gpm > 0 ? gpm * GST_RATE_PROFIT : 0);
+    : deal.gstMode === "package" ? gstSell * GST_RATE_PACKAGE
+    : (gstGpm > 0 ? gstGpm * GST_RATE_PROFIT : 0);
   const netProfit=gpm-gst;
   const marginPct=totalSell>0?((gpm/totalSell)*100).toFixed(1):"0.0";
   const netMarginPct=totalSell>0?((netProfit/totalSell)*100).toFixed(1):"0.0";
@@ -2254,6 +2262,23 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                     </button>
                   ))}
                 </div>
+                {deal.gstMode!=="none"&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"10px 0 8px"}}>
+                    <span style={{fontSize:10,color:"#5a6b8c",alignSelf:"center"}}>Exempt from GST:</span>
+                    {["flights","hotels","land","visa"].map(sec=>{
+                      const isExempt = (deal.gstExemptSections||[]).includes(sec);
+                      return (
+                        <button key={sec} onClick={()=>{
+                          const cur = deal.gstExemptSections||[];
+                          upd("gstExemptSections", isExempt ? cur.filter(s=>s!==sec) : [...cur,sec]);
+                        }} style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",border:"1px solid",fontWeight:600,
+                          background:isExempt?"#fdeaea":"transparent",borderColor:isExempt?"#dc2626":"#c2d2ee",color:isExempt?"#b91c1c":"#6b7a99"}}>
+                          {isExempt?"✖":"✔"} {sec.charAt(0).toUpperCase()+sec.slice(1)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="mono" style={{fontSize:24,fontWeight:800,color:"#4169E1"}}>{fmtINR(gst)}</div>
                 <div style={{fontSize:12,color:"#4169E1",marginTop:4}}>
                   {deal.gstMode==="none"
