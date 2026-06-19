@@ -1283,6 +1283,124 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     return <Login onLogin={() => setIsLoggedIn(true)} />;
   }
 // ── USERS SCREEN (admin only) ─────────────────────────────────────────────
+  // ─── 📊 REPORTS SCREEN (repeat customers, vendor performance, monthly P&L) ──
+  if(screen==="reports"){
+    const allD = loadAllDeals();
+    const dvAll = (d)=>[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+    const dSell = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const dCost = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+    const isBooked = (d)=>(d.status||d.stage)==="Booked";
+    const inr = (x)=>"₹"+Math.round(x).toLocaleString("en-IN");
+
+    // ── 1. REPEAT CUSTOMERS: group by phone (fallback name) ──
+    const byCust = {};
+    allD.forEach(d=>{
+      const key = (d.contactNo||"").replace(/[^0-9]/g,"").slice(-10) || (d.clientName||"").toLowerCase().trim();
+      if(!key) return;
+      if(!byCust[key]) byCust[key]={name:d.clientName,phone:d.contactNo,deals:[]};
+      byCust[key].deals.push(d);
+    });
+    const repeats = Object.values(byCust).filter(c=>c.deals.length>1)
+      .map(c=>({...c, total:c.deals.reduce((s,d)=>s+dSell(d),0), booked:c.deals.filter(isBooked).length}))
+      .sort((a,b)=>b.deals.length-a.deals.length);
+
+    // ── 2. VENDOR PERFORMANCE: aggregate by vendor name ──
+    const byVendor = {};
+    allD.forEach(d=>dvAll(d).forEach(v=>{
+      const name=(v.name||"").trim(); if(!name) return;
+      if(!byVendor[name]) byVendor[name]={name,deals:0,sell:0,cost:0,profit:0};
+      const s=toINR(v.sellingPrice,v.currency,v.exchangeRate), c=toINR(v.costPrice,v.currency,v.exchangeRate);
+      byVendor[name].deals++; byVendor[name].sell+=s; byVendor[name].cost+=c; byVendor[name].profit+=(s-c);
+    }));
+    const vendors = Object.values(byVendor).sort((a,b)=>b.profit-a.profit);
+
+    // ── 3. MONTHLY P&L: bucket booked deals by month ──
+    const byMonth = {};
+    allD.filter(isBooked).forEach(d=>{
+      const dt = d.bookedDate||d.createdAt||d.travelDate||"";
+      const mon = dt ? new Date(dt).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "Undated";
+      if(!byMonth[mon]) byMonth[mon]={mon,deals:0,sell:0,cost:0,profit:0};
+      const s=dSell(d), c=dCost(d);
+      byMonth[mon].deals++; byMonth[mon].sell+=s; byMonth[mon].cost+=c; byMonth[mon].profit+=(s-c);
+    });
+    const months = Object.values(byMonth);
+
+    const card = {background:"#fff",border:"1px solid #d4e0f5",borderRadius:12,padding:"18px 20px",marginBottom:18};
+    const th = {textAlign:"left",padding:"8px 10px",fontSize:11,letterSpacing:.5,color:"#5a6b8c",borderBottom:"2px solid #d4e0f5"};
+    const td = {padding:"9px 10px",fontSize:13,color:"#1a2c52",borderBottom:"1px solid #eef3fc"};
+
+    return (
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Segoe UI',sans-serif"}}>
+        <style>{dashStyles}</style>
+        <div style={{background:"#fff",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+          <div>
+            <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:4}}>VOYAGE-ED CRM · REPORTS</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#0f2350"}}>📊 Business Reports</div>
+          </div>
+          <button onClick={()=>setScreen("dashboard")} className="btn btn-sm">← Dashboard</button>
+        </div>
+        <div style={{maxWidth:1000,margin:"0 auto",padding:"24px 20px"}}>
+
+          {/* REPEAT CUSTOMERS */}
+          <div style={card}>
+            <div style={{fontSize:16,fontWeight:800,color:"#4169E1",marginBottom:4}}>🔁 Repeat Customers</div>
+            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Clients who came back more than once — your most loyal, easiest to upsell.</div>
+            {repeats.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No repeat customers yet.</div> :
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr><th style={th}>CLIENT</th><th style={th}>PHONE</th><th style={th}>TRIPS</th><th style={th}>BOOKED</th><th style={th}>TOTAL VALUE</th></tr></thead>
+              <tbody>{repeats.map((c,i)=>(
+                <tr key={i}><td style={{...td,fontWeight:700}}>{c.name||"—"}</td><td style={td}>{c.phone||"—"}</td>
+                  <td style={td}><span style={{background:"#e8efff",color:"#4169E1",padding:"2px 8px",borderRadius:10,fontWeight:700}}>{c.deals.length}×</span></td>
+                  <td style={td}>{c.booked}</td><td style={{...td,fontWeight:700}}>{inr(c.total)}</td></tr>
+              ))}</tbody>
+            </table></div>}
+          </div>
+
+          {/* VENDOR PERFORMANCE */}
+          <div style={card}>
+            <div style={{fontSize:16,fontWeight:800,color:"#4169E1",marginBottom:4}}>🤝 Vendor Performance</div>
+            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Which vendors you use most and which give the best margin.</div>
+            {vendors.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No vendor data yet.</div> :
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr><th style={th}>VENDOR</th><th style={th}>TIMES USED</th><th style={th}>TOTAL COST</th><th style={th}>TOTAL SELL</th><th style={th}>PROFIT</th></tr></thead>
+              <tbody>{vendors.map((v,i)=>(
+                <tr key={i}><td style={{...td,fontWeight:700}}>{v.name}</td><td style={td}>{v.deals}</td>
+                  <td style={td}>{inr(v.cost)}</td><td style={td}>{inr(v.sell)}</td>
+                  <td style={{...td,fontWeight:700,color:v.profit>=0?"#15803d":"#b91c1c"}}>{inr(v.profit)}</td></tr>
+              ))}</tbody>
+            </table></div>}
+          </div>
+
+          {/* MONTHLY P&L */}
+          <div style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:4}}>
+              <div style={{fontSize:16,fontWeight:800,color:"#4169E1"}}>💹 Monthly Profit & Loss</div>
+              <button onClick={()=>window.print()} className="btn btn-sm">🖨 Print / Save PDF</button>
+            </div>
+            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Booked deals grouped by month — your real earnings.</div>
+            {months.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No booked deals yet.</div> :
+            <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr><th style={th}>MONTH</th><th style={th}>BOOKINGS</th><th style={th}>REVENUE</th><th style={th}>COST</th><th style={th}>GROSS PROFIT</th></tr></thead>
+              <tbody>{months.map((m,i)=>(
+                <tr key={i}><td style={{...td,fontWeight:700}}>{m.mon}</td><td style={td}>{m.deals}</td>
+                  <td style={td}>{inr(m.sell)}</td><td style={td}>{inr(m.cost)}</td>
+                  <td style={{...td,fontWeight:700,color:m.profit>=0?"#15803d":"#b91c1c"}}>{inr(m.profit)}</td></tr>
+              ))}</tbody>
+              <tfoot><tr style={{background:"#f4f7fc"}}>
+                <td style={{...td,fontWeight:800}}>TOTAL</td>
+                <td style={{...td,fontWeight:800}}>{months.reduce((s,m)=>s+m.deals,0)}</td>
+                <td style={{...td,fontWeight:800}}>{inr(months.reduce((s,m)=>s+m.sell,0))}</td>
+                <td style={{...td,fontWeight:800}}>{inr(months.reduce((s,m)=>s+m.cost,0))}</td>
+                <td style={{...td,fontWeight:800,color:"#15803d"}}>{inr(months.reduce((s,m)=>s+m.profit,0))}</td>
+              </tr></tfoot>
+            </table></div>}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
   if(screen==="users"){
     if(!isAdmin){
       return (
@@ -1435,6 +1553,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           <div className="hdr-actions" style={{display:"flex",gap:10,alignItems:"center"}}>
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
             <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
+            <button onClick={()=>setScreen("reports")} className="btn btn-sm">📊 Reports</button>
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
             <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
           </div>
