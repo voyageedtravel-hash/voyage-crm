@@ -3,9 +3,61 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 
+// ─── JWT secret: must be set in env. Warn loudly if using insecure default. ───
+const JWT_SECRET = process.env.JWT_SECRET || "VE_SECRET_CHANGE_THIS";
+if (JWT_SECRET === "VE_SECRET_CHANGE_THIS") {
+  console.warn("⚠️  SECURITY: JWT_SECRET env var is not set — using insecure default. Set JWT_SECRET on Render before going to production!");
+}
+
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+
+// ─── CORS: restrict to our own domains (was wide-open before) ───
+const ALLOWED_ORIGINS = [
+  "https://voyage-ed.com",
+  "https://www.voyage-ed.com",
+  "https://voyageedtravel-hash.netlify.app",
+  "https://remarkable-horse-c2fed5.netlify.app", // CRM frontend
+];
+app.use(cors({
+  origin: function (origin, cb) {
+    // allow same-origin / server-to-server (no origin header) and whitelisted browsers
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: "1mb" }));  // was 10mb — booking payloads don't need that; blocks abuse
+
+// ─── Basic security headers ───
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
+// ─── Simple in-memory rate limiter (per IP) for public endpoints ───
+function makeRateLimiter(maxPerMin) {
+  const store = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of store) { if (now > v.resetAt) store.delete(k); }
+  }, 5 * 60 * 1000).unref();
+  return function (req, res, next) {
+    const ip = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?")
+      .toString().split(",")[0].trim();
+    const now = Date.now();
+    let rec = store.get(ip);
+    if (!rec || now > rec.resetAt) rec = { count: 0, resetAt: now + 60000 };
+    rec.count++; store.set(ip, rec);
+    if (rec.count > maxPerMin) {
+      res.setHeader("Retry-After", Math.ceil((rec.resetAt - now) / 1000));
+      return res.status(429).json({ error: "Too many requests. Please wait a moment." });
+    }
+    next();
+  };
+}
+const publicLimiter = makeRateLimiter(10);  // 10 lead/chat submits per IP per minute
 
 const authRoutes = require("./routes/auth");
 
@@ -14,7 +66,7 @@ const authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token provided" });
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "VE_SECRET_CHANGE_THIS");
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
@@ -54,7 +106,7 @@ const start = async () => {
     }
 
     // ─── PUBLIC LEAD CAPTURE (Website AI Chat — no auth) ─────────────────────
-    app.post("/api/public/lead", async (req, res) => {
+    app.post("/api/public/lead", publicLimiter, async (req, res) => {
       try {
         const { name, phone, source, page } = req.body || {};
         if (!name || !phone) return res.status(400).json({ error: "name and phone required" });
@@ -148,7 +200,7 @@ const start = async () => {
     const ChatLog = require("./models/ChatLog");
 
     // Save chat log (public - no auth needed for website)
-    app.post("/api/chatlogs", async (req, res) => {
+    app.post("/api/chatlogs", publicLimiter, async (req, res) => {
       try {
         const log = new ChatLog(req.body);
         await log.save();
@@ -281,7 +333,7 @@ const start = async () => {
     });
 
     // ─── AI CHAT PROXY ────────────────────────────────────────────────────────
-    app.post("/api/chat", async (req, res) => {
+    app.post("/api/chat", publicLimiter, async (req, res) => {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
       try {
@@ -310,7 +362,7 @@ const start = async () => {
     app.use("/api/auth", authRoutes);
 
     // ─── PUBLIC WEBHOOK — Website AI → CRM auto-create ──────────────────────
-    app.post("/api/leads/webhook", async (req, res) => {
+    app.post("/api/leads/webhook", publicLimiter, async (req, res) => {
       try {
         const { clientName, contactNo, destination, email, source, remarks } = req.body;
         if (!clientName && !contactNo) return res.status(400).json({ error: "Name or contact required" });
