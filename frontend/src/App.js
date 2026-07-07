@@ -1732,6 +1732,45 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const showH=propFlights!=="only";
     const sell=propSell();
     const totalPax=(Number(deal.adults)||0)+(Number(deal.children)||0);
+    const allDayLines=(deal.landVendors||[]).filter(l=>l.itinerary).map(l=>l.itinerary.split(/\n+/).filter(x=>x.trim())).reduce((a,b)=>a.concat(b),[]);
+    const dayIcon=(t)=>{const s=(t||"").toLowerCase();
+      if(/beach|island|boat|snorkel|cruise|speed/.test(s))return"🏖️";
+      if(/temple|pagoda|heritage|fort|palace|museum|ancient/.test(s))return"🛕";
+      if(/cable|hill|mountain|trek|peak/.test(s))return"🚡";
+      if(/safari|wildlife|zoo|national park/.test(s))return"🦁";
+      if(/arrival|airport pickup|check-in|welcome/.test(s))return"🛬";
+      if(/departure|check-out|drop/.test(s))return"🛫";
+      if(/shopping|market|city tour|downtown/.test(s))return"🏙️";
+      if(/leisure|relax|free day|own/.test(s))return"🌴";
+      return"📍";};
+    const statsRibbon=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px">
+      ${nightsTotal?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${nightsTotal}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">NIGHTS</div></div>`:""}
+      ${showH&&hotels.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${hotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${hotels.length>1?"S":""}</div></div>`:""}
+      ${showF&&flights.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${flights.reduce((s,f)=>s+((f.sectors||[]).filter(x=>x.from||x.to).length)+((f.returnSectors||[]).filter(x=>x.from||x.to).length),0)}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">FLIGHT SECTORS</div></div>`:""}
+      ${allDayLines.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${allDayLines.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">CURATED DAYS</div></div>`:""}
+      <div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${totalPax||"–"}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">TRAVELLER${totalPax>1?"S":""}</div></div>
+    </div>`;
+    const hlItems=[];
+    if(showF&&flights.length)hlItems.push("✈️ Flights handpicked for the best timings & baggage");
+    if(showH&&hotels.length)hlItems.push(`🏨 ${hotels.length} premium stay${hotels.length>1?"s":""} with breakfast included`);
+    if(allDayLines.length)hlItems.push(`🗺️ ${allDayLines.length}-day fully curated experience — zero planning stress`);
+    hlItems.push("🤝 Dedicated Voyage-Ed trip manager on WhatsApp, before & during your trip");
+    const highlightsHTML=`<div style="background:linear-gradient(135deg,#fdf9ee,#fff);border-left:4px solid #c9961a;border-radius:0 14px 14px 0;padding:16px 20px;margin:0 0 18px">
+      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">WHY YOU'LL LOVE THIS TRIP</div>
+      <div style="font-size:12.5px;line-height:2.1;color:#33415e">${hlItems.join("<br>")}</div>
+    </div>`;
+    const timelineHTML=allDayLines.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 16px;margin-bottom:16px">
+      ${allDayLines.map((d,i)=>`<div style="text-align:center;min-width:50px"><div style="font-size:19px">${dayIcon(d)}</div><div style="font-size:8.5px;color:#7d8bab;font-weight:800;letter-spacing:.5px">DAY ${i+1}</div></div>`).join(`<div style="color:#c9961a;font-weight:800">›</div>`)}
+    </div>`:"";
+    const totRec=sum(deal.clientPayments||[],"amount");
+    const payBlock=(propShowPrice&&sell>0&&totRec>0)?`<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-top:16px">
+      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT SUMMARY</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
+        <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${totRec.toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED — thank you! 🙏</div></div>
+        <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0,sell-totRec).toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
+      </div>
+    </div>`:"";
+    const qrURL="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data="+encodeURIComponent("https://wa.me/917009659048?text="+encodeURIComponent("Hi! I would like to confirm my "+(deal.destination||"trip")+" proposal (Ref: "+ref+")"));
 
     const sectorRow=(s)=>`
       <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px dashed #d8e2f3">
@@ -1775,7 +1814,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       return days.map((d,i)=>`
         <div style="display:flex;gap:14px;margin-bottom:12px">
           <div style="min-width:54px;height:54px;background:linear-gradient(135deg,#c9961a,#f0c842);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800"><div style="font-size:9px">DAY</div><div style="font-size:19px">${i+1}</div></div>
-          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${esc(d)}</div>
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e"><span style="margin-right:7px">${dayIcon(d)}</span>${esc(d)}</div>
         </div>`).join("");
     }).join("") : "";
 
@@ -1813,25 +1852,39 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         👥 <b>${deal.rooms||1} room${Number(deal.rooms)===1?"":"s"}, ${pax}</b>
       </div>
     </div>
-    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">Specially prepared for <b>${esc(deal.clientName)||"You"}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> · 📞 +91 70096 59048</div>
+    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">${deal.clientName?`Get ready, <b style="color:#f0c842">${esc(deal.clientName.split(" ")[0])}</b> — an unforgettable journey awaits ✨ &nbsp;·&nbsp; `:""}Specially prepared for <b>${esc(deal.clientName)||"You"}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> · 📞 +91 70096 59048</div>
   </div>
 
   <!-- BODY -->
   <div class="pagebreak" style="padding:34px 36px">
+    ${statsRibbon}
     ${priceBlock}
+    ${highlightsHTML}
     ${showF?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}`:""}
     ${showH&&hotels.length?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
-    ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${landBlocks}`:""}
+    ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}`:""}
 
-    <h2 style="font-size:18px;color:#0d1b3e;margin:22px 0 10px">What's Included</h2>
-    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:12.5px;line-height:2;color:#33415e">
-      ${showF?"✅ Flights as mentioned above<br>":""}${showH&&hotels.length?"✅ Hotel stays with breakfast<br>✅ All transfers & sightseeing as per itinerary<br>":""}✅ Dedicated trip manager on WhatsApp<br>✅ All taxes included — no hidden charges
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
+      <div style="flex:1;min-width:250px">
+        <h2 style="font-size:16px;color:#15803d;margin:0 0 8px">✅ What's Included</h2>
+        <div style="background:#fff;border:1px solid #d3ecd9;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
+          ${showF?"✅ Flights as mentioned above<br>":""}${showH&&hotels.length?"✅ Hotel stays with breakfast<br>✅ All transfers & sightseeing as per itinerary<br>":""}✅ Dedicated trip manager on WhatsApp<br>✅ All taxes included — no hidden charges
+        </div>
+      </div>
+      <div style="flex:1;min-width:250px">
+        <h2 style="font-size:16px;color:#b4540a;margin:0 0 8px">ℹ️ Not Included</h2>
+        <div style="background:#fff;border:1px solid #f3e3cf;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
+          ✖ Meals other than specified<br>✖ Visa fees (unless mentioned)<br>✖ Travel insurance & personal expenses<br>✖ Anything not mentioned in inclusions
+        </div>
+      </div>
     </div>
     <div style="font-size:10px;color:#8a97b5;margin-top:14px;line-height:1.7">This itinerary is a preliminary proposal. All services & prices are subject to availability and currency fluctuation at the time of booking. A deposit constitutes acceptance of our Terms & Conditions.</div>
 
+    ${payBlock}
     <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;display:flex;align-items:center;gap:16px;color:#fff;flex-wrap:wrap">
       <div style="background:#fff;border-radius:10px;padding:6px 12px"><img src="https://voyage-ed.com/logo.png" style="height:34px;display:block"/></div>
       <div style="flex:1;font-size:12px;line-height:1.8"><b style="color:#f0c842">Ready to make it happen?</b><br>📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com<br>GMADA Aerocity, Mohali · Learn · Travel · Explore</div>
+      <div style="text-align:center"><img src="${qrURL}" style="height:76px;width:76px;border-radius:8px;background:#fff;padding:4px;display:block"/><div style="font-size:8.5px;opacity:.85;margin-top:4px">Scan to confirm<br>on WhatsApp</div></div>
     </div>
   </div>
 </div>
