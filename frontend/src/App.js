@@ -634,6 +634,10 @@ export default function TravelCRM() {
   const [tab,setTab]=useState("client");
   const [expandedVendor,setExpandedVendor]=useState(null);
   const [receiptPayment,setReceiptPayment]=useState(null);
+  const [proposalOpen,setProposalOpen]=useState(false);
+  const [propFlights,setPropFlights]=useState("with");   // with | without | only
+  const [propShowPrice,setPropShowPrice]=useState(true);
+  const [propCoverUrl,setPropCoverUrl]=useState("");
   const [saveStatus,setSaveStatus]=useState("");
   const [apiLoading,setApiLoading]=useState(false);
   // User management
@@ -1467,6 +1471,176 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   }
 
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
+
+  // ─── PROPOSAL GENERATOR (client-facing itinerary PDF + WhatsApp) ─────────────
+  const PROP_COVERS = {
+    kashmir:"https://images.unsplash.com/photo-1595815771614-ade9d652a65d?w=1400&q=85",
+    switzerland:"https://images.unsplash.com/photo-1512273222628-4daea6e55abb?w=1400&q=85",
+    egypt:"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
+    seychelles:"https://images.unsplash.com/photo-1553829176-61484f865ac3?w=1400&q=85",
+    "victoria falls":"https://images.unsplash.com/photo-1627347456206-d3df7d8484b0?w=1400&q=85",
+  };
+  function propCover(){
+    if(propCoverUrl.trim()) return propCoverUrl.trim();
+    const dest=(deal.destination||"").toLowerCase();
+    for(const k in PROP_COVERS){ if(dest.indexOf(k)>=0) return PROP_COVERS[k]; }
+    return ""; // gradient fallback — never a wrong photo
+  }
+  function propSell(){
+    let vend=[];
+    if(propFlights==="only") vend=[...(deal.flightVendors||[])];
+    else if(propFlights==="without") vend=[...(deal.hotelVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
+    else vend=[...(deal.hotelVendors||[]),...(deal.flightVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
+    return vend.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+  }
+  function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function fmtD(d){ if(!d) return ""; try{return new Date(d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});}catch(e){return d;} }
+  function buildProposalHTML(){
+    const cover=propCover();
+    const pax=`${deal.adults||0} Adults${Number(deal.children)>0?`, ${deal.children} Children`:""}${Number(deal.infants)>0?`, ${deal.infants} Infants`:""}`;
+    const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
+    const nightsTotal=hotels.reduce((s,h)=>s+(Number(h.nights)||0),0);
+    const flights=(deal.flightVendors||[]).filter(f=>(f.sectors||[]).some(s=>s.from||s.to));
+    const ref=deal.dealNumber||("VE"+String(Date.now()).slice(-6));
+    const showF=propFlights!=="without" && flights.length>0;
+    const showH=propFlights!=="only";
+    const sell=propSell();
+    const totalPax=(Number(deal.adults)||0)+(Number(deal.children)||0);
+
+    const sectorRow=(s)=>`
+      <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px dashed #d8e2f3">
+        <div style="min-width:52px;text-align:center">
+          <div style="font-size:11px;font-weight:800;color:#c9961a;letter-spacing:1px">${esc(s.airlineCode)||"✈"}</div>
+          <div style="font-size:9px;color:#7d8bab">${esc(s.airlineName)}</div>
+        </div>
+        <div style="flex:1;display:flex;align-items:center;gap:10px">
+          <div><div style="font-size:17px;font-weight:800;color:#0d1b3e">${esc(s.from)}</div><div style="font-size:9px;color:#7d8bab">${esc(s.fromName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${esc(s.depTime)}</div></div>
+          <div style="flex:1;text-align:center;color:#c9961a;font-size:11px">──────✈──────<div style="font-size:9px;color:#7d8bab">${fmtD(s.date)}</div></div>
+          <div style="text-align:right"><div style="font-size:17px;font-weight:800;color:#0d1b3e">${esc(s.to)}</div><div style="font-size:9px;color:#7d8bab">${esc(s.toName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${esc(s.arrTime)}</div></div>
+        </div>
+      </div>`;
+
+    const flightBlocks = showF ? flights.map(f=>`
+      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;overflow:hidden;margin-bottom:16px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+        <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;padding:10px 18px;font-size:12px;font-weight:700;letter-spacing:1px">✈️ FLIGHT · ${f.flightType==="round-trip"?"ROUND TRIP":f.flightType==="multi-city"?"MULTI-CITY":"ONE WAY"}</div>
+        ${(f.sectors||[]).filter(s=>s.from||s.to).map(sectorRow).join("")}
+        ${(f.flightType==="round-trip"?(f.returnSectors||[]):[]).filter(s=>s.from||s.to).map(s=>`<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>`+sectorRow(s)).join("")}
+      </div>`).join("") : "";
+
+    const hotelBlocks = showH ? hotels.map(h=>`
+      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${esc((h.city||"").toUpperCase())}${h.country?" · "+esc(h.country.toUpperCase()):""}</div>
+            <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${esc(h.hotelName)||"Hotel"}</div>
+            <div style="font-size:12px;color:#5a6b8c">${esc(h.roomCategory)} · Breakfast included</div>
+          </div>
+          <div style="text-align:right">
+            <div style="background:#f0f5fd;border-radius:10px;padding:8px 14px;font-size:11px;color:#334e82">
+              <b>${h.nights||"?"} night${Number(h.nights)===1?"":"s"}</b><br>
+              ${h.checkIn?"In: "+fmtD(h.checkIn):""}<br>${h.checkOut?"Out: "+fmtD(h.checkOut):""}
+            </div>
+          </div>
+        </div>
+      </div>`).join("") : "";
+
+    const landBlocks = showH ? (deal.landVendors||[]).filter(l=>l.itinerary).map(l=>{
+      const days=l.itinerary.split(/\n+/).filter(x=>x.trim());
+      return days.map((d,i)=>`
+        <div style="display:flex;gap:14px;margin-bottom:12px">
+          <div style="min-width:54px;height:54px;background:linear-gradient(135deg,#c9961a,#f0c842);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800"><div style="font-size:9px">DAY</div><div style="font-size:19px">${i+1}</div></div>
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${esc(d)}</div>
+        </div>`).join("");
+    }).join("") : "";
+
+    const priceBlock = propShowPrice && sell>0 ? `
+      <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:18px;padding:26px 28px;color:#fff;margin:8px 0 18px">
+        <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">TOTAL PACKAGE PRICE</div>
+        <div style="font-size:34px;font-weight:800">₹${sell.toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
+        ${totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">≈ ₹${Math.round(sell/totalPax).toLocaleString("en-IN")} per person · ${pax}</div>`:""}
+        <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation.</div>
+      </div>` : `
+      <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
+        <div style="font-size:13px;color:#8a6d1a;font-weight:700">💬 Best price guaranteed — contact us for your personalised quote</div>
+      </div>`;
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${esc(deal.destination)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',sans-serif;background:#eef2f9;color:#1a2c52}
+.page{max-width:820px;margin:0 auto;background:#f7fafd}
+h1,h2,.serif{font-family:'Playfair Display',serif}
+@media print{ body{background:#fff} .noprint{display:none} .pagebreak{page-break-before:always} }
+</style></head><body>
+<div class="page">
+  <!-- COVER -->
+  <div style="position:relative;height:96vh;min-height:640px;${cover?`background:url('${cover}') center/cover no-repeat;`:"background:linear-gradient(155deg,#0a1530,#13265c 55%,#1a3572);"}display:flex;flex-direction:column;justify-content:flex-end">
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,21,48,.25),rgba(10,21,48,${cover?".78":".15"}) 75%)"></div>
+    <div style="position:absolute;top:26px;left:28px;background:#fff;border-radius:12px;padding:8px 16px"><img src="https://voyage-ed.com/logo.png" style="height:42px;display:block" alt="Voyage-Ed Travels"/></div>
+    ${!cover?`<div style="position:absolute;top:40%;left:0;right:0;text-align:center;color:#f0c842;font-size:60px">✈️</div>`:""}
+    <div style="position:relative;padding:34px 40px 40px;color:#fff">
+      <h1 style="font-size:52px;line-height:1.05;margin-bottom:8px">Trip to ${esc(deal.destination)||"Your Dream Destination"}</h1>
+      <div style="font-size:13px;opacity:.85;margin-bottom:16px">Reference: <b>${ref}</b></div>
+      <div style="border-top:2px solid rgba(255,255,255,.5);padding-top:16px;font-size:14px;line-height:2">
+        📍 <b>${esc(deal.destination)}</b>${nightsTotal?` — ${nightsTotal} nights / ${nightsTotal+1} days`:""}<br>
+        📅 <b>${esc(deal.travelDates)||"Dates to be confirmed"}</b><br>
+        👥 <b>${deal.rooms||1} room${Number(deal.rooms)===1?"":"s"}, ${pax}</b>
+      </div>
+    </div>
+    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">Specially prepared for <b>${esc(deal.clientName)||"You"}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> · 📞 +91 70096 59048</div>
+  </div>
+
+  <!-- BODY -->
+  <div class="pagebreak" style="padding:34px 36px">
+    ${priceBlock}
+    ${showF?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}`:""}
+    ${showH&&hotels.length?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
+    ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${landBlocks}`:""}
+
+    <h2 style="font-size:18px;color:#0d1b3e;margin:22px 0 10px">What's Included</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:12.5px;line-height:2;color:#33415e">
+      ${showF?"✅ Flights as mentioned above<br>":""}${showH&&hotels.length?"✅ Hotel stays with breakfast<br>✅ All transfers & sightseeing as per itinerary<br>":""}✅ Dedicated trip manager on WhatsApp<br>✅ All taxes included — no hidden charges
+    </div>
+    <div style="font-size:10px;color:#8a97b5;margin-top:14px;line-height:1.7">This itinerary is a preliminary proposal. All services & prices are subject to availability and currency fluctuation at the time of booking. A deposit constitutes acceptance of our Terms & Conditions.</div>
+
+    <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;display:flex;align-items:center;gap:16px;color:#fff;flex-wrap:wrap">
+      <div style="background:#fff;border-radius:10px;padding:6px 12px"><img src="https://voyage-ed.com/logo.png" style="height:34px;display:block"/></div>
+      <div style="flex:1;font-size:12px;line-height:1.8"><b style="color:#f0c842">Ready to make it happen?</b><br>📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com<br>GMADA Aerocity, Mohali · Learn · Travel · Explore</div>
+    </div>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+  }
+  function openProposal(){
+    const w=window.open("","_blank");
+    if(!w){window.veToast("Popup blocked — allow popups","error");return;}
+    w.document.write(buildProposalHTML());
+    w.document.close();
+  }
+  function waProposal(){
+    const ph=(deal.contactNo||"").replace(/[^0-9]/g,"");
+    if(!ph){window.veToast("Client phone number missing","error");return;}
+    const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
+    const flights=(deal.flightVendors||[]).filter(f=>(f.sectors||[]).some(s=>s.from||s.to));
+    const sell=propSell();
+    let m="✈️ *VOYAGE-ED TRAVELS — Trip Proposal*\n\n";
+    m+="Hi "+((deal.clientName||"").split(" ")[0]||"")+"! Here is your personalised plan 🌍\n\n";
+    m+="📍 *"+(deal.destination||"")+"*\n📅 "+(deal.travelDates||"Dates TBC")+"\n👥 "+(deal.adults||0)+" Adults"+(Number(deal.children)>0?", "+deal.children+" Children":"")+"\n";
+    if(propFlights!=="without"&&flights.length){
+      m+="\n*✈️ Flights:*\n";
+      flights.forEach(f=>(f.sectors||[]).forEach(s=>{ if(s.from||s.to) m+="• "+(s.airlineName||s.airlineCode||"Flight")+" — "+s.from+" → "+s.to+(s.date?" ("+s.date+")":"")+"\n"; }));
+    }
+    if(propFlights!=="only"&&hotels.length){
+      m+="\n*🏨 Stays:*\n";
+      hotels.forEach(h=>{ m+="• "+(h.city?h.city+": ":"")+(h.hotelName||"Hotel")+" — "+(h.nights||"?")+"N, "+(h.roomCategory||"")+"\n"; });
+    }
+    if(propShowPrice&&sell>0) m+="\n💰 *Total: ₹"+sell.toLocaleString("en-IN")+"/-* (all inclusive)\n";
+    else m+="\n💬 Reply for your best personalised price!\n";
+    m+="\n📄 Detailed PDF proposal attached separately.\n\n— Team Voyage-Ed 🌟\n📞 +91 70096 59048 · voyage-ed.com";
+    window.open("https://wa.me/91"+ph+"?text="+encodeURIComponent(m),"_blank");
+  }
+
   if(screen==="dashboard"){
     // Date-range filter (defaults to all-time if blank)
     const inRange=(d)=>{
@@ -1752,6 +1926,38 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
       {receiptPayment&&<Receipt deal={deal} payment={receiptPayment} onClose={()=>setReceiptPayment(null)} />}
 
+      {proposalOpen&&(
+        <div onClick={()=>setProposalOpen(false)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,padding:"26px 26px 22px",width:"100%",maxWidth:460,boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
+            <div style={{fontSize:10,letterSpacing:2,color:"#f97316",fontWeight:800,marginBottom:4}}>CLIENT PROPOSAL</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#0f2350",marginBottom:16}}>📄 Generate Proposal</div>
+
+            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>WHAT TO INCLUDE</div>
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              {[["with","✈️+🏨 Full package"],["without","🏨 Without flights"],["only","✈️ Flights only"]].map(function(o){
+                var act=propFlights===o[0];
+                return <button key={o[0]} onClick={()=>setPropFlights(o[0])} style={{flex:"1 1 120px",background:act?"#0d1b3e":"#f4f7fc",color:act?"#fff":"#334e82",border:"1px solid "+(act?"#0d1b3e":"#d4e0f5"),borderRadius:10,padding:"10px 8px",cursor:"pointer",fontSize:12,fontWeight:700}}>{o[1]}</button>;
+              })}
+            </div>
+
+            <label style={{display:"flex",alignItems:"center",gap:10,background:"#f4f7fc",border:"1px solid #d4e0f5",borderRadius:10,padding:"11px 14px",cursor:"pointer",marginBottom:12}}>
+              <input type="checkbox" checked={propShowPrice} onChange={e=>setPropShowPrice(e.target.checked)} style={{width:17,height:17,accentColor:"#c9961a"}}/>
+              <span style={{fontSize:13,fontWeight:600,color:"#1a2c52"}}>Show selling price {propShowPrice&&propSell()>0&&<b style={{color:"#15803d"}}>(₹{propSell().toLocaleString("en-IN")})</b>}</span>
+            </label>
+
+            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>COVER PHOTO URL <span style={{fontWeight:400}}>(optional — paste any image link)</span></div>
+            <input value={propCoverUrl} onChange={e=>setPropCoverUrl(e.target.value)} placeholder="https://... (blank = auto/premium cover)"
+              style={{width:"100%",background:"#f4f7fc",border:"1px solid #d4e0f5",borderRadius:10,padding:"10px 13px",fontSize:12,outline:"none",marginBottom:18}}/>
+
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={openProposal} style={{flex:1,background:"linear-gradient(135deg,#0d1b3e,#1a3060)",color:"#fff",border:"none",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800}}>🖨 Preview / PDF</button>
+              <button onClick={waProposal} style={{flex:1,background:"#25d366",color:"#fff",border:"none",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800}}>💬 Send WhatsApp</button>
+            </div>
+            <div style={{fontSize:10,color:"#8a97b5",marginTop:10,textAlign:"center"}}>PDF: browser print dialog se "Save as PDF" karo, phir WhatsApp pe attach karo</div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"16px 28px"}}>
         <div style={{maxWidth:1200,margin:"0 auto"}}>
@@ -1763,6 +1969,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>}
+              <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
               <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}
                 title="Deal status (used in dashboard Booked/Cancelled totals)"
                 style={{background:(deal.status==="Booked"?"#e6f7ee":deal.status==="Cancelled"?"#fdeaea":"#eef3fc"),
