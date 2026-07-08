@@ -1557,7 +1557,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const showH=propFlights!=="only";
     const sell=propSell();
     const totalPax=(Number(deal.adults)||0)+(Number(deal.children)||0);
-    const _parseDaysEarly=(text)=>{const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);const dayHdr=/^(?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;const hasHeaders=raw.some(l=>dayHdr.test(l));if(!hasHeaders)return raw;const out=[];let cur=null;raw.forEach(l=>{if(dayHdr.test(l)){if(cur!==null)out.push(cur);cur=l;}else{cur=cur===null?l:cur+" "+l;}});if(cur!==null)out.push(cur);return out;};
+    const _parseDaysEarly=(text)=>{const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);const dayHdr=/^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;const firstHdr=raw.findIndex(l=>dayHdr.test(l));if(firstHdr<0)return raw;const out=[];let cur=null;raw.slice(firstHdr).forEach(l=>{if(dayHdr.test(l)){if(cur!==null)out.push(cur);cur=l;}else{cur=cur===null?l:cur+" "+l;}});if(cur!==null)out.push(cur);return out;};
     const allDayLines=(deal.landVendors||[]).filter(l=>l.itinerary).map(l=>_parseDaysEarly(l.itinerary)).reduce((a,b)=>a.concat(b),[]);
     const dayIcon=(t)=>{const s=(t||"").toLowerCase();
       if(/beach|island|boat|snorkel|cruise|speed/.test(s))return"🏖️";
@@ -1596,9 +1596,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0,sell-totRec).toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
       </div>
     </div>`:"";
-    let galleryImgs=[];
-    {const _dl=(deal.destination||"").toLowerCase();const _gk=Object.keys(PROP_KEYMAP).sort(function(a,b){return b.length-a.length;});
-     for(var _gi=0;_gi<_gk.length;_gi++){ if(_dl.indexOf(_gk[_gi])>=0){ galleryImgs=PROP_GALLERY[PROP_KEYMAP[_gk[_gi]]]||[]; break; } }}
+    const galleryImgs=propGallery();
     const glimpseHTML=galleryImgs.length?`<div style="margin:0 0 18px">
       <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">A GLIMPSE OF YOUR DESTINATION</div>
       <div style="display:flex;gap:10px">${galleryImgs.map(g=>`<img src="${g}" style="flex:1;min-width:0;height:130px;object-fit:cover;border-radius:14px"/>`).join("")}</div>
@@ -1647,11 +1645,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const parseDays=(text)=>{
       const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);
       // Detect explicit day headers like "Day 1", "Day-2", "1st Day", "Day 1:"
-      const dayHdr=/^(?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
-      const hasHeaders=raw.some(l=>dayHdr.test(l));
-      if(!hasHeaders) return raw; // no headers → each line = a point (legacy)
+      const dayHdr=/^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+      const firstHdr=raw.findIndex(l=>dayHdr.test(l));
+      if(firstHdr<0) return raw; // no headers → each line = a point (legacy)
       const out=[]; let cur=null;
-      raw.forEach(l=>{
+      // Skip intro lines before the first real day header (e.g. "Day Wise Itinerary")
+      raw.slice(firstHdr).forEach(l=>{
         if(dayHdr.test(l)){ if(cur!==null) out.push(cur); cur=l; }
         else { cur = cur===null ? l : cur+"\n"+l; }
       });
@@ -1663,7 +1662,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       return days.map((d,i)=>`
         <div style="display:flex;gap:14px;margin-bottom:12px">
           <div style="min-width:54px;height:54px;background:linear-gradient(135deg,#c9961a,#f0c842);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800"><div style="font-size:9px">DAY</div><div style="font-size:19px">${i+1}</div></div>
-          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${(()=>{const lines=String(d).split("\n");const head=lines[0];const body=lines.slice(1).join("<br>");const m=head.match(/^((?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);const title=m?m[2]:head;return `<span style="margin-right:7px">${dayIcon(d)}</span><b style="color:#0d1b3e">${esc(title||head)}</b>${body?`<br><span style="color:#5a6b8c">${esc(lines.slice(1).join(" "))}</span>`:""}`;})()}</div>
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${(()=>{const lines=String(d).split("\n");const head=lines[0];const body=lines.slice(1).join("<br>");const m=head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);const title=m?m[2]:head;return `<span style="margin-right:7px">${dayIcon(d)}</span><b style="color:#0d1b3e">${esc(title||head)}</b>${body?`<br><span style="color:#5a6b8c">${esc(lines.slice(1).join(" "))}</span>`:""}`;})()}</div>
         </div>`).join("");
     }).join("") : "";
 
