@@ -296,7 +296,7 @@ const emptyVendor = (isFlight=false) => ({
 const emptyVisaVendor = () => ({...emptyVendor(), visaStatus:"Not Applied"});
 const emptyHotelVendor = () => ({
   id:uid(), name:"", currency:"INR", exchangeRate:"",
-  country:"", city:"", hotelName:"", photoUrl:"", roomCategory:"Deluxe Room",
+  country:"", city:"", hotelName:"", photoUrl:"", starRating:"", roomCategory:"Deluxe Room",
   checkIn:"", checkOut:"", nights:0,
   costPrice:"", sellingPrice:"", payments:[],
 });
@@ -1473,248 +1473,69 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 // ── DASHBOARD SCREEN ──────────────────────────────────────────────────────
 
   // ─── PROPOSAL GENERATOR (client-facing itinerary PDF + WhatsApp) ─────────────
-  const PROP_COVERS = {
-    "kashmir":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85",
-    "srinagar":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85",
-    "gulmarg":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85",
-    "pahalgam":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85",
-    "sonamarg":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85",
-    "ladakh":"https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=1400&q=85",
-    "leh":"https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=1400&q=85",
-    "pangong":"https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=1400&q=85",
-    "nubra":"https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=1400&q=85",
-    "himachal":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "manali":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "shimla":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "dharamshala":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "kasol":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "spiti":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "dalhousie":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85",
-    "goa":"https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1400&q=85",
-    "kerala":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "munnar":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "alleppey":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "kochi":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "kovalam":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "wayanad":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85",
-    "rajasthan":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "jaipur":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "udaipur":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "jodhpur":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "jaisalmer":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "pushkar":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85",
-    "uttarakhand":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "rishikesh":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "mussoorie":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "nainital":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "auli":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "haridwar":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85",
-    "sikkim":"https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=1400&q=85",
-    "darjeeling":"https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=1400&q=85",
-    "gangtok":"https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=1400&q=85",
-    "arunachal":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "meghalaya":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "shillong":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "tawang":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "cherrapunji":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "north east":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "northeast":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85",
-    "madhya pradesh":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85",
-    "khajuraho":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85",
-    "bandhavgarh":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85",
-    "kanha":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85",
-    "pench":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85",
-    "tamil nadu":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "chennai":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "madurai":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "ooty":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "rameshwaram":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "kodaikanal":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85",
-    "karnataka":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "coorg":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "hampi":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "mysore":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "bengaluru":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "bangalore":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "gokarna":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85",
-    "gujarat":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85",
-    "rann":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85",
-    "kutch":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85",
-    "dwarka":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85",
-    "somnath":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85",
-    "andaman":"https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1400&q=85",
-    "havelock":"https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1400&q=85",
-    "port blair":"https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1400&q=85",
-    "agra":"https://images.unsplash.com/photo-1564507592333-c60657eea523?w=1400&q=85",
-    "taj mahal":"https://images.unsplash.com/photo-1564507592333-c60657eea523?w=1400&q=85",
-    "varanasi":"https://images.unsplash.com/photo-1564507592333-c60657eea523?w=1400&q=85",
-    "golden triangle":"https://images.unsplash.com/photo-1564507592333-c60657eea523?w=1400&q=85",
-    "bali":"https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=1400&q=85",
-    "ubud":"https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=1400&q=85",
-    "indonesia":"https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=1400&q=85",
-    "thailand":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "bangkok":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "phuket":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "pattaya":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "krabi":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "koh samui":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85",
-    "vietnam":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "da nang":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "danang":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "hanoi":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "ho chi minh":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "phu quoc":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "hoi an":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "halong":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "nha trang":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85",
-    "singapore":"https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=1400&q=85",
-    "sentosa":"https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=1400&q=85",
-    "maldives":"https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=1400&q=85",
-    "dubai":"https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1400&q=85",
-    "abu dhabi":"https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1400&q=85",
-    "uae":"https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1400&q=85",
-    "united arab":"https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1400&q=85",
-    "sri lanka":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "srilanka":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "colombo":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "kandy":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "ella":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "bentota":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85",
-    "georgia":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85",
-    "tbilisi":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85",
-    "kazbegi":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85",
-    "batumi":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85",
-    "gudauri":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85",
-    "armenia":"https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=1400&q=85",
-    "yerevan":"https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=1400&q=85",
-    "azerbaijan":"https://images.unsplash.com/photo-1601059625985-6da10d56ec22?w=1400&q=85",
-    "baku":"https://images.unsplash.com/photo-1601059625985-6da10d56ec22?w=1400&q=85",
-    "kazakhstan":"https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=1400&q=85",
-    "almaty":"https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=1400&q=85",
-    "astana":"https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=1400&q=85",
-    "turkey":"https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1400&q=85",
-    "istanbul":"https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1400&q=85",
-    "cappadocia":"https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1400&q=85",
-    "antalya":"https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1400&q=85",
-    "egypt":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "cairo":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "giza":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "luxor":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "nile":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "sharm":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85",
-    "kenya":"https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1400&q=85",
-    "masai":"https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1400&q=85",
-    "nairobi":"https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1400&q=85",
-    "south africa":"https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=1400&q=85",
-    "cape town":"https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=1400&q=85",
-    "johannesburg":"https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=1400&q=85",
-    "kruger":"https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=1400&q=85",
-    "seychelles":"https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=1400&q=85",
-    "mahe":"https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=1400&q=85",
-    "praslin":"https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=1400&q=85",
-    "mauritius":"https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1400&q=85",
-    "victoria falls":"https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=1400&q=85",
-    "zimbabwe":"https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=1400&q=85",
-    "zambia":"https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=1400&q=85",
-    "greece":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85",
-    "santorini":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85",
-    "athens":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85",
-    "mykonos":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85",
-    "crete":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85",
-    "switzerland":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "swiss":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "zurich":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "interlaken":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "france":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "paris":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "italy":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "rome":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "venice":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "milan":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "europe":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85",
-    "germany":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "berlin":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "munich":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "austria":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "vienna":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "hungary":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "budapest":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85",
-    "prague":"https://images.unsplash.com/photo-1541849546-216549ae216d?w=1400&q=85",
-    "czech":"https://images.unsplash.com/photo-1541849546-216549ae216d?w=1400&q=85",
-    "poland":"https://images.unsplash.com/photo-1541849546-216549ae216d?w=1400&q=85",
-    "krakow":"https://images.unsplash.com/photo-1541849546-216549ae216d?w=1400&q=85",
-    "norway":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "oslo":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "finland":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "helsinki":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "northern lights":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "scandinavia":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "lapland":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85",
-    "london":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "england":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "scotland":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "united kingdom":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "ireland":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "dublin":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "edinburgh":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85",
-    "russia":"https://images.unsplash.com/photo-1513326738677-b964603b136d?w=1400&q=85",
-    "moscow":"https://images.unsplash.com/photo-1513326738677-b964603b136d?w=1400&q=85",
-    "petersburg":"https://images.unsplash.com/photo-1513326738677-b964603b136d?w=1400&q=85",
-    "japan":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "tokyo":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "kyoto":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "osaka":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "korea":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "seoul":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85",
-    "new york":"https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1400&q=85",
-    "washington dc":"https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1400&q=85",
-    "boston":"https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1400&q=85",
-    "niagara usa":"https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1400&q=85",
-    "los angeles":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85",
-    "san francisco":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85",
-    "las vegas":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85",
-    "california":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85",
-    "hollywood":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85",
-    "yellowstone":"https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=1400&q=85",
-    "grand canyon":"https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=1400&q=85",
-    "national parks":"https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=1400&q=85",
-    "orlando":"https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1400&q=85",
-    "disney":"https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1400&q=85",
-    "miami":"https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1400&q=85",
-    "florida":"https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1400&q=85",
-    "canada":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85",
-    "toronto":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85",
-    "montreal":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85",
-    "niagara":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85",
-    "ottawa":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85",
-    "vancouver":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85",
-    "calgary":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85",
-    "banff":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85",
-    "whistler":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85",
-    "rocky mountaineer":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85",
-    "queenstown":"https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1400&q=85",
-    "new zealand":"https://images.unsplash.com/photo-1517935706615-2717063c2225?w=1400&q=85",
-    "auckland":"https://images.unsplash.com/photo-1517935706615-2717063c2225?w=1400&q=85",
-    "christchurch":"https://images.unsplash.com/photo-1517935706615-2717063c2225?w=1400&q=85",
-    "rotorua":"https://images.unsplash.com/photo-1517935706615-2717063c2225?w=1400&q=85",
-    "australia":"https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=1400&q=85",
-    "sydney":"https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=1400&q=85",
-    "melbourne":"https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=1400&q=85",
-    "great barrier reef":"https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=1400&q=85",
-    "cairns":"https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=1400&q=85",
-    "whitsundays":"https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=1400&q=85",
-    "gold coast":"https://images.unsplash.com/photo-1524397057410-1e775ed476f3?w=1400&q=85",
-    "brisbane":"https://images.unsplash.com/photo-1524397057410-1e775ed476f3?w=1400&q=85"
-  };
-  const PROP_KEYMAP = {"kashmir":"kashmir","srinagar":"kashmir","gulmarg":"kashmir","pahalgam":"kashmir","sonamarg":"kashmir","ladakh":"ladakh","leh":"ladakh","pangong":"ladakh","nubra":"ladakh","himachal":"himachal","manali":"himachal","shimla":"himachal","dharamshala":"himachal","kasol":"himachal","spiti":"himachal","dalhousie":"himachal","goa":"goa","kerala":"kerala","munnar":"kerala","alleppey":"kerala","kochi":"kerala","kovalam":"kerala","wayanad":"kerala","rajasthan":"rajasthan","jaipur":"rajasthan","udaipur":"rajasthan","jodhpur":"rajasthan","jaisalmer":"rajasthan","pushkar":"rajasthan","uttarakhand":"uttarakhand","rishikesh":"uttarakhand","mussoorie":"uttarakhand","nainital":"uttarakhand","auli":"uttarakhand","haridwar":"uttarakhand","sikkim":"sikkim-darjeeling","darjeeling":"sikkim-darjeeling","gangtok":"sikkim-darjeeling","arunachal":"arunachal-meghalaya","meghalaya":"arunachal-meghalaya","shillong":"arunachal-meghalaya","tawang":"arunachal-meghalaya","cherrapunji":"arunachal-meghalaya","north east":"arunachal-meghalaya","northeast":"arunachal-meghalaya","madhya pradesh":"madhya-pradesh","khajuraho":"madhya-pradesh","bandhavgarh":"madhya-pradesh","kanha":"madhya-pradesh","pench":"madhya-pradesh","tamil nadu":"tamil-nadu","chennai":"tamil-nadu","madurai":"tamil-nadu","ooty":"tamil-nadu","rameshwaram":"tamil-nadu","kodaikanal":"tamil-nadu","karnataka":"karnataka","coorg":"karnataka","hampi":"karnataka","mysore":"karnataka","bengaluru":"karnataka","bangalore":"karnataka","gokarna":"karnataka","gujarat":"gujarat","rann":"gujarat","kutch":"gujarat","dwarka":"gujarat","somnath":"gujarat","andaman":"andaman-nicobar","havelock":"andaman-nicobar","port blair":"andaman-nicobar","agra":"delhi-agra-varanasi","taj mahal":"delhi-agra-varanasi","varanasi":"delhi-agra-varanasi","golden triangle":"delhi-agra-varanasi","bali":"bali","ubud":"bali","indonesia":"bali","thailand":"thailand","bangkok":"thailand","phuket":"thailand","pattaya":"thailand","krabi":"thailand","koh samui":"thailand","vietnam":"vietnam","da nang":"vietnam","danang":"vietnam","hanoi":"vietnam","ho chi minh":"vietnam","phu quoc":"vietnam","hoi an":"vietnam","halong":"vietnam","nha trang":"vietnam","singapore":"singapore","sentosa":"singapore","maldives":"maldives","dubai":"dubai","abu dhabi":"dubai","uae":"dubai","united arab":"dubai","sri lanka":"sri-lanka","srilanka":"sri-lanka","colombo":"sri-lanka","kandy":"sri-lanka","ella":"sri-lanka","bentota":"sri-lanka","georgia":"georgia","tbilisi":"georgia","kazbegi":"georgia","batumi":"georgia","gudauri":"georgia","armenia":"armenia","yerevan":"armenia","azerbaijan":"azerbaijan","baku":"azerbaijan","kazakhstan":"kazakhstan","almaty":"kazakhstan","astana":"kazakhstan","turkey":"turkey","istanbul":"turkey","cappadocia":"turkey","antalya":"turkey","egypt":"egypt","cairo":"egypt","giza":"egypt","luxor":"egypt","nile":"egypt","sharm":"egypt","kenya":"kenya","masai":"kenya","nairobi":"kenya","south africa":"south-africa","cape town":"south-africa","johannesburg":"south-africa","kruger":"south-africa","seychelles":"seychelles","mahe":"seychelles","praslin":"seychelles","mauritius":"mauritius","victoria falls":"victoria-falls","zimbabwe":"victoria-falls","zambia":"victoria-falls","greece":"greece","santorini":"greece","athens":"greece","mykonos":"greece","crete":"greece","switzerland":"france-switzerland-italy","swiss":"france-switzerland-italy","zurich":"france-switzerland-italy","interlaken":"france-switzerland-italy","france":"france-switzerland-italy","paris":"france-switzerland-italy","italy":"france-switzerland-italy","rome":"france-switzerland-italy","venice":"france-switzerland-italy","milan":"france-switzerland-italy","europe":"france-switzerland-italy","germany":"germany-austria-hungary","berlin":"germany-austria-hungary","munich":"germany-austria-hungary","austria":"germany-austria-hungary","vienna":"germany-austria-hungary","hungary":"germany-austria-hungary","budapest":"germany-austria-hungary","prague":"prague-budapest-poland","czech":"prague-budapest-poland","poland":"prague-budapest-poland","krakow":"prague-budapest-poland","norway":"norway-finland","oslo":"norway-finland","finland":"norway-finland","helsinki":"norway-finland","northern lights":"norway-finland","scandinavia":"norway-finland","lapland":"norway-finland","london":"uk-ireland","england":"uk-ireland","scotland":"uk-ireland","united kingdom":"uk-ireland","ireland":"uk-ireland","dublin":"uk-ireland","edinburgh":"uk-ireland","russia":"russia","moscow":"russia","petersburg":"russia","japan":"japan-korea","tokyo":"japan-korea","kyoto":"japan-korea","osaka":"japan-korea","korea":"japan-korea","seoul":"japan-korea","new york":"us-east-coast","washington dc":"us-east-coast","boston":"us-east-coast","los angeles":"us-west-coast","san francisco":"us-west-coast","las vegas":"us-west-coast","california":"us-west-coast","hollywood":"us-west-coast","yellowstone":"us-national-parks","grand canyon":"us-national-parks","national parks":"us-national-parks","orlando":"orlando","disney":"orlando","miami":"orlando","florida":"orlando","canada":"eastern-canada","toronto":"eastern-canada","montreal":"eastern-canada","niagara":"eastern-canada","ottawa":"eastern-canada","vancouver":"western-canada","calgary":"western-canada","banff":"western-canada","whistler":"western-canada","rocky mountaineer":"rocky-mountaineer","queenstown":"nz-queenstown","new zealand":"nz-north-south","auckland":"nz-north-south","christchurch":"nz-north-south","rotorua":"nz-north-south","australia":"australia-sydney-melbourne","sydney":"australia-sydney-melbourne","melbourne":"australia-sydney-melbourne","great barrier reef":"australia-great-barrier-reef","cairns":"australia-great-barrier-reef","whitsundays":"australia-great-barrier-reef","gold coast":"australia-gold-coast","brisbane":"australia-gold-coast"};
-  const PROP_GALLERY = {"kashmir":["https://images.unsplash.com/photo-1566837945700-30057527ade0?w=700&q=80","https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80"],"ladakh":["https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=700&q=80","https://images.unsplash.com/photo-1504893524553-b855bce32c67?w=700&q=80","https://images.unsplash.com/photo-1589308454676-21178b783dc1?w=700&q=80"],"rajasthan":["https://images.unsplash.com/photo-1477587458883-47145ed94245?w=700&q=80","https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=700&q=80","https://images.unsplash.com/photo-1599661046827-dacde63e9860?w=700&q=80"],"himachal":["https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=700&q=80","https://images.unsplash.com/photo-1586500036706-41963de24d8b?w=700&q=80","https://images.unsplash.com/photo-1572213426852-0e4ed8f69e0f?w=700&q=80"],"goa":["https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=700&q=80","https://images.unsplash.com/photo-1583294955284-3a9a56b1d427?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80"],"kerala":["https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=700&q=80","https://images.unsplash.com/photo-1561361513-2d000a50f0dc?w=700&q=80","https://images.unsplash.com/photo-1590001155093-a3c66f9f85b4?w=700&q=80"],"tamil-nadu":["https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=700&q=80","https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=700&q=80","https://images.unsplash.com/photo-1597277478408-8df2e6a9a3ce?w=700&q=80"],"arunachal-meghalaya":["https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=700&q=80","https://images.unsplash.com/photo-1571606428253-b7bda8a64a1a?w=700&q=80","https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=700&q=80"],"uttarakhand":["https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80","https://images.unsplash.com/photo-1564507592333-c60657eea523?w=700&q=80","https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=700&q=80"],"bali":["https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=700&q=80","https://images.unsplash.com/photo-1604999333679-b86d54738315?w=700&q=80","https://images.unsplash.com/photo-1518548419970-58e3b4079ab2?w=700&q=80"],"thailand":["https://images.unsplash.com/photo-1528181304800-259b08848526?w=700&q=80","https://images.unsplash.com/photo-1508009603885-50cf7c579365?w=700&q=80","https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?w=700&q=80"],"maldives":["https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=700&q=80","https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80","https://images.unsplash.com/photo-1540202404-a2f29016b523?w=700&q=80"],"dubai":["https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=700&q=80","https://images.unsplash.com/photo-1518684079-3c830dcef090?w=700&q=80","https://images.unsplash.com/photo-1546412414-e1885e51cfa5?w=700&q=80"],"singapore":["https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=700&q=80","https://images.unsplash.com/photo-1540202404-a2f29016b523?w=700&q=80","https://images.unsplash.com/photo-1565967511849-76a60a516170?w=700&q=80"],"vietnam":["https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=700&q=80","https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=700&q=80","https://images.unsplash.com/photo-1559128010-7c1ad6e1b6a5?w=700&q=80"],"egypt":["https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=700&q=80","https://images.unsplash.com/photo-1568322445389-f64ac2515020?w=700&q=80","https://images.unsplash.com/photo-1503177119275-0aa32b3a9368?w=700&q=80"],"victoria-falls":["https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=700&q=80","https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=700&q=80","https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=700&q=80"],"kenya":["https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=700&q=80","https://images.unsplash.com/photo-1459262838948-3e2de6c1ec80?w=700&q=80","https://images.unsplash.com/photo-1523805009345-7448845a9e53?w=700&q=80"],"sri-lanka":["https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=700&q=80","https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?w=700&q=80"],"georgia":["https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=700&q=80","https://images.unsplash.com/photo-1567103472667-6898f3a79cf2?w=700&q=80","https://images.unsplash.com/photo-1504214208698-ea1916a2195a?w=700&q=80"],"armenia":["https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=700&q=80","https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=700&q=80","https://images.unsplash.com/photo-1503614472-8c93d56e92ce?w=700&q=80"],"azerbaijan":["https://images.unsplash.com/photo-1601059625985-6da10d56ec22?w=700&q=80","https://images.unsplash.com/photo-1593011951104-f30e76c2c4cd?w=700&q=80","https://images.unsplash.com/photo-1558618047-3c8c76ca0d31?w=700&q=80"],"kazakhstan":["https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=700&q=80","https://images.unsplash.com/photo-1596397360628-7b27e25c5cbf?w=700&q=80","https://images.unsplash.com/photo-1609825488888-3a766db05542?w=700&q=80"],"rocky-mountaineer":["https://images.unsplash.com/photo-1501854140801-50d01698950b?w=700&q=80","https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=700&q=80","https://images.unsplash.com/photo-1531321293222-7e6cdd9b75bb?w=700&q=80"],"eastern-canada":["https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=700&q=80","https://images.unsplash.com/photo-1569161031678-f49d0e38e2be?w=700&q=80","https://images.unsplash.com/photo-1514924013411-cbf25faa35bb?w=700&q=80"],"western-canada":["https://images.unsplash.com/photo-1501854140801-50d01698950b?w=700&q=80","https://images.unsplash.com/photo-1505832268823-414c63a48fb4?w=700&q=80","https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=700&q=80"],"australia-great-barrier-reef":["https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=700&q=80","https://images.unsplash.com/photo-1559828583-c93b69cf94c4?w=700&q=80","https://images.unsplash.com/photo-1559128010-7c1ad6e1b6a5?w=700&q=80"],"andaman-nicobar":["https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80","https://images.unsplash.com/photo-1534710961216-75c88202f43e?w=700&q=80","https://images.unsplash.com/photo-1583212292454-1d6a5b13cca1?w=700&q=80"],"delhi-agra-varanasi":["https://images.unsplash.com/photo-1564507592333-c60657eea523?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80","https://images.unsplash.com/photo-1561361513-2d8efce48e9e?w=700&q=80"],"sikkim-darjeeling":["https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80","https://images.unsplash.com/photo-1566837945700-30057527ade0?w=700&q=80","https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=700&q=80"],"gujarat":["https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1477587458883-47145ed94245?w=700&q=80","https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=700&q=80"],"karnataka":["https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=700&q=80","https://images.unsplash.com/photo-1567157577867-05ccb1388e66?w=700&q=80","https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=700&q=80"],"madhya-pradesh":["https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=700&q=80","https://images.unsplash.com/photo-1571126770897-2d612d1f7b89?w=700&q=80","https://images.unsplash.com/photo-1530053969600-caed2596d242?w=700&q=80"],"australia-gold-coast":["https://images.unsplash.com/photo-1524397057410-1e775ed476f3?w=700&q=80","https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=700&q=80","https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?w=700&q=80"],"australia-sydney-melbourne":["https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=700&q=80","https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=700&q=80","https://images.unsplash.com/photo-1538688423619-a81d3f23454b?w=700&q=80"],"france-switzerland-italy":["https://images.unsplash.com/photo-1431274172761-fca41d930114?w=700&q=80","https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80","https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=700&q=80"],"germany-austria-hungary":["https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=700&q=80","https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=700&q=80","https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=700&q=80"],"greece":["https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=700&q=80","https://images.unsplash.com/photo-1555993539-1732b0258235?w=700&q=80","https://images.unsplash.com/photo-1533105079780-92b9be482077?w=700&q=80"],"japan-korea":["https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=700&q=80","https://images.unsplash.com/photo-1522383225653-ed111181a951?w=700&q=80","https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=700&q=80"],"mauritius":["https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=80","https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80","https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80"],"norway-finland":["https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=700&q=80","https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1484447330491-de89c23be34a?w=700&q=80"],"nz-north-south":["https://images.unsplash.com/photo-1517935706615-2717063c2225?w=700&q=80","https://images.unsplash.com/photo-1507699622108-4be3abd695ad?w=700&q=80","https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=700&q=80"],"nz-queenstown":["https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=700&q=80","https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=700&q=80","https://images.unsplash.com/photo-1517935706615-2717063c2225?w=700&q=80"],"orlando":["https://images.unsplash.com/photo-1534430480872-3498386e7856?w=700&q=80","https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=700&q=80","https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=700&q=80"],"prague-budapest-poland":["https://images.unsplash.com/photo-1541849546-216549ae216d?w=700&q=80","https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=700&q=80","https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80"],"russia":["https://images.unsplash.com/photo-1513326738677-b964603b136d?w=700&q=80","https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=700&q=80","https://images.unsplash.com/photo-1547448415-e9f5b28e570d?w=700&q=80"],"seychelles":["https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=700&q=80","https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=80","https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80"],"south-africa":["https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=700&q=80","https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=700&q=80","https://images.unsplash.com/photo-1517783999520-f068d7431a60?w=700&q=80"],"turkey":["https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=700&q=80","https://images.unsplash.com/photo-1545241047-6083a3684587?w=700&q=80","https://images.unsplash.com/photo-1502301197179-65228ab57f78?w=700&q=80"],"uk-ireland":["https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=700&q=80","https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=700&q=80","https://images.unsplash.com/photo-1512075135822-67cdd9dd7314?w=700&q=80"],"us-east-coast":["https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=700&q=80","https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=700&q=80","https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=700&q=80"],"us-national-parks":["https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=700&q=80","https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=700&q=80","https://images.unsplash.com/photo-1504870712357-65ea720d6078?w=700&q=80"],"us-west-coast":["https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=700&q=80","https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=700&q=80","https://images.unsplash.com/photo-1534430480872-3498386e7856?w=700&q=80"]};
+  
+  const PROP_KEYMAP = {"kashmir":"kashmir","srinagar":"kashmir","gulmarg":"kashmir","pahalgam":"kashmir","sonamarg":"kashmir","ladakh":"ladakh","leh":"ladakh","pangong":"ladakh","nubra":"ladakh","himachal":"himachal","manali":"himachal","shimla":"himachal","dharamshala":"himachal","kasol":"himachal","spiti":"himachal","dalhousie":"himachal","mcleodganj":"himachal","goa":"goa","kerala":"kerala","munnar":"kerala","alleppey":"kerala","kochi":"kerala","kovalam":"kerala","wayanad":"kerala","thekkady":"kerala","rajasthan":"rajasthan","jaipur":"rajasthan","udaipur":"rajasthan","jodhpur":"rajasthan","jaisalmer":"rajasthan","pushkar":"rajasthan","mount abu":"rajasthan","uttarakhand":"uttarakhand","rishikesh":"uttarakhand","mussoorie":"uttarakhand","nainital":"uttarakhand","auli":"uttarakhand","haridwar":"uttarakhand","jim corbett":"uttarakhand","sikkim":"sikkim-darjeeling","darjeeling":"sikkim-darjeeling","gangtok":"sikkim-darjeeling","pelling":"sikkim-darjeeling","lachung":"sikkim-darjeeling","arunachal":"arunachal-meghalaya","meghalaya":"arunachal-meghalaya","shillong":"arunachal-meghalaya","tawang":"arunachal-meghalaya","cherrapunji":"arunachal-meghalaya","cherrapunjee":"arunachal-meghalaya","north east":"arunachal-meghalaya","northeast":"arunachal-meghalaya","north-east":"arunachal-meghalaya","guwahati":"arunachal-meghalaya","assam":"arunachal-meghalaya","kaziranga":"arunachal-meghalaya","dawki":"arunachal-meghalaya","mawlynnong":"arunachal-meghalaya","jowai":"arunachal-meghalaya","krangsuri":"arunachal-meghalaya","madhya pradesh":"madhya-pradesh","khajuraho":"madhya-pradesh","bandhavgarh":"madhya-pradesh","kanha":"madhya-pradesh","pench":"madhya-pradesh","tamil nadu":"tamil-nadu","chennai":"tamil-nadu","madurai":"tamil-nadu","ooty":"tamil-nadu","rameshwaram":"tamil-nadu","kodaikanal":"tamil-nadu","karnataka":"karnataka","coorg":"karnataka","hampi":"karnataka","mysore":"karnataka","bengaluru":"karnataka","bangalore":"karnataka","gokarna":"karnataka","gujarat":"gujarat","rann":"gujarat","kutch":"gujarat","dwarka":"gujarat","somnath":"gujarat","gir":"gujarat","andaman":"andaman-nicobar","havelock":"andaman-nicobar","port blair":"andaman-nicobar","nicobar":"andaman-nicobar","agra":"delhi-agra-varanasi","taj mahal":"delhi-agra-varanasi","varanasi":"delhi-agra-varanasi","golden triangle":"delhi-agra-varanasi","delhi":"delhi-agra-varanasi","bali":"bali","ubud":"bali","indonesia":"bali","nusa":"bali","seminyak":"bali","kuta":"bali","thailand":"thailand","bangkok":"thailand","phuket":"thailand","pattaya":"thailand","krabi":"thailand","koh samui":"thailand","phi phi":"thailand","vietnam":"vietnam","da nang":"vietnam","danang":"vietnam","hanoi":"vietnam","ho chi minh":"vietnam","phu quoc":"vietnam","hoi an":"vietnam","halong":"vietnam","nha trang":"vietnam","singapore":"singapore","sentosa":"singapore","maldives":"maldives","male":"maldives","dubai":"dubai","abu dhabi":"dubai","uae":"dubai","united arab":"dubai","sharjah":"dubai","sri lanka":"sri-lanka","srilanka":"sri-lanka","colombo":"sri-lanka","kandy":"sri-lanka","ella":"sri-lanka","bentota":"sri-lanka","galle":"sri-lanka","georgia":"georgia","tbilisi":"georgia","kazbegi":"georgia","batumi":"georgia","gudauri":"georgia","armenia":"armenia","yerevan":"armenia","azerbaijan":"azerbaijan","baku":"azerbaijan","kazakhstan":"kazakhstan","almaty":"kazakhstan","astana":"kazakhstan","turkey":"turkey","istanbul":"turkey","cappadocia":"turkey","antalya":"turkey","egypt":"egypt","cairo":"egypt","giza":"egypt","luxor":"egypt","nile":"egypt","sharm":"egypt","kenya":"kenya","masai":"kenya","nairobi":"kenya","south africa":"south-africa","cape town":"south-africa","johannesburg":"south-africa","kruger":"south-africa","seychelles":"seychelles","mahe":"seychelles","praslin":"seychelles","mauritius":"mauritius","victoria falls":"victoria-falls","zimbabwe":"victoria-falls","zambia":"victoria-falls","greece":"greece","santorini":"greece","athens":"greece","mykonos":"greece","crete":"greece","switzerland":"france-switzerland-italy","swiss":"france-switzerland-italy","zurich":"france-switzerland-italy","interlaken":"france-switzerland-italy","france":"france-switzerland-italy","paris":"france-switzerland-italy","italy":"france-switzerland-italy","rome":"france-switzerland-italy","venice":"france-switzerland-italy","milan":"france-switzerland-italy","europe":"france-switzerland-italy","lucerne":"france-switzerland-italy","germany":"germany-austria-hungary","berlin":"germany-austria-hungary","munich":"germany-austria-hungary","austria":"germany-austria-hungary","vienna":"germany-austria-hungary","hungary":"germany-austria-hungary","budapest":"germany-austria-hungary","prague":"prague-budapest-poland","czech":"prague-budapest-poland","poland":"prague-budapest-poland","krakow":"prague-budapest-poland","warsaw":"prague-budapest-poland","norway":"norway-finland","oslo":"norway-finland","finland":"norway-finland","helsinki":"norway-finland","northern lights":"norway-finland","scandinavia":"norway-finland","lapland":"norway-finland","london":"uk-ireland","england":"uk-ireland","scotland":"uk-ireland","united kingdom":"uk-ireland","ireland":"uk-ireland","dublin":"uk-ireland","edinburgh":"uk-ireland","britain":"uk-ireland","russia":"russia","moscow":"russia","petersburg":"russia","japan":"japan-korea","tokyo":"japan-korea","kyoto":"japan-korea","osaka":"japan-korea","korea":"japan-korea","seoul":"japan-korea","new york":"us-east-coast","washington dc":"us-east-coast","boston":"us-east-coast","los angeles":"us-west-coast","san francisco":"us-west-coast","las vegas":"us-west-coast","california":"us-west-coast","hollywood":"us-west-coast","yellowstone":"us-national-parks","grand canyon":"us-national-parks","national parks":"us-national-parks","orlando":"orlando","disney":"orlando","miami":"orlando","florida":"orlando","canada":"eastern-canada","toronto":"eastern-canada","montreal":"eastern-canada","niagara":"eastern-canada","ottawa":"eastern-canada","vancouver":"western-canada","calgary":"western-canada","banff":"western-canada","whistler":"western-canada","queenstown":"nz-queenstown","new zealand":"nz-north-south","auckland":"nz-north-south","christchurch":"nz-north-south","rotorua":"nz-north-south","australia":"australia-sydney-melbourne","sydney":"australia-sydney-melbourne","melbourne":"australia-sydney-melbourne","great barrier reef":"australia-great-barrier-reef","cairns":"australia-great-barrier-reef","whitsundays":"australia-great-barrier-reef","gold coast":"australia-gold-coast","brisbane":"australia-gold-coast"};
+  const PROP_DEST_COVER = {"kashmir":"https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=1400&q=85","ladakh":"https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=1400&q=85","himachal":"https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85","goa":"https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1400&q=85","kerala":"https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=1400&q=85","rajasthan":"https://images.unsplash.com/photo-1477587458883-47145ed94245?w=1400&q=85","uttarakhand":"https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1400&q=85","sikkim-darjeeling":"https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=1400&q=85","arunachal-meghalaya":"https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=1400&q=85","madhya-pradesh":"https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=1400&q=85","tamil-nadu":"https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=1400&q=85","karnataka":"https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=1400&q=85","gujarat":"https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1400&q=85","andaman-nicobar":"https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1400&q=85","delhi-agra-varanasi":"https://images.unsplash.com/photo-1564507592333-c60657eea523?w=1400&q=85","bali":"https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=1400&q=85","thailand":"https://images.unsplash.com/photo-1528181304800-259b08848526?w=1400&q=85","vietnam":"https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1400&q=85","singapore":"https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=1400&q=85","maldives":"https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=1400&q=85","dubai":"https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=1400&q=85","sri-lanka":"https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1400&q=85","georgia":"https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=1400&q=85","armenia":"https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=1400&q=85","azerbaijan":"https://images.unsplash.com/photo-1601059625985-6da10d56ec22?w=1400&q=85","kazakhstan":"https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=1400&q=85","turkey":"https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1400&q=85","egypt":"https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=1400&q=85","kenya":"https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1400&q=85","south-africa":"https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=1400&q=85","seychelles":"https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=1400&q=85","mauritius":"https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1400&q=85","victoria-falls":"https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=1400&q=85","greece":"https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=1400&q=85","france-switzerland-italy":"https://images.unsplash.com/photo-1431274172761-fca41d930114?w=1400&q=85","germany-austria-hungary":"https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=1400&q=85","prague-budapest-poland":"https://images.unsplash.com/photo-1541849546-216549ae216d?w=1400&q=85","norway-finland":"https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1400&q=85","uk-ireland":"https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=1400&q=85","russia":"https://images.unsplash.com/photo-1513326738677-b964603b136d?w=1400&q=85","japan-korea":"https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=1400&q=85","us-east-coast":"https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1400&q=85","us-west-coast":"https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=1400&q=85","us-national-parks":"https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=1400&q=85","orlando":"https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1400&q=85","eastern-canada":"https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=1400&q=85","western-canada":"https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1400&q=85","nz-queenstown":"https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1400&q=85","nz-north-south":"https://images.unsplash.com/photo-1517935706615-2717063c2225?w=1400&q=85","australia-sydney-melbourne":"https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=1400&q=85","australia-great-barrier-reef":"https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=1400&q=85","australia-gold-coast":"https://images.unsplash.com/photo-1524397057410-1e775ed476f3?w=1400&q=85"};
+  const PROP_GALLERY = {"kashmir":["https://images.unsplash.com/photo-1598091383021-15ddea10925d?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80"],
+    "ladakh":["https://images.unsplash.com/photo-1626176329831-4cf8ccb8bc45?w=700&q=80","https://images.unsplash.com/photo-1504893524553-b855bce32c67?w=700&q=80","https://images.unsplash.com/photo-1589308454676-21178b783dc1?w=700&q=80"],
+    "himachal":["https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=700&q=80","https://images.unsplash.com/photo-1586500036706-41963de24d8b?w=700&q=80","https://images.unsplash.com/photo-1572213426852-0e4ed8f69e0f?w=700&q=80"],
+    "goa":["https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=700&q=80","https://images.unsplash.com/photo-1583294955284-3a9a56b1d427?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80"],
+    "kerala":["https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=700&q=80","https://images.unsplash.com/photo-1561361513-2d000a50f0dc?w=700&q=80","https://images.unsplash.com/photo-1590001155093-a3c66f9f85b4?w=700&q=80"],
+    "rajasthan":["https://images.unsplash.com/photo-1477587458883-47145ed94245?w=700&q=80","https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=700&q=80","https://images.unsplash.com/photo-1599661046827-dacde63e9860?w=700&q=80"],
+    "uttarakhand":["https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80","https://images.unsplash.com/photo-1564507592333-c60657eea523?w=700&q=80","https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=700&q=80"],
+    "sikkim-darjeeling":["https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80","https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=700&q=80"],
+    "arunachal-meghalaya":["https://images.unsplash.com/photo-1606134459088-89b3e2ff3af9?w=700&q=80","https://images.unsplash.com/photo-1571606428253-b7bda8a64a1a?w=700&q=80","https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=700&q=80"],
+    "madhya-pradesh":["https://images.unsplash.com/photo-1607153333879-c174d265f1d2?w=700&q=80","https://images.unsplash.com/photo-1571126770897-2d612d1f7b89?w=700&q=80","https://images.unsplash.com/photo-1530053969600-caed2596d242?w=700&q=80"],
+    "tamil-nadu":["https://images.unsplash.com/photo-1621318104153-4a25bf9e7e43?w=700&q=80","https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=700&q=80","https://images.unsplash.com/photo-1597277478408-8df2e6a9a3ce?w=700&q=80"],
+    "karnataka":["https://images.unsplash.com/photo-1565030606948-e5d7ee4d17f6?w=700&q=80","https://images.unsplash.com/photo-1567157577867-05ccb1388e66?w=700&q=80","https://images.unsplash.com/photo-1582510003544-4d00b7f74220?w=700&q=80"],
+    "gujarat":["https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1477587458883-47145ed94245?w=700&q=80","https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=700&q=80"],
+    "andaman-nicobar":["https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80","https://images.unsplash.com/photo-1534710961216-75c88202f43e?w=700&q=80","https://images.unsplash.com/photo-1583212292454-1d6a5b13cca1?w=700&q=80"],
+    "delhi-agra-varanasi":["https://images.unsplash.com/photo-1564507592333-c60657eea523?w=700&q=80","https://images.unsplash.com/photo-1587474260584-136574528ed5?w=700&q=80","https://images.unsplash.com/photo-1561361513-2d8efce48e9e?w=700&q=80"],
+    "bali":["https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=700&q=80","https://images.unsplash.com/photo-1604999333679-b86d54738315?w=700&q=80","https://images.unsplash.com/photo-1518548419970-58e3b4079ab2?w=700&q=80"],
+    "thailand":["https://images.unsplash.com/photo-1528181304800-259b08848526?w=700&q=80","https://images.unsplash.com/photo-1508009603885-50cf7c579365?w=700&q=80","https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?w=700&q=80"],
+    "vietnam":["https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=700&q=80","https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=700&q=80","https://images.unsplash.com/photo-1559128010-7c1ad6e1b6a5?w=700&q=80"],
+    "singapore":["https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=700&q=80","https://images.unsplash.com/photo-1540202404-a2f29016b523?w=700&q=80","https://images.unsplash.com/photo-1565967511849-76a60a516170?w=700&q=80"],
+    "maldives":["https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=700&q=80","https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80","https://images.unsplash.com/photo-1540202404-a2f29016b523?w=700&q=80"],
+    "dubai":["https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=700&q=80","https://images.unsplash.com/photo-1518684079-3c830dcef090?w=700&q=80","https://images.unsplash.com/photo-1546412414-e1885e51cfa5?w=700&q=80"],
+    "sri-lanka":["https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=700&q=80","https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?w=700&q=80"],
+    "georgia":["https://images.unsplash.com/photo-1626776877737-d5ff85d6d44b?w=700&q=80","https://images.unsplash.com/photo-1567103472667-6898f3a79cf2?w=700&q=80","https://images.unsplash.com/photo-1504214208698-ea1916a2195a?w=700&q=80"],
+    "armenia":["https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=700&q=80","https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=700&q=80","https://images.unsplash.com/photo-1503614472-8c93d56e92ce?w=700&q=80"],
+    "azerbaijan":["https://images.unsplash.com/photo-1601059625985-6da10d56ec22?w=700&q=80","https://images.unsplash.com/photo-1593011951104-f30e76c2c4cd?w=700&q=80","https://images.unsplash.com/photo-1558618047-3c8c76ca0d31?w=700&q=80"],
+    "kazakhstan":["https://images.unsplash.com/photo-1474401941244-3a13d3107b51?w=700&q=80","https://images.unsplash.com/photo-1596397360628-7b27e25c5cbf?w=700&q=80","https://images.unsplash.com/photo-1609825488888-3a766db05542?w=700&q=80"],
+    "turkey":["https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=700&q=80","https://images.unsplash.com/photo-1545241047-6083a3684587?w=700&q=80","https://images.unsplash.com/photo-1502301197179-65228ab57f78?w=700&q=80"],
+    "egypt":["https://images.unsplash.com/photo-1568322445389-f64ac2515020?w=700&q=80","https://images.unsplash.com/photo-1503177119275-0aa32b3a9368?w=700&q=80"],
+    "kenya":["https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=700&q=80","https://images.unsplash.com/photo-1459262838948-3e2de6c1ec80?w=700&q=80","https://images.unsplash.com/photo-1523805009345-7448845a9e53?w=700&q=80"],
+    "south-africa":["https://images.unsplash.com/photo-1566438480900-0609be27a4be?w=700&q=80","https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=700&q=80","https://images.unsplash.com/photo-1517783999520-f068d7431a60?w=700&q=80"],
+    "seychelles":["https://images.unsplash.com/photo-1504472478235-9bc48ba4d60f?w=700&q=80","https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=80","https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80"],
+    "mauritius":["https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=700&q=80","https://images.unsplash.com/photo-1559339352-11d035aa65de?w=700&q=80","https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=700&q=80"],
+    "victoria-falls":["https://images.unsplash.com/photo-1547036967-23d11aacaee0?w=700&q=80","https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=700&q=80","https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=700&q=80"],
+    "greece":["https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=700&q=80","https://images.unsplash.com/photo-1555993539-1732b0258235?w=700&q=80","https://images.unsplash.com/photo-1533105079780-92b9be482077?w=700&q=80"],
+    "france-switzerland-italy":["https://images.unsplash.com/photo-1431274172761-fca41d930114?w=700&q=80","https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80","https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=700&q=80"],
+    "germany-austria-hungary":["https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=700&q=80","https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=700&q=80","https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=700&q=80"],
+    "prague-budapest-poland":["https://images.unsplash.com/photo-1541849546-216549ae216d?w=700&q=80","https://images.unsplash.com/photo-1549880338-65ddcdfd017b?w=700&q=80","https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=700&q=80"],
+    "norway-finland":["https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=700&q=80","https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=700&q=80","https://images.unsplash.com/photo-1484447330491-de89c23be34a?w=700&q=80"],
+    "uk-ireland":["https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=700&q=80","https://images.unsplash.com/photo-1533929736458-ca588d08c8be?w=700&q=80","https://images.unsplash.com/photo-1512075135822-67cdd9dd7314?w=700&q=80"],
+    "russia":["https://images.unsplash.com/photo-1513326738677-b964603b136d?w=700&q=80","https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=700&q=80","https://images.unsplash.com/photo-1547448415-e9f5b28e570d?w=700&q=80"],
+    "japan-korea":["https://images.unsplash.com/photo-1490806843957-31f4c9a91c65?w=700&q=80","https://images.unsplash.com/photo-1522383225653-ed111181a951?w=700&q=80","https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=700&q=80"],
+    "us-east-coast":["https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=700&q=80","https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=700&q=80","https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=700&q=80"],
+    "us-west-coast":["https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=700&q=80","https://images.unsplash.com/photo-1534430480872-3498386e7856?w=700&q=80"],
+    "us-national-parks":["https://images.unsplash.com/photo-1474044159687-1ee9f3a51722?w=700&q=80","https://images.unsplash.com/photo-1504870712357-65ea720d6078?w=700&q=80"],
+    "orlando":["https://images.unsplash.com/photo-1534430480872-3498386e7856?w=700&q=80","https://images.unsplash.com/photo-1501466044931-62695aada8e9?w=700&q=80","https://images.unsplash.com/photo-1449034446853-66c86144b0ad?w=700&q=80"],
+    "eastern-canada":["https://images.unsplash.com/photo-1548679847-1d4ff48016c9?w=700&q=80","https://images.unsplash.com/photo-1569161031678-f49d0e38e2be?w=700&q=80","https://images.unsplash.com/photo-1514924013411-cbf25faa35bb?w=700&q=80"],
+    "western-canada":["https://images.unsplash.com/photo-1501854140801-50d01698950b?w=700&q=80","https://images.unsplash.com/photo-1505832268823-414c63a48fb4?w=700&q=80","https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=700&q=80"],
+    "nz-queenstown":["https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=700&q=80","https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=700&q=80","https://images.unsplash.com/photo-1517935706615-2717063c2225?w=700&q=80"],
+    "nz-north-south":["https://images.unsplash.com/photo-1517935706615-2717063c2225?w=700&q=80","https://images.unsplash.com/photo-1507699622108-4be3abd695ad?w=700&q=80","https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=700&q=80"],
+    "australia-sydney-melbourne":["https://images.unsplash.com/photo-1523428096881-5bd79d043006?w=700&q=80","https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=700&q=80","https://images.unsplash.com/photo-1538688423619-a81d3f23454b?w=700&q=80"],
+    "australia-great-barrier-reef":["https://images.unsplash.com/photo-1582967788606-a171c1080cb0?w=700&q=80","https://images.unsplash.com/photo-1559828583-c93b69cf94c4?w=700&q=80","https://images.unsplash.com/photo-1559128010-7c1ad6e1b6a5?w=700&q=80"],
+    "australia-gold-coast":["https://images.unsplash.com/photo-1524397057410-1e775ed476f3?w=700&q=80","https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=700&q=80","https://images.unsplash.com/photo-1568702846914-96b305d2aaeb?w=700&q=80"]};
   function propGallery(){const dest=((deal&&deal.destination)||"").toLowerCase();const _pk=Object.keys(PROP_KEYMAP).sort(function(a,b){return b.length-a.length;});for(var i=0;i<_pk.length;i++){if(dest.indexOf(_pk[i])>=0)return PROP_GALLERY[PROP_KEYMAP[_pk[i]]]||[];}return[];}
 
   function propCover(){
-    if(propCoverUrl.trim()) return propCoverUrl.trim();
+    if(propCoverUrl && propCoverUrl.trim()) return propCoverUrl.trim();
     const dest=(deal.destination||"").toLowerCase();
-    const _pk=Object.keys(PROP_COVERS).sort(function(a,b){return b.length-a.length;}); for(var _i=0;_i<_pk.length;_i++){ if(dest.indexOf(_pk[_i])>=0) return PROP_COVERS[_pk[_i]]; }
-    return ""; // gradient fallback — never a wrong photo
+    const _pk=Object.keys(PROP_KEYMAP).sort(function(a,b){return b.length-a.length;});
+    for(var i=0;i<_pk.length;i++){ if(dest.indexOf(_pk[i])>=0) return PROP_DEST_COVER[PROP_KEYMAP[_pk[i]]]||""; }
+    return "";
   }
   function propSell(){
     let vend=[];
@@ -1736,7 +1557,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const showH=propFlights!=="only";
     const sell=propSell();
     const totalPax=(Number(deal.adults)||0)+(Number(deal.children)||0);
-    const allDayLines=(deal.landVendors||[]).filter(l=>l.itinerary).map(l=>l.itinerary.split(/\n+/).filter(x=>x.trim())).reduce((a,b)=>a.concat(b),[]);
+    const _parseDaysEarly=(text)=>{const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);const dayHdr=/^(?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;const hasHeaders=raw.some(l=>dayHdr.test(l));if(!hasHeaders)return raw;const out=[];let cur=null;raw.forEach(l=>{if(dayHdr.test(l)){if(cur!==null)out.push(cur);cur=l;}else{cur=cur===null?l:cur+" "+l;}});if(cur!==null)out.push(cur);return out;};
+    const allDayLines=(deal.landVendors||[]).filter(l=>l.itinerary).map(l=>_parseDaysEarly(l.itinerary)).reduce((a,b)=>a.concat(b),[]);
     const dayIcon=(t)=>{const s=(t||"").toLowerCase();
       if(/beach|island|boat|snorkel|cruise|speed/.test(s))return"🏖️";
       if(/temple|pagoda|heritage|fort|palace|museum|ancient/.test(s))return"🛕";
@@ -1811,22 +1633,37 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${esc((h.city||"").toUpperCase())}${h.country?" · "+esc(h.country.toUpperCase()):""}</div>
             <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${esc(h.hotelName)||"Hotel"}</div>
             <div style="font-size:12px;color:#5a6b8c">${esc(h.roomCategory)} · Breakfast included</div>
+            ${h.starRating?`<div style="font-size:13px;color:#f0c842;margin-top:3px">${"★".repeat(Number(h.starRating)||0)}<span style="color:#c9ccd4">${"★".repeat(Math.max(0,5-(Number(h.starRating)||0)))}</span></div>`:""}
           </div>
           <div style="text-align:right">
             <div style="background:#f0f5fd;border-radius:10px;padding:8px 14px;font-size:11px;color:#334e82">
-              <b>${h.nights||"?"} night${Number(h.nights)===1?"":"s"}</b><br>
+              <b>${(()=>{let n=Number(h.nights);if(!n&&h.checkIn&&h.checkOut){n=Math.round((new Date(h.checkOut)-new Date(h.checkIn))/86400000);}return n>0?n:1;})()} night${(()=>{let n=Number(h.nights);if(!n&&h.checkIn&&h.checkOut){n=Math.round((new Date(h.checkOut)-new Date(h.checkIn))/86400000);}return n===1?"":"s";})()}</b><br>
               ${h.checkIn?"In: "+fmtD(h.checkIn):""}<br>${h.checkOut?"Out: "+fmtD(h.checkOut):""}
             </div>
           </div>
         </div>
       </div>`).join("") : "";
 
+    const parseDays=(text)=>{
+      const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);
+      // Detect explicit day headers like "Day 1", "Day-2", "1st Day", "Day 1:"
+      const dayHdr=/^(?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+      const hasHeaders=raw.some(l=>dayHdr.test(l));
+      if(!hasHeaders) return raw; // no headers → each line = a point (legacy)
+      const out=[]; let cur=null;
+      raw.forEach(l=>{
+        if(dayHdr.test(l)){ if(cur!==null) out.push(cur); cur=l; }
+        else { cur = cur===null ? l : cur+"\n"+l; }
+      });
+      if(cur!==null) out.push(cur);
+      return out;
+    };
     const landBlocks = showH ? (deal.landVendors||[]).filter(l=>l.itinerary).map(l=>{
-      const days=l.itinerary.split(/\n+/).filter(x=>x.trim());
+      const days=parseDays(l.itinerary);
       return days.map((d,i)=>`
         <div style="display:flex;gap:14px;margin-bottom:12px">
           <div style="min-width:54px;height:54px;background:linear-gradient(135deg,#c9961a,#f0c842);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800"><div style="font-size:9px">DAY</div><div style="font-size:19px">${i+1}</div></div>
-          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e"><span style="margin-right:7px">${dayIcon(d)}</span>${esc(d)}</div>
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${(()=>{const lines=String(d).split("\n");const head=lines[0];const body=lines.slice(1).join("<br>");const m=head.match(/^((?:day[\s\-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);const title=m?m[2]:head;return `<span style="margin-right:7px">${dayIcon(d)}</span><b style="color:#0d1b3e">${esc(title||head)}</b>${body?`<br><span style="color:#5a6b8c">${esc(lines.slice(1).join(" "))}</span>`:""}`;})()}</div>
         </div>`).join("");
     }).join("") : "";
 
@@ -1865,7 +1702,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         👥 <b>${deal.rooms||1} room${Number(deal.rooms)===1?"":"s"}, ${pax}</b>
       </div>
     </div>
-    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">${deal.clientName?`Get ready, <b style="color:#f0c842">${esc(deal.clientName.split(" ")[0])}</b> — an unforgettable journey awaits ✨ &nbsp;·&nbsp; `:""}Specially prepared for <b>${esc(deal.clientName)||"You"}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> · 📞 +91 70096 59048</div>
+    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">Specially crafted for <b style="color:#f0c842">${esc(deal.clientName)||"our valued guest"}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
   </div>
 
   <!-- BODY -->
@@ -1892,7 +1729,14 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         </div>
       </div>
     </div>
-    <div style="font-size:10px;color:#8a97b5;margin-top:14px;line-height:1.7">This itinerary is a preliminary proposal. All services & prices are subject to availability and currency fluctuation at the time of booking. A deposit constitutes acceptance of our Terms & Conditions.</div>
+    <h2 style="font-size:18px;color:#0d1b3e;margin:24px 0 10px">📋 Booking Terms & Cancellation Policy</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:11.5px;line-height:1.9;color:#4a5772">
+      <b style="color:#0d1b3e">Payment:</b> A booking deposit confirms your reservation and constitutes acceptance of these terms. Balance is payable before travel as per the schedule shared. Payments accepted via bank transfer, UPI, or card — we never ask for payments to personal accounts.<br>
+      <b style="color:#0d1b3e">Cancellation:</b> Charges apply as per hotel, airline & land-operator policies. Non-refundable bookings and used/partially-used services are not eligible for refund. A service charge of 5% of booking value applies on cancellations & amendments of land services.<br>
+      <b style="color:#0d1b3e">Amendments:</b> Any change is treated as a new booking, subject to availability and revised pricing. Changes within the cancellation window attract applicable charges.<br>
+      <b style="color:#0d1b3e">Important:</b> Passport must be valid for at least 6 months from travel date. Visa granting is at the Embassy's discretion; rejection/delay is not our liability. Gala dinner charges on special dates (24/31 Dec, 14 Feb) may be payable directly at the hotel. Itinerary may be modified due to force majeure, weather, or availability — suitable alternatives will be arranged.
+    </div>
+    <div style="font-size:10px;color:#8a97b5;margin-top:12px;line-height:1.7">This itinerary is a preliminary proposal. All services & prices are subject to availability and currency fluctuation at the time of booking. GST is applicable as per government norms.</div>
 
     ${payBlock}
     <div style="margin-top:22px;display:flex;justify-content:flex-end"><div style="text-align:right">
@@ -2554,6 +2398,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div><span className="lbl">City</span><input value={hv.city} onChange={e=>updH(hv.id,"city",e.target.value)} placeholder="Dubai" /></div>
                     <div><span className="lbl">Hotel Name</span><input value={hv.hotelName} onChange={e=>updH(hv.id,"hotelName",e.target.value)} placeholder="Atlantis The Palm" /></div>
                     <div><span className="lbl">Hotel Photo URL <span style={{opacity:.6}}>(optional — proposal me dikhegi)</span></span><input value={hv.photoUrl||""} onChange={e=>updH(hv.id,"photoUrl",e.target.value)} placeholder="Google se image link paste karo" /></div>
+                    <div><span className="lbl">Hotel Category <span style={{opacity:.6}}>(stars)</span></span><select value={hv.starRating||""} onChange={e=>updH(hv.id,"starRating",e.target.value)}><option value="">Not specified</option><option value="3">3-Star ★★★</option><option value="4">4-Star ★★★★</option><option value="5">5-Star ★★★★★</option></select></div>
                     <div><span className="lbl">Room Category</span><select value={hv.roomCategory} onChange={e=>updH(hv.id,"roomCategory",e.target.value)}>{ROOM_CATEGORIES.map(r=><option key={r}>{r}</option>)}</select></div>
                     <div><span className="lbl">Check-In</span><input type="date" value={hv.checkIn} onChange={e=>updH(hv.id,"checkIn",e.target.value)} /></div>
                     <div><span className="lbl">Check-Out</span><input type="date" value={hv.checkOut} onChange={e=>updH(hv.id,"checkOut",e.target.value)} /></div>
