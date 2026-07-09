@@ -1,0 +1,39 @@
+name: Image Link Checker
+on:
+  schedule:
+    - cron: '30 3 * * 1'   # every Monday 09:00 IST
+  workflow_dispatch:
+permissions:
+  issues: write
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all proposal image URLs
+        id: chk
+        run: |
+          grep -oE 'https://images\.unsplash\.com/photo-[a-zA-Z0-9-]+' frontend/src/App.js | sort -u > urls.txt
+          echo "Total URLs: $(wc -l < urls.txt)"
+          : > dead.txt
+          while read -r u; do
+            code=$(curl -sIL -o /dev/null -w '%{http_code}' --max-time 20 "$u?w=50" || echo 000)
+            if [ "$code" != "200" ]; then
+              sleep 3
+              code=$(curl -sIL -o /dev/null -w '%{http_code}' --max-time 20 "$u?w=50" || echo 000)
+            fi
+            [ "$code" != "200" ] && echo "$u -> HTTP $code" >> dead.txt
+            echo "$u -> $code"
+          done < urls.txt
+          if [ -s dead.txt ]; then echo "dead=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Open issue if dead images found
+        if: steps.chk.outputs.dead == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "🔴 Dead proposal images detected ($(date +%F))" \
+            --body "$(printf 'In khali/dead image URLs ko App.js (PROP_DEST_COVER / PROP_GALLERY) mein replace karo:\n\n```\n%s\n```' "$(cat dead.txt)")" || true
+      - name: Fail job if dead
+        if: steps.chk.outputs.dead == 'true'
+        run: exit 1

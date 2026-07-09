@@ -642,6 +642,9 @@ export default function TravelCRM() {
   const [propCancelCustom,setPropCancelCustom]=useState("");
   const [propDays,setPropDays]=useState(null); // null = auto from vendor itinerary; array = day-wise edited
   const [saveStatus,setSaveStatus]=useState("");
+  const [dirty,setDirty]=useState(false);
+  const _dealLoadedRef=useRef(false);
+  const _autosaveTimer=useRef(null);
   const [apiLoading,setApiLoading]=useState(false);
   // User management
   const [users,setUsers]=useState([]);
@@ -1127,6 +1130,15 @@ ${text}
       .catch(()=>{ /* keep cached localStorage rates */ });
   },[]);
   const upd=(key,val)=>setDeal(d=>({...d,[key]:val}));
+  // ── Dirty tracking + debounced autosave ──
+  useEffect(()=>{
+    if(!_dealLoadedRef.current){_dealLoadedRef.current=true;return;}
+    setDirty(true);
+    if(_autosaveTimer.current) clearTimeout(_autosaveTimer.current);
+    _autosaveTimer.current=setTimeout(()=>{ if(deal&&deal.clientName) saveToAllDeals(true); },2500);
+    return ()=>{ if(_autosaveTimer.current) clearTimeout(_autosaveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[deal]);
 
   const updH=(id,key,val)=>
     setDeal(d=>({...d,hotelVendors:d.hotelVendors.map(v=>{
@@ -1190,8 +1202,8 @@ ${text}
   };
   const rmAttachment=(id)=>setDeal(d=>({...d,attachments:d.attachments.filter(a=>a.id!==id)}));
 
-  const saveToAllDeals = async () => {
-    if (!deal.clientName) { window.veToast && window.veToast("Please enter client name first", "warning"); return; }
+  const saveToAllDeals = async (silent) => {
+    if (!deal.clientName) { if(!silent){window.veToast && window.veToast("Please enter client name first", "warning");} return; }
     setApiLoading(true);
     // Always keep a local copy first so a deal can NEVER be lost, even if the network fails.
     const persistLocal = (d) => {
@@ -1211,7 +1223,9 @@ ${text}
       // Merge server response (gets real _id) but keep our _localId for matching.
       const finalDeal = { ...toSave, ...(saved || {}), _localId: toSave._localId };
       persistLocal(finalDeal);
-      window.veToast && window.veToast("✅ Deal saved successfully!", "success");
+      setDirty(false);
+      setSaveStatus(silent?"Autosaved "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}):"Saved");
+      if(!silent) window.veToast && window.veToast("✅ Deal saved successfully!", "success");
     } catch (e) {
       console.error("Save error:", e?.message);
       // Network/auth failed — DO NOT lose the deal. Keep it locally and tell the user clearly.
@@ -1758,14 +1772,40 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       if(cur!==null) out.push(cur);
       return out;
     };
-    const landBlocks = showH ? [(propDays&&propDays.length)?{__days:allDayLines}:null].filter(Boolean).concat((propDays&&propDays.length)?[]:(deal.landVendors||[]).filter(l=>l.itinerary)).map(l=>{
-      const days=l.__days?l.__days:parseDays(l.itinerary);
-      return days.map((d,i)=>`
-        <div style="display:flex;gap:14px;margin-bottom:12px">
-          <div style="min-width:54px;height:54px;background:linear-gradient(135deg,#c9961a,#f0c842);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800"><div style="font-size:9px">DAY</div><div style="font-size:19px">${i+1}</div></div>
-          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 16px;font-size:12.5px;line-height:1.65;color:#33415e">${(()=>{const lines=String(d).split("\n");const head=lines[0];const body=lines.slice(1).join("<br>");const m=head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);const title=m?m[2]:head;return `<span style="margin-right:7px">${dayIcon(d)}</span><b style="color:#0d1b3e">${esc(title||head)}</b>${body?`<br><span style="color:#5a6b8c">${esc(lines.slice(1).join(" "))}</span>`:""}`;})()}</div>
-        </div>`).join("");
-    }).join("") : "";
+    const landBlocks = showH ? (function(){
+      const srcs=[(propDays&&propDays.length)?{__days:allDayLines}:null].filter(Boolean).concat((propDays&&propDays.length)?[]:(deal.landVendors||[]).filter(l=>l.itinerary));
+      const allDays=srcs.map(l=>l.__days?l.__days:parseDays(l.itinerary)).reduce((a,b)=>a.concat(b),[]);
+      const N=allDays.length;
+      return allDays.map((d,i)=>{
+        const lines=String(d).split("\n");
+        let head=lines[0]||"";
+        const m=head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);
+        let rest=m?m[2]:head;
+        // pull out "(Mon 15th June)" style date chip
+        let chip=""; const dm=rest.match(/^\s*\(([^)]{3,30})\)\s*[:\-–]?\s*(.*)$/);
+        if(dm){chip=dm[1]; rest=dm[2]||rest;}
+        // title = part before first " - " or first sentence-ish colon
+        let title=rest, body=lines.slice(1).join(" ");
+        const tSplit=rest.split(/\s[-–—]\s|:\s/);
+        if(tSplit.length>1 && tSplit[0].length<70){ title=tSplit[0]; body=(rest.slice(title.length).replace(/^[\s:\-–—]+/,"")+" "+body).trim(); }
+        return `
+        <div style="display:flex;gap:0;position:relative">
+          <div style="width:66px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+            <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#c9961a,#f0c842);box-shadow:0 3px 10px rgba(201,150,26,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800;z-index:1">
+              <div style="font-size:7.5px;letter-spacing:1px">DAY</div><div style="font-size:17px;line-height:1">${i+1}</div>
+            </div>
+            ${i<N-1?`<div style="flex:1;width:2px;background:linear-gradient(#e8d9a8,#f3ecd2);margin:4px 0"></div>`:""}
+          </div>
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 17px;margin:0 0 16px 6px;box-shadow:0 2px 10px rgba(13,27,62,.05)">
+            <div style="display:flex;align-items:flex-start;gap:8px 10px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${dayIcon(d)} ${esc(title)}</div>
+              ${chip?`<div style="background:#fdf6e5;border:1px solid #ecd9a0;color:#8a6d1a;font-size:9.5px;font-weight:800;letter-spacing:.5px;border-radius:20px;padding:4px 11px;white-space:nowrap">📅 ${esc(chip)}</div>`:""}
+            </div>
+            ${body?`<div style="font-size:12px;line-height:1.7;color:#5a6b8c;margin-top:6px">${esc(body)}</div>`:""}
+          </div>
+        </div>`;
+      }).join("");
+    })() : "";
 
     const priceBlock = propShowPrice && sell>0 ? `
       <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:18px;padding:26px 28px;color:#fff;margin:8px 0 18px">
@@ -1862,6 +1902,33 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 </div>
 <div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
 </body></html>`;
+  }
+  function propWarnings(){
+    const w=[];
+    const P=x=>{if(!x)return null;const t=Date.parse(x);return isNaN(t)?null:t;};
+    const today0=new Date(); today0.setHours(0,0,0,0);
+    if(!(deal.clientName||"").trim()) w.push("Client name missing — legal acceptance mein naam blank aayega");
+    if(!(deal.contactNo||"").trim()) w.push("Client phone missing — WhatsApp send kaam nahi karega");
+    (deal.flightVendors||[]).forEach(f=>{
+      const secs=(f.sectors||[]).concat(f.returnSectors||[]).filter(x=>x.from||x.to);
+      let prev=null, prevLbl="";
+      secs.forEach(x=>{
+        const t=P(x.date); const lbl=(x.from||"?")+" → "+(x.to||"?");
+        if(t!==null){
+          if(t<today0.getTime()) w.push("Flight "+lbl+" ki date ("+x.date+") past mein hai");
+          if(prev!==null && t<prev) w.push("Flight dates ulti hain: "+lbl+" ("+x.date+") pichhle sector "+prevLbl+" se PEHLE hai");
+          prev=t; prevLbl=lbl+" ("+x.date+")";
+        }
+      });
+    });
+    (deal.hotelVendors||[]).forEach(h=>{
+      const ci=P(h.checkIn), co=P(h.checkOut); const nm=h.hotelName||h.city||"Hotel";
+      if(ci!==null&&co!==null&&co<=ci) w.push(nm+": check-out ("+h.checkOut+") check-in ("+h.checkIn+") ke baad nahi hai");
+      if(ci!==null&&ci<today0.getTime()) w.push(nm+": check-in ("+h.checkIn+") past mein hai");
+    });
+    const sell=propSell();
+    if(propShowPrice&&!(sell>0)) w.push("Selling price 0/blank hai — price section khali dikhega");
+    return w;
   }
   function loadPropDaysForEdit(){
     const dayHdr=/^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
@@ -2230,6 +2297,18 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <input value={propCoverUrl} onChange={e=>setPropCoverUrl(e.target.value)} placeholder="https://... (blank = auto/premium cover)"
               style={{width:"100%",background:"#f4f7fc",border:"1px solid #d4e0f5",borderRadius:10,padding:"10px 13px",fontSize:12,outline:"none",marginBottom:18}}/>
 
+            {dirty&&(
+              <div style={{display:"flex",alignItems:"center",gap:10,background:"#fdeaea",border:"1px solid #f5c6c6",borderRadius:10,padding:"9px 12px",marginBottom:12}}>
+                <span style={{fontSize:12,fontWeight:700,color:"#b91c1c",flex:1}}>⚠️ Unsaved changes — proposal purane data se ban sakti hai</span>
+                <button onClick={()=>saveToAllDeals(false)} disabled={apiLoading} style={{background:"#b91c1c",color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800}}>{apiLoading?"Saving...":"💾 Save now"}</button>
+              </div>
+            )}
+            {(function(){var ws=propWarnings(); return ws.length?(
+              <div style={{background:"#fdf6e5",border:"1px solid #ecd9a0",borderRadius:10,padding:"10px 14px",marginBottom:12}}>
+                <div style={{fontSize:10,letterSpacing:1.5,color:"#8a6d1a",fontWeight:800,marginBottom:5}}>⚠️ CHECK KARO ({ws.length})</div>
+                {ws.map(function(x,i){return <div key={i} style={{fontSize:11.5,color:"#7a5c10",lineHeight:1.7}}>• {x}</div>;})}
+              </div>
+            ):null;})()}
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>CANCELLATION POLICY</div>
             <div style={{display:"flex",gap:8,marginBottom:propCancelMode==="custom"?8:14,flexWrap:"wrap"}}>
               {[["static","📋 Static (official policy)"],["custom","✏️ Amend for this booking"]].map(function(o){
@@ -2285,7 +2364,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               <input value={deal.destination||""} onChange={e=>upd("destination",e.target.value)} placeholder="Destination / Package Name..." style={{background:"transparent",border:"none",borderBottom:"1px solid #c2d2ee",borderRadius:0,color:"#0f2350",fontSize:18,fontWeight:800,padding:"2px 0",width:300,outline:"none"}} />
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
-              {saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>}
+              {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
               <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}
                 title="Deal status (used in dashboard Booked/Cancelled totals)"

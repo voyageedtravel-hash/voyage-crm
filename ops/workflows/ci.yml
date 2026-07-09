@@ -1,0 +1,22 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  jsx-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JSX parse check (fast fail)
+        run: npx --yes esbuild frontend/src/App.js --loader:.js=jsx --outfile=/dev/null
+  build:
+    runs-on: ubuntu-latest
+    needs: jsx-parse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install
+        working-directory: frontend
+        run: npm ci || npm install
+      - name: Production build (CI=true, ESLint warnings = errors, same as Netlify)
+        working-directory: frontend
+        run: CI=true npx react-scripts build
