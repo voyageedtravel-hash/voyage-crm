@@ -1679,13 +1679,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           var chk=document.getElementById("veAgree"), msg=document.getElementById("veAccMsg");
           if(!chk.checked){ msg.style.color="#b91c1c"; msg.textContent="⚠️ Please tick the acceptance checkbox first."; return; }
           btn.disabled=true; btn.textContent="Submitting..."; 
+          var hashP = (window.crypto&&crypto.subtle) ? crypto.subtle.digest("SHA-256", new TextEncoder().encode(VE_POLICY+"|"+VE_REF)).then(function(buf){ return Array.prototype.map.call(new Uint8Array(buf),function(b){return ("0"+b.toString(16)).slice(-2);}).join(""); }).catch(function(){return "unavailable";}) : Promise.resolve("unavailable");
+          hashP.then(function(policyHash){
           var body={ _subject: "PROPOSAL ACCEPTED - " + VE_REF + " - " + VE_CLIENT,
             type:"Proposal T&C Acceptance", reference:VE_REF, client:VE_CLIENT, destination:VE_DEST,
             packagePrice:VE_PRICE, policyMode:VE_PMODE, cancellationPolicyAccepted:VE_POLICY,
+            policyHashSHA256:policyHash,
             acceptedAtISO:new Date().toISOString(), acceptedFrom:(navigator.userAgent||"").slice(0,120) };
-          fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify(body)})
+          return fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify(body)})
           .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-          .then(function(){ msg.style.color="#15803d"; msg.textContent="✅ Thank you! Your acceptance has been recorded and sent to Voyage-Ed Travels (Ref: "+VE_REF+")."; btn.textContent="✅ Accepted"; })
+          .then(function(){ msg.style.color="#15803d"; msg.textContent="✅ Thank you! Your acceptance has been recorded and sent to Voyage-Ed Travels (Ref: "+VE_REF+")."; btn.textContent="✅ Accepted"; }); })
           .catch(function(){ msg.style.color="#b91c1c";
             var mailto="mailto:enquiry@voyage-ed.com?subject="+encodeURIComponent("PROPOSAL ACCEPTED - "+VE_REF+" - "+VE_CLIENT)+"&body="+encodeURIComponent("I accept the T&C, Booking Policy and Cancellation Policy of proposal "+VE_REF+".%0ACancellation policy accepted: "+VE_POLICY+"%0AAccepted at: "+new Date().toString());
             msg.innerHTML="⚠️ Could not auto-submit. <a href='"+mailto+"' style='color:#0d1b3e'>Click here to send your acceptance by email</a>."; btn.disabled=false; btn.textContent="✅ Accept & Submit"; });
@@ -1796,12 +1799,20 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             ${i<N-1?`<div style="flex:1;width:2px;background:linear-gradient(#e8d9a8,#f3ecd2);margin:4px 0"></div>`:""}
           </div>
-          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 17px;margin:0 0 16px 6px;box-shadow:0 2px 10px rgba(13,27,62,.05)">
+          <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-left:3px solid #e8d089;border-radius:14px;padding:13px 17px;margin:0 0 16px 6px;box-shadow:0 2px 10px rgba(13,27,62,.05)">
             <div style="display:flex;align-items:flex-start;gap:8px 10px;flex-wrap:wrap">
-              <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${dayIcon(d)} ${esc(title)}</div>
+              <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${i===0&&/arriv|pick|airport|welcome/i.test(d)?"🛬":i===N-1&&/depart|drop|airport|onward journey/i.test(d)?"🛫":dayIcon(d)} ${esc(title)}</div>
               ${chip?`<div style="background:#fdf6e5;border:1px solid #ecd9a0;color:#8a6d1a;font-size:9.5px;font-weight:800;letter-spacing:.5px;border-radius:20px;padding:4px 11px;white-space:nowrap">📅 ${esc(chip)}</div>`:""}
             </div>
-            ${body?`<div style="font-size:12px;line-height:1.7;color:#5a6b8c;margin-top:6px">${esc(body)}</div>`:""}
+            ${(function(){
+              if(!body) return "";
+              const hi=(t)=>esc(t).replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi,'<b style="color:#8a6d1a;font-weight:700">$1</b>');
+              const sents=body.split(/(?<=[.!?])\s+(?=[A-Z])/).map(x=>x.trim()).filter(Boolean);
+              if(body.length>170&&sents.length>=3){
+                return '<div style="margin-top:8px">'+sents.map(x=>'<div style="display:flex;gap:8px;font-size:11.5px;line-height:1.65;color:#5a6b8c;margin-bottom:4px"><span style="color:#c9961a;font-weight:800;flex-shrink:0">›</span><span>'+hi(x)+'</span></div>').join("")+'</div>';
+              }
+              return '<div style="font-size:12px;line-height:1.7;color:#5a6b8c;margin-top:6px">'+hi(body)+'</div>';
+            })()}
           </div>
         </div>`;
       }).join("");
@@ -1954,11 +1965,26 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       const a=D(h.checkIn), b=D(h.checkOut);
       if(a&&b&&b<=a) issues.push("🏨 Hotel "+(hi+1)+" ("+(h.hotelName||h.city||"?")+"): check-out check-in se pehle/same hai");
     });
+    const _T0=(function(){const d=new Date();d.setHours(0,0,0,0);return d.getTime();})();
+    (deal.flightVendors||[]).forEach((f)=>{ (f.sectors||[]).concat(f.returnSectors||[]).forEach(x=>{ const t=D(x.date); if((x.from||x.to)&&t!==null&&t<_T0&&!issues.some(m=>m.indexOf("past date")>=0)) issues.push("✈️ Kisi flight ki date past date mein hai ("+x.date+") — check karo"); }); });
+    (deal.hotelVendors||[]).forEach((h)=>{ const a=D(h.checkIn); if(a!==null&&a<_T0&&!issues.some(m=>m.indexOf("check-in past")>=0)) issues.push("🏨 "+(h.hotelName||h.city||"Hotel")+": check-in past date mein hai"); });
+    const _recv=(deal.clientPayments||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
+    if(propSell()>0&&_recv>propSell()) issues.push("💰 Received (₹"+_recv.toLocaleString("en-IN")+") total price se ZYADA hai — payment entries check karo");
     if(propShowPrice&&propSell()<=0) issues.push("💰 Selling price 0 hai lekin 'Show price' ON hai");
     if(!(deal.clientName||"").trim()) issues.push("👤 Client name khali hai — acceptance section mein naam nahi aayega");
     return issues;
   }
+  // ── Autosave: 2s debounce after any change — unsaved-state proposals khatam ──
+  const _lastSavedRef=useRef("");
+  useEffect(()=>{
+    if(!deal||(!(deal.clientName||"").trim()&&!(deal.destination||"").trim())) return;
+    const snap=JSON.stringify({...deal,_savedAt:0});
+    if(snap===_lastSavedRef.current) return;
+    const t=setTimeout(()=>{ _lastSavedRef.current=snap; try{saveToAllDeals(true);}catch(e){} },2000);
+    return ()=>clearTimeout(t);
+  },[deal]); // eslint-disable-line react-hooks/exhaustive-deps
   function openProposal(){
+    try{ saveToAllDeals(true); }catch(e){}
     const issues=validateDealForProposal();
     if(issues.length && !window.confirm("⚠️ PROPOSAL WARNINGS:\n\n"+issues.join("\n")+"\n\nPhir bhi generate karein?")) return;
     const w=window.open("","_blank");
