@@ -1869,7 +1869,31 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     const days=(deal.landVendors||[]).filter(l=>l.itinerary).map(l=>parse(l.itinerary)).reduce((a,b)=>a.concat(b),[]);
     setPropDays(days.length?days:[""]);
   }
+  function validateDealForProposal(){
+    const issues=[];
+    const D=x=>{const t=Date.parse(x);return isNaN(t)?null:t;};
+    (deal.flightVendors||[]).forEach((f,fi)=>{
+      const secs=(f.sectors||[]).filter(x=>x.from||x.to);
+      for(let i=1;i<secs.length;i++){
+        const a=D(secs[i-1].date), b=D(secs[i].date);
+        if(a&&b&&b<a) issues.push("✈️ Flight "+(fi+1)+": sector "+(i+1)+" ("+secs[i].from+"→"+secs[i].to+", "+secs[i].date+") ki date pichhle sector se PEHLE hai — dates check karo");
+      }
+      (f.returnSectors||[]).filter(x=>x.from||x.to).forEach((r,ri)=>{
+        const a=secs.length?D(secs[secs.length-1].date):null, b=D(r.date);
+        if(a&&b&&b<a) issues.push("✈️ Flight "+(fi+1)+": return sector ("+r.date+") onward se pehle hai");
+      });
+    });
+    (deal.hotelVendors||[]).forEach((h,hi)=>{
+      const a=D(h.checkIn), b=D(h.checkOut);
+      if(a&&b&&b<=a) issues.push("🏨 Hotel "+(hi+1)+" ("+(h.hotelName||h.city||"?")+"): check-out check-in se pehle/same hai");
+    });
+    if(propShowPrice&&propSell()<=0) issues.push("💰 Selling price 0 hai lekin 'Show price' ON hai");
+    if(!(deal.clientName||"").trim()) issues.push("👤 Client name khali hai — acceptance section mein naam nahi aayega");
+    return issues;
+  }
   function openProposal(){
+    const issues=validateDealForProposal();
+    if(issues.length && !window.confirm("⚠️ PROPOSAL WARNINGS:\n\n"+issues.join("\n")+"\n\nPhir bhi generate karein?")) return;
     const w=window.open("","_blank");
     if(!w){window.veToast("Popup blocked — allow popups","error");return;}
     w.document.write(buildProposalHTML());
