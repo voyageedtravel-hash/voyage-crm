@@ -1312,6 +1312,31 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"summary",label:"📋 Summary"},
   ];
 
+  // ── Real-time image health check: modal khulte hi cover+gallery test — dead image PDF tak jaane hi nahi degi ──
+  useEffect(()=>{
+    if(!proposalOpen){ setImgHealth(null); return; }
+    let cancelled=false;
+    setImgHealth("checking");
+    const urls=[propCover()].concat(propGallery()).filter(Boolean);
+    if(!urls.length){ setImgHealth({ok:0,dead:[]}); return; }
+    Promise.all(urls.map(u=>new Promise(res=>{
+      const im=new Image();
+      const t=setTimeout(()=>res({u,ok:false}),8000);
+      im.onload=()=>{clearTimeout(t);res({u,ok:true});};
+      im.onerror=()=>{clearTimeout(t);res({u,ok:false});};
+      im.src=u;
+    }))).then(rs=>{ if(!cancelled) setImgHealth({ok:rs.filter(r=>r.ok).length, dead:rs.filter(r=>!r.ok).map(r=>r.u)}); });
+    return ()=>{cancelled=true;};
+  },[proposalOpen,propCoverUrl,deal&&deal.destination]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Autosave: 2s debounce after any change — unsaved-state proposals khatam ──
+  const _lastSavedRef=useRef("");
+  useEffect(()=>{
+    if(!deal||(!(deal.clientName||"").trim()&&!(deal.destination||"").trim())) return;
+    const snap=JSON.stringify({...deal,_savedAt:0});
+    if(snap===_lastSavedRef.current) return;
+    const t=setTimeout(()=>{ _lastSavedRef.current=snap; try{saveToAllDeals(true);}catch(e){} },2000);
+    return ()=>clearTimeout(t);
+  },[deal]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!isLoggedIn) {
     return <Login onLogin={() => setIsLoggedIn(true)} />;
   }
@@ -1981,22 +2006,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(propShowPrice&&!(sell>0)) w.push("Selling price 0/blank hai — price section khali dikhega");
     return w;
   }
-  // ── Real-time image health check: modal khulte hi cover+gallery test — dead image PDF tak jaane hi nahi degi ──
-  useEffect(()=>{
-    if(!proposalOpen){ setImgHealth(null); return; }
-    let cancelled=false;
-    setImgHealth("checking");
-    const urls=[propCover()].concat(propGallery()).filter(Boolean);
-    if(!urls.length){ setImgHealth({ok:0,dead:[]}); return; }
-    Promise.all(urls.map(u=>new Promise(res=>{
-      const im=new Image();
-      const t=setTimeout(()=>res({u,ok:false}),8000);
-      im.onload=()=>{clearTimeout(t);res({u,ok:true});};
-      im.onerror=()=>{clearTimeout(t);res({u,ok:false});};
-      im.src=u;
-    }))).then(rs=>{ if(!cancelled) setImgHealth({ok:rs.filter(r=>r.ok).length, dead:rs.filter(r=>!r.ok).map(r=>r.u)}); });
-    return ()=>{cancelled=true;};
-  },[proposalOpen,propCoverUrl,deal&&deal.destination]); // eslint-disable-line react-hooks/exhaustive-deps
   function loadPropDaysForEdit(){
     const dayHdr=/^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
     const parse=(text)=>{const raw=(text||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);const f=raw.findIndex(l=>dayHdr.test(l));if(f<0)return raw;const out=[];let cur=null;raw.slice(f).forEach(l=>{if(dayHdr.test(l)){if(cur!==null)out.push(cur);cur=l;}else{cur=cur===null?l:cur+" "+l;}});if(cur!==null)out.push(cur);return out;};
@@ -2030,15 +2039,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(!(deal.clientName||"").trim()) issues.push("👤 Client name khali hai — acceptance section mein naam nahi aayega");
     return issues;
   }
-  // ── Autosave: 2s debounce after any change — unsaved-state proposals khatam ──
-  const _lastSavedRef=useRef("");
-  useEffect(()=>{
-    if(!deal||(!(deal.clientName||"").trim()&&!(deal.destination||"").trim())) return;
-    const snap=JSON.stringify({...deal,_savedAt:0});
-    if(snap===_lastSavedRef.current) return;
-    const t=setTimeout(()=>{ _lastSavedRef.current=snap; try{saveToAllDeals(true);}catch(e){} },2000);
-    return ()=>clearTimeout(t);
-  },[deal]); // eslint-disable-line react-hooks/exhaustive-deps
   function openProposal(){
     try{ saveToAllDeals(true); }catch(e){}
     const issues=validateDealForProposal();
