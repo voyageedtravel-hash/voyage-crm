@@ -1205,6 +1205,52 @@ ${text}
   const addCPmt=()=>setDeal(d=>({...d,clientPayments:[...d.clientPayments,emptyPayment(CLIENT_MODES)]}));
   const updCPmt=(pid,key,val)=>setDeal(d=>({...d,clientPayments:d.clientPayments.map(p=>p.id===pid?{...p,[key]:val}:p)}));
   const rmCPmt=(pid)=>setDeal(d=>({...d,clientPayments:d.clientPayments.filter(p=>p.id!==pid)}));
+  const exportAllDeals=()=>{
+    try{
+      const all=loadAllDeals();
+      const cur={...deal,_savedAt:deal._savedAt||new Date().toISOString(),_localId:deal._localId||uid()};
+      const map={}; all.concat([cur]).forEach(d=>{ if(d&&d._localId) map[d._localId]=d; });
+      const list=Object.values(map);
+      const blob=new Blob([JSON.stringify({app:"voyage-crm",exportedAt:new Date().toISOString(),count:list.length,deals:list},null,1)],{type:"application/json"});
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+      a.download="voyage-ed-backup-"+new Date().toISOString().slice(0,10)+".json";
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+      window.veToast && window.veToast(list.length+" deals ka backup download ho gaya — isse Google Drive/email me safe rakho ✅","success");
+    }catch(e){ window.veToast && window.veToast("Backup failed: "+e.message,"error"); }
+  };
+  const importDealsFile=(file)=>{
+    const rd=new FileReader();
+    rd.onload=()=>{
+      try{
+        const j=JSON.parse(rd.result);
+        const incoming=Array.isArray(j)?j:(j&&Array.isArray(j.deals))?j.deals:null;
+        if(!incoming) throw new Error("valid backup file nahi hai");
+        const cur=loadAllDeals(); const map={};
+        cur.forEach(d=>{ if(d&&d._localId) map[d._localId]=d; });
+        let added=0,updated=0;
+        incoming.forEach(raw=>{
+          const d=normalizeDeal(raw); if(!d._localId){ d._localId=uid(); }
+          const ex=map[d._localId];
+          if(!ex){ map[d._localId]=d; added++; }
+          else if((d._savedAt||"")>(ex._savedAt||"")){ map[d._localId]=d; updated++; }
+        });
+        const merged=Object.values(map);
+        saveAllDeals(merged); setAllDeals(merged);
+        window.veToast && window.veToast("Restore done ✅ "+added+" nayi deals, "+updated+" updated (newer). Total: "+merged.length,"success");
+      }catch(e){ window.veToast && window.veToast("Restore failed: "+e.message,"error"); }
+    };
+    rd.readAsText(file);
+  };
+  const duplicateDeal=()=>{
+    const copy=normalizeDeal({...JSON.parse(JSON.stringify(deal)),
+      _localId:uid(), _savedAt:new Date().toISOString(),
+      clientName:(deal.clientName||"Client")+" (Copy)",
+      clientPayments:[], refunds:[], status:"Lead"});
+    delete copy._id;
+    const all=loadAllDeals(); all.unshift(copy); saveAllDeals(all); setAllDeals(all);
+    setDeal(copy); saveDeal(copy);
+    window.veToast && window.veToast("Deal duplicate ho gayi — same package, payments/refunds fresh. Client name update kar lo ✏️","success");
+  };
   const addRefund=()=>setDeal(d=>({...d,refunds:[...(d.refunds||[]),emptyRefund()]}));
   const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
   const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
@@ -2353,7 +2399,15 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             ))}
           </div>
 
-          <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>All Deals ({allDeals.length})</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+            <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase"}}>All Deals ({allDeals.length})</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={exportAllDeals} className="btn btn-sm" title="Saari deals ki JSON file download — Google Drive me safe rakho">⬇️ Backup</button>
+              <label className="btn btn-sm" style={{cursor:"pointer"}} title="Backup file se deals wapas lao (naya device / data loss)">⬆️ Restore
+                <input type="file" accept=".json,application/json" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0]; if(f) importDealsFile(f); e.target.value="";}}/>
+              </label>
+            </div>
+          </div>
           {allDeals.length===0&&<div style={{textAlign:"center",padding:40,color:"#a9bce0",background:"#ffffff",borderRadius:12,border:"1px dashed #d4e0f5"}}>No deals saved yet. Create a new deal and save it.</div>}
           <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
             <input value={dealSearch} onChange={e=>setDealSearch(e.target.value)} placeholder="🔍 Search client, destination, deal no..."
@@ -2533,6 +2587,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
               </select>
               <button onClick={newDeal} className="btn btn-sm">+ New</button>
+              <button onClick={duplicateDeal} className="btn btn-sm" title="Same package naye client ke liye — payments/refunds fresh">⧉ Duplicate</button>
               <button onClick={saveToAllDeals} className="btn btn-ind" disabled={apiLoading}>{apiLoading?"Saving...":"💾 Save Deal"}</button>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:2}}>
