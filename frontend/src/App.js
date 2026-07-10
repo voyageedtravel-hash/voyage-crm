@@ -657,6 +657,7 @@ export default function TravelCRM() {
   const [propDays,setPropDays]=useState(null); // null = auto from vendor itinerary; array = day-wise edited
   const [propInc,setPropInc]=useState(null);  // null = auto; string = edited inclusions (one per line)
   const [propExc,setPropExc]=useState(null);  // null = auto; string = edited exclusions
+  const [propDayPhotos,setPropDayPhotos]=useState({}); // {dayIndex: dataURL} — day card ke saath photo
   const [saveStatus,setSaveStatus]=useState("");
   const [dirty,setDirty]=useState(false);
   const _dealLoadedRef=useRef(false);
@@ -1985,6 +1986,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${i===0&&/arriv|pick|airport|welcome/i.test(d)?"🛬":i===N-1&&/depart|drop|airport|onward journey/i.test(d)?"🛫":dayIcon(d)} ${esc(title)}</div>
               ${chip?`<div style="background:#fdf6e5;border:1px solid #ecd9a0;color:#8a6d1a;font-size:9.5px;font-weight:800;letter-spacing:.5px;border-radius:20px;padding:4px 11px;white-space:nowrap">📅 ${esc(chip)}</div>`:""}
             </div>
+            ${propDayPhotos[i]?`<img src="${propDayPhotos[i]}" style="float:right;width:132px;height:90px;object-fit:cover;border-radius:10px;margin:6px 0 6px 12px;border:1px solid #eadfc2"/>`:""}
             ${(function(){const mm=mealsOf(d),tt=tagsOf(d); if(!mm.length&&!tt.length) return ""; return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${mm.map(x=>`<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join("")}${tt.map(x=>`<span style="background:#eef3fc;border:1px solid #d4e0f5;color:#334e82;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join("")}</div>`;})()}
             ${(function(){
               if(!body) return "";
@@ -2602,12 +2604,24 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div style={{minWidth:44,background:"linear-gradient(135deg,#c9961a,#f0c842)",borderRadius:8,textAlign:"center",padding:"5px 0",fontSize:10,fontWeight:800,color:"#0d1b3e"}}>DAY<br/>{i+1}</div>
                     <textarea value={d} rows={2} onChange={e=>{var a=propDays.slice();a[i]=e.target.value;setPropDays(a);}}
                       style={{flex:1,background:"#fff",border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 10px",fontSize:11.5,outline:"none",resize:"vertical",fontFamily:"inherit",lineHeight:1.5}}/>
-                    <button onClick={()=>{var a=propDays.slice();a.splice(i,1);setPropDays(a.length?a:[""]);}} title="Remove day" style={{background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+                    {propDayPhotos[i]?(
+                      <div style={{position:"relative",width:52,flexShrink:0}}>
+                        <img src={propDayPhotos[i]} alt="" style={{width:52,height:38,objectFit:"cover",borderRadius:6,border:"1px solid #d4e0f5"}}/>
+                        <button onClick={()=>{const m={...propDayPhotos};delete m[i];setPropDayPhotos(m);}} title="Photo hatao" style={{position:"absolute",top:-7,right:-7,width:17,height:17,borderRadius:"50%",background:"#b91c1c",color:"#fff",border:"none",fontSize:9,cursor:"pointer",lineHeight:"17px",padding:0}}>✕</button>
+                      </div>
+                    ):(
+                      <label tabIndex={0} title="Is day ki photo — click karke Ctrl+V ya file choose"
+                        onPaste={e=>{const it=Array.from(e.clipboardData.items||[]).find(x=>x.type&&x.type.indexOf("image")===0); if(it){e.preventDefault(); const f=it.getAsFile(); if(f) window.__veImgToData(f,(d)=>setPropDayPhotos(m=>({...m,[i]:d})));}}}
+                        style={{width:52,height:38,flexShrink:0,border:"1.5px dashed #c2d2ee",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,cursor:"pointer",background:"#f8fafd",outline:"none"}}>📷
+                        <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0]; if(f) window.__veImgToData(f,(d)=>setPropDayPhotos(m=>({...m,[i]:d}))); e.target.value="";}}/>
+                      </label>
+                    )}
+                    <button onClick={()=>{var a=propDays.slice();a.splice(i,1);const m={};Object.keys(propDayPhotos).forEach(k=>{const kk=Number(k); if(kk<i)m[kk]=propDayPhotos[k]; else if(kk>i)m[kk-1]=propDayPhotos[k];});setPropDayPhotos(m);setPropDays(a.length?a:[""]);}} title="Remove day" style={{background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
                   </div>;
                 })}
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>setPropDays(propDays.concat([""]))} style={{flex:1,background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#334e82"}}>+ Add day</button>
-                  <button onClick={()=>setPropDays(null)} style={{flex:1,background:"transparent",border:"1px solid #e3eaf7",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#7d8bab"}}>↺ Reset to auto</button>
+                  <button onClick={()=>{setPropDays(null);setPropDayPhotos({});}} style={{flex:1,background:"transparent",border:"1px solid #e3eaf7",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#7d8bab"}}>↺ Reset to auto</button>
                 </div>
               </div>
             )}
