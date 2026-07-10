@@ -328,7 +328,7 @@ const emptyFlightVendor = () => ({
 const initDeal = {
   clientName:"", contactNo:"", email:"",
   adults:"2", children:"0", infants:"0", rooms:"1",
-  modeOfQuery:"Call", travelDates:"", destination:"",
+  modeOfQuery:"Call", travelDates:"", destination:"", quoteValidTill:"",
   remarks:"",
   gstMode:"profit",
   gstExemptSections:[],
@@ -2013,7 +2013,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">TOTAL PACKAGE PRICE</div>
         <div style="font-size:34px;font-weight:800">₹${sell.toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
         ${totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">≈ ₹${Math.round(sell/totalPax).toLocaleString("en-IN")} per person · ${pax}</div>`:""}
-        <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till ${new Date(Date.now()+7*864e5).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}.</div>
+        <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till <b>${quoteVTDisplay}</b>.</div>
       </div>` : `
       <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
         <div style="font-size:13px;color:#8a6d1a;font-weight:700">💬 Best price guaranteed — contact us for your personalised quote</div>
@@ -2132,6 +2132,13 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(propShowPrice&&!(sell>0)) w.push("Selling price 0/blank hai — price section khali dikhega");
     return w;
   }
+  // ── Quote validity engine ──
+  const _qToday=()=>{const d=new Date();d.setHours(0,0,0,0);return d;};
+  const quoteVT=(function(){ const t=Date.parse(deal.quoteValidTill||""); if(!isNaN(t)&&t>=_qToday().getTime()) return deal.quoteValidTill; const d=new Date(Date.now()+7*864e5); return d.toISOString().slice(0,10); })();
+  const quoteDaysLeft=Math.ceil((Date.parse(quoteVT)-_qToday().getTime())/864e5);
+  const quoteVTDisplay=new Date(quoteVT).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
+  const persistQuoteVT=(vt)=>{ if(deal.quoteValidTill!==vt) setDeal(d=>({...d,quoteValidTill:vt})); };
+  const extendQuoteVT=()=>{ const d=new Date(Date.now()+7*864e5).toISOString().slice(0,10); setDeal(x=>({...x,quoteValidTill:d})); window.veToast&&window.veToast("Quote validity extend — ab "+new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short"})+" tak","success"); };
   const visaIncludedInDeal=()=> (deal.visaVendors||[]).some(v=> (Number(v.sellingPrice)||0)>0 || (Number(v.costPrice)||0)>0 );
   function autoIncText(){
     const L=[];
@@ -2183,6 +2190,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     return issues;
   }
   function openProposal(){
+    persistQuoteVT(quoteVT);
     try{ saveToAllDeals(true); }catch(e){}
     const issues=validateDealForProposal();
     if(issues.length && !window.confirm("⚠️ PROPOSAL WARNINGS:\n\n"+issues.join("\n")+"\n\nPhir bhi generate karein?")) return;
@@ -2192,6 +2200,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     w.document.close();
   }
   function downloadProposalHTML(){
+    persistQuoteVT(quoteVT);
     try{ saveToAllDeals(true); }catch(e){}
     const issues=validateDealForProposal();
     if(issues.length && !window.confirm("⚠️ PROPOSAL WARNINGS:\n\n"+issues.join("\n")+"\n\nPhir bhi generate karein?")) return;
@@ -2224,7 +2233,9 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     }
     if(propShowPrice&&sell>0) m+="\n💰 *Total: ₹"+sell.toLocaleString("en-IN")+"/-* (all inclusive)\n";
     else m+="\n💬 Reply for your best personalised price!\n";
-    m+="\n📄 Detailed PDF proposal attached separately.\n\n— Team Voyage-Ed 🌟\n📞 +91 70096 59048 · voyage-ed.com";
+    const _wref=deal.reference||("VE-"+(deal._localId||"").slice(-4).toUpperCase());
+    m+="\n⏳ *Price valid till "+quoteVTDisplay+"* — seats/rooms subject to availability.\n";
+    m+="\n✅ To confirm, simply reply: *I ACCEPT "+_wref+"*\n📄 Detailed PDF proposal attached separately.\n\n— Team Voyage-Ed 🌟\n📞 +91 70096 59048 · voyage-ed.com";
     window.open("https://wa.me/91"+ph+"?text="+encodeURIComponent(m),"_blank");
   }
 
@@ -2565,6 +2576,12 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             {imgHealth&&imgHealth!=="checking"&&imgHealth.dead&&imgHealth.dead.length===0&&imgHealth.ok>0&&(
               <div style={{background:"#f0faf2",border:"1px solid #c9e8d0",borderRadius:10,padding:"8px 12px",fontSize:11,color:"#15803d",marginBottom:12,fontWeight:600}}>✅ Saari {imgHealth.ok} destination images live hain</div>
             )}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+              <span style={{flex:1,fontSize:11,fontWeight:800,borderRadius:8,padding:"8px 12px",background:quoteDaysLeft>3?"#f0faf4":quoteDaysLeft>=1?"#fff7ed":"#fdf1f1",color:quoteDaysLeft>3?"#15803d":quoteDaysLeft>=1?"#c2660a":"#b91c1c",border:"1px solid "+(quoteDaysLeft>3?"#cfe9d6":quoteDaysLeft>=1?"#f3dfc0":"#f3c6c6")}}>
+                ⏳ Quote valid till {quoteVTDisplay}{deal.quoteValidTill?` — ${quoteDaysLeft} din ${quoteDaysLeft===1?"bacha":"bache"}`:" (generate pe lock hogi)"}
+              </span>
+              <button onClick={extendQuoteVT} title="+7 din" style={{background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"8px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#334e82"}}>🔄 +7d</button>
+            </div>
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>CANCELLATION POLICY</div>
             <div style={{display:"flex",gap:8,marginBottom:propCancelMode==="custom"?8:14,flexWrap:"wrap"}}>
               {[["static","📋 Static (official policy)"],["custom","✏️ Amend for this booking"]].map(function(o){
