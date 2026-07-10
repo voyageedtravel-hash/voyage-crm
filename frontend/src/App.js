@@ -1739,12 +1739,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         </label>
         <button id="veAccBtn" style="margin-top:12px;background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;font-size:13px;font-weight:800;cursor:pointer">✅ Accept & Submit</button>
         <div id="veAccMsg" style="font-size:12px;margin-top:10px;font-weight:700"></div>
+        <div style="font-size:10.5px;color:#7d8bab;margin-top:8px">Ya ek tap me: <a href="${acceptWA}" style="color:#15803d;font-weight:800">WhatsApp par accept karein →</a></div>
       </div>
-      <div class="ve-printsign" style="display:none;font-size:11px;color:#33415e;line-height:2.4">
-        I have read and accept the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1–16) of this proposal.<br><br>
-        Client Signature: ______________________________ &nbsp;&nbsp;&nbsp; Name: ${esc(deal.clientName)||"____________________"} &nbsp;&nbsp;&nbsp; Date: ________________
-        <div style="margin-top:10px;background:#f0faf4;border:1px solid #c9e8d0;border-radius:10px;padding:8px 14px;font-size:10.5px;line-height:1.7;color:#15803d">
-          ✅ <b>Accept digitally in seconds:</b> WhatsApp us at <b>+91 70096 59048</b> with the message — <b>"I ACCEPT ${esc(ref)}"</b> — or scan the QR at the end of this proposal. Your reply will be treated as acceptance of these terms.
+      <div class="ve-printsign" style="display:none">
+        <a href="${acceptWA}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);border-radius:14px;padding:16px 20px;text-align:center;margin:4px 0 12px">
+          <span style="color:#fff;font-size:16px;font-weight:800;letter-spacing:.5px">✅ &nbsp;TAP HERE TO ACCEPT THIS PROPOSAL</span><br>
+          <span style="color:#d7f5e0;font-size:10.5px">Ek tap me WhatsApp khulega — ready-typed acceptance message ke saath — bas Send dabayein.<br>By sending, you accept the Booking Policy, Cancellation Policy & Terms (Clauses 1–16) · Ref: ${esc(ref)}</span>
+        </a>
+        <div style="font-size:10px;color:#7d8bab;text-align:center;margin-bottom:10px">Ya WhatsApp par likh bhejein: <b style="color:#33415e">"I ACCEPT ${esc(ref)}"</b> → <b style="color:#33415e">+91 70096 59048</b> · Ya QR scan karein (footer)</div>
+        <div style="font-size:11px;color:#33415e;line-height:2.2;border-top:1px dashed #e3d9be;padding-top:8px">
+          For physical signing: &nbsp; Client Signature: ______________________________ &nbsp;&nbsp; Name: ${esc(deal.clientName)||"____________________"} &nbsp;&nbsp; Date: ________________
         </div>
       </div>
     </div>
@@ -1773,7 +1777,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       })();
     </script>
     ` ;
-    const qrURL="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data="+encodeURIComponent("https://wa.me/917009659048?text="+encodeURIComponent("Hi! I would like to confirm my "+(deal.destination||"trip")+" proposal (Ref: "+ref+")"));
+    const acceptMsg="I, "+(deal.clientName||"the Client")+", have read and ACCEPT the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1-16) of Voyage-Ed proposal Ref: "+ref+".";
+    const acceptWA="https://wa.me/917009659048?text="+encodeURIComponent(acceptMsg);
+    const qrURL="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data="+encodeURIComponent(acceptWA);
 
     const sectorRow=(s)=>{
       const _code=String(s.airlineCode||"").trim().toUpperCase();
