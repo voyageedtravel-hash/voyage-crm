@@ -349,6 +349,10 @@ const VENDORS_KEY = "travelcrm_vendors";
 const DEALS_KEY = "travelcrm_all_deals";
 
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
+// Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
+const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","attachments"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  return x; };
 const saveDeal = (d) => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); } catch(e){} };
 const loadVendorNames = () => { try { const v=localStorage.getItem(VENDORS_KEY); return v?JSON.parse(v):[]; } catch(e){return[];} };
 const saveVendorName = (name) => {
@@ -635,7 +639,7 @@ export default function TravelCRM() {
   );
   const [screen,setScreen]=useState("dashboard");
   const [allDeals,setAllDeals]=useState(()=>loadAllDeals());
-  const [deal,setDeal]=useState(()=>loadDeal()||{...initDeal});
+  const [deal,setDeal]=useState(()=>normalizeDeal(loadDeal()));
   const [tab,setTab]=useState("client");
   const [expandedVendor,setExpandedVendor]=useState(null);
   const [receiptPayment,setReceiptPayment]=useState(null);
@@ -1220,8 +1224,8 @@ ${text}
       const idx = all.findIndex(x => (d._id && x._id === d._id) || (d._localId && x._localId === d._localId));
       if (idx >= 0) all[idx] = d; else all.unshift(d);
       saveAllDeals(all); setAllDeals(all);
-      setDeal(d); saveDeal(d);
-      return d;
+      const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd);
+      return nd;
     };
     try {
       const toSave = { ...deal, _localId: deal._localId || uid(), _savedAt: new Date().toISOString() };
@@ -1257,7 +1261,7 @@ ${text}
   };
 
   const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal};setDeal(d);saveDeal(d);setTab("client");} };
-  const openDeal=(d)=>{ setDeal(d); saveDeal(d); setScreen("deal"); setTab("client"); };
+  const openDeal=(d)=>{ const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd); setScreen("deal"); setTab("client"); };
 
   const vendorINR=(v)=>({
     costINR:toINR(v.costPrice,v.currency,v.exchangeRate),
@@ -2915,8 +2919,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             </div>
             <div className="card">
               <div className="sec-head">Payment Entries — {deal.clientName||"Client"}</div>
-              {deal.clientPayments.length===0&&<div style={{textAlign:"center",padding:30,color:"#a9bce0"}}>No payments recorded yet.</div>}
-              {deal.clientPayments.map((pmt,i)=>(
+              {(deal.clientPayments||[]).length===0&&<div style={{textAlign:"center",padding:30,color:"#a9bce0"}}>No payments recorded yet.</div>}
+              {(deal.clientPayments||[]).map((pmt,i)=>(
                 <div key={pmt.id} className="prow" style={{border:"1px solid #d4e0f5",marginBottom:10}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                     <span style={{fontSize:12,color:"#f97316",fontWeight:700}}>Payment #{i+1}</span>
@@ -2933,7 +2937,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   </div>
                 </div>
               ))}
-              {deal.clientPayments.length>0&&(
+              {(deal.clientPayments||[]).length>0&&(
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#ffffff",borderRadius:8,padding:"12px 16px",marginTop:10}}>
                   <span style={{fontWeight:700}}>Total Received</span>
                   <span className="mono" style={{fontSize:18,fontWeight:800,color:"#10b981"}}>{fmtINR(totalClientReceived)}</span>
