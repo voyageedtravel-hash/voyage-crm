@@ -1942,7 +1942,25 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       const srcs=[(propDays&&propDays.length)?{__days:allDayLines}:null].filter(Boolean).concat((propDays&&propDays.length)?[]:(deal.landVendors||[]).filter(l=>l.itinerary));
       const allDays=srcs.map(l=>l.__days?l.__days:parseDays(l.itinerary)).reduce((a,b)=>a.concat(b),[]);
       const N=allDays.length;
-      return allDays.map((d,i)=>{
+      // meals + day-type + overnight-hotel intelligence (sab auto — text/dates se)
+      const _hp=(x)=>{const t=Date.parse(x);return isNaN(t)?null:t;};
+      const _hn=(deal.hotelVendors||[]).map(h=>({h,ci:_hp(h.checkIn),co:_hp(h.checkOut)})).filter(x=>x.ci!==null&&x.co!==null&&x.co>x.ci);
+      const _t0=_hn.length?Math.min.apply(null,_hn.map(x=>x.ci)):null;
+      const overnightFor=(i)=>{ if(_t0===null) return null; const t=_t0+i*86400000; const f=_hn.find(x=>t>=x.ci&&t<x.co); return f?f.h:null; };
+      const mealsOf=(d)=>{const c=[];if(/breakfast/i.test(d))c.push("🍳 Breakfast");if(/\blunch/i.test(d))c.push("🥗 Lunch");if(/dinner/i.test(d))c.push("🍽 Dinner");return c;};
+      const tagsOf=(d)=>{const t=[];
+        if(/temple|monastery|pagoda|shakti|church|cathedral|mosque|gurudwara/i.test(d))t.push("🛕 Temples");
+        if(/beach|island/i.test(d))t.push("🏖 Beach");
+        if(/waterfall|falls\b/i.test(d))t.push("💦 Waterfalls");
+        if(/trek|hiking|hike\b|canyon/i.test(d))t.push("🥾 Trek");
+        if(/cruise|boat|ferry|kayak/i.test(d))t.push("🚤 Boat");
+        if(/safari|wildlife|national park/i.test(d))t.push("🦁 Wildlife");
+        if(/shopping|bazaar|market/i.test(d))t.push("🛍 Shopping");
+        if(!t.length&&/transfer|proceed to|drive to|drop/i.test(d))t.push("🚗 Transfer Day");
+        return t.slice(0,3);};
+      const _bC=allDays.filter(d=>/breakfast/i.test(d)).length,_lC=allDays.filter(d=>/\blunch/i.test(d)).length,_dC=allDays.filter(d=>/dinner/i.test(d)).length;
+      const mealSummary=(_bC||_lC||_dC)?`<div style="margin:-2px 0 14px;display:flex;gap:8px;flex-wrap:wrap">${[_bC?`🍳 ${_bC} Breakfast${_bC>1?"s":""}`:"",_lC?`🥗 ${_lC} Lunch${_lC>1?"es":""}`:"",_dC?`🍽 ${_dC} Dinner${_dC>1?"s":""}`:""].filter(Boolean).map(x=>`<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:10px;font-weight:800;border-radius:20px;padding:5px 12px">${x} included</span>`).join("")}</div>`:"";
+      const _cards=allDays.map((d,i)=>{
         const lines=String(d).split("\n");
         let head=lines[0]||"";
         const m=head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);
@@ -1967,18 +1985,25 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
               <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${i===0&&/arriv|pick|airport|welcome/i.test(d)?"🛬":i===N-1&&/depart|drop|airport|onward journey/i.test(d)?"🛫":dayIcon(d)} ${esc(title)}</div>
               ${chip?`<div style="background:#fdf6e5;border:1px solid #ecd9a0;color:#8a6d1a;font-size:9.5px;font-weight:800;letter-spacing:.5px;border-radius:20px;padding:4px 11px;white-space:nowrap">📅 ${esc(chip)}</div>`:""}
             </div>
+            ${(function(){const mm=mealsOf(d),tt=tagsOf(d); if(!mm.length&&!tt.length) return ""; return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${mm.map(x=>`<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join("")}${tt.map(x=>`<span style="background:#eef3fc;border:1px solid #d4e0f5;color:#334e82;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join("")}</div>`;})()}
             ${(function(){
               if(!body) return "";
               const hi=(t)=>esc(t).replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi,'<b style="color:#8a6d1a;font-weight:700">$1</b>');
               const sents=body.split(/(?<=[.!?])\s+(?=[A-Z])/).map(x=>x.trim()).filter(Boolean);
               if(body.length>170&&sents.length>=3){
-                return '<div style="margin-top:8px">'+sents.map(x=>'<div style="display:flex;gap:8px;font-size:11.5px;line-height:1.65;color:#5a6b8c;margin-bottom:4px"><span style="color:#c9961a;font-weight:800;flex-shrink:0">›</span><span>'+hi(x)+'</span></div>').join("")+'</div>';
+                return '<div style="margin-top:8px">'+sents.map(x=>{
+                  if(/^tips?\s*[:\-–]/i.test(x)) return '<div style="margin:6px 0;background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:9px;padding:7px 11px;font-size:11px;color:#8a6d1a;font-weight:600">💡 <b>Voyage-Ed Tip:</b> '+hi(x.replace(/^tips?\s*[:\-–]\s*/i,""))+'</div>';
+                  return '<div style="display:flex;gap:8px;font-size:11.5px;line-height:1.65;color:#5a6b8c;margin-bottom:4px"><span style="color:#c9961a;font-weight:800;flex-shrink:0">›</span><span>'+hi(x)+'</span></div>';
+                }).join("")+'</div>';
               }
+              if(/^tips?\s*[:\-–]/i.test(body)) return '<div style="margin-top:8px;background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:9px;padding:7px 11px;font-size:11px;color:#8a6d1a;font-weight:600">💡 <b>Voyage-Ed Tip:</b> '+hi(body.replace(/^tips?\s*[:\-–]\s*/i,""))+'</div>';
               return '<div style="font-size:12px;line-height:1.7;color:#5a6b8c;margin-top:6px">'+hi(body)+'</div>';
             })()}
+            ${(function(){const oh=overnightFor(i); if(!oh||!(oh.hotelName||oh.city)) return ""; const st=oh.starRating?" ⭐"+esc(String(oh.starRating)):""; return `<div style="margin-top:9px;background:#f4f7fc;border:1px solid #e0e9f7;border-radius:9px;padding:6px 11px;font-size:10.5px;color:#334e82;font-weight:700">🏨 Overnight: ${esc(oh.hotelName||"")}${oh.city?", "+esc(oh.city):""}${st}${oh.roomCategory?` · <span style="font-weight:600;color:#7d8bab">${esc(oh.roomCategory)}</span>`:""}</div>`;})()}
           </div>
         </div>`;
       }).join("");
+      return mealSummary+_cards;
     })() : "";
 
     const priceBlock = propShowPrice && sell>0 ? `
