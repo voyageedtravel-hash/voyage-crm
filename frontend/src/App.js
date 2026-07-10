@@ -1254,6 +1254,37 @@ ${text}
   const addRefund=()=>setDeal(d=>({...d,refunds:[...(d.refunds||[]),emptyRefund()]}));
   const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
   const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
+  const printRefundReceipt=(r)=>{
+    const amt=Number(r.amount)||0;
+    const w=window.open("","_blank"); if(!w){window.veToast&&window.veToast("Popup blocked","error");return;}
+    w.document.write(`<html><head><title>Refund Receipt</title><style>body{font-family:'Segoe UI',sans-serif;background:#eef2f9;padding:30px;display:flex;justify-content:center}
+      .card{background:#fff;max-width:560px;width:100%;border-radius:18px;padding:30px 34px;box-shadow:0 10px 40px rgba(13,27,62,.15)}
+      table{width:100%;border-collapse:collapse;margin-top:14px}td{padding:9px 4px;border-bottom:1px dashed #e3eaf7;font-size:13px}
+      .label{color:#7d8bab;width:42%}.val{color:#0d1b3e;font-weight:700}
+      @media print{body{background:#fff;padding:0}.card{box-shadow:none}}</style></head><body><div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <img src="${VE_LOGO}" style="height:40px"/>
+        <div style="text-align:right"><div style="font-size:10px;letter-spacing:2px;color:#b91c1c;font-weight:800">REFUND RECEIPT</div><div style="font-size:10px;color:#7d8bab">RFD-${Date.now()}</div></div>
+      </div>
+      <div style="margin-top:16px;background:#fdf1f1;border-radius:12px;padding:14px 18px;text-align:center">
+        <div style="font-size:26px;font-weight:800;color:#b91c1c">₹ ${amt.toLocaleString("en-IN")}</div>
+        <div style="font-size:10.5px;color:#7d8bab;letter-spacing:1px">REFUNDED TO CLIENT</div>
+      </div>
+      <table>
+        <tr><td class="label">Client</td><td class="val">${(deal.clientName||"—")}</td></tr>
+        <tr><td class="label">Booking Ref</td><td class="val">${(deal.reference||"—")} · ${(deal.destination||"")}</td></tr>
+        <tr><td class="label">Date</td><td class="val">${r.date||"—"}</td></tr>
+        <tr><td class="label">Mode</td><td class="val">${r.mode||"—"}</td></tr>
+        <tr><td class="label">Reason</td><td class="val">${r.reason||"—"}</td></tr>
+        <tr><td class="label">UTR / Ref No.</td><td class="val">${r.refNo||"—"}</td></tr>
+        <tr><td class="label">Approved By</td><td class="val">${r.approvedBy||"—"}</td></tr>
+        ${r.note?`<tr><td class="label">Note</td><td class="val">${r.note}</td></tr>`:""}
+      </table>
+      <div style="margin-top:18px;font-size:10px;color:#7d8bab;text-align:center">Voyage-Ed Travels · GMADA Aerocity, Mohali · enquiry@voyage-ed.com · +91 70096 59048<br>This is a computer generated refund receipt.</div>
+      <div style="text-align:center;margin-top:14px"><button onclick="window.print()" style="background:#0d1b3e;color:#fff;border:none;border-radius:9px;padding:10px 26px;cursor:pointer;font-weight:700">🖨 Print / Save PDF</button></div>
+    </div></body></html>`);
+    w.document.close();
+  };
 
   const fileInputRef=useRef();
   const handleFiles=(files)=>{
@@ -1955,7 +1986,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">TOTAL PACKAGE PRICE</div>
         <div style="font-size:34px;font-weight:800">₹${sell.toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
         ${totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">≈ ₹${Math.round(sell/totalPax).toLocaleString("en-IN")} per person · ${pax}</div>`:""}
-        <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid for 7 days.</div>
+        <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till ${new Date(Date.now()+7*864e5).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}.</div>
       </div>` : `
       <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
         <div style="font-size:13px;color:#8a6d1a;font-weight:700">💬 Best price guaranteed — contact us for your personalised quote</div>
@@ -3082,6 +3113,14 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 </div>
               )}
 
+              {balanceFromClient>0&&(deal.contactNo||"").trim()&&(
+                <a href={"https://wa.me/"+String(deal.contactNo).replace(/[^0-9]/g,"").replace(/^(?!91)/,"91")+"?text="+encodeURIComponent("Namaste "+(deal.clientName||"ji")+"! 🙏\n\nAapke "+(deal.destination||"trip")+" package (Ref: "+(deal.reference||"")+") ka balance payment ₹"+balanceFromClient.toLocaleString("en-IN")+" pending hai — kindly clear before travel date so everything stays confirmed.\n\nUPI / Bank transfer dono chalega. Koi bhi sawaal ho toh bata dijiye!\n\n— Team Voyage-Ed Travels ✈️")}
+                  target="_blank" rel="noreferrer"
+                  style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"linear-gradient(135deg,#128c4b,#25d366)",color:"#fff",borderRadius:10,padding:"12px",marginTop:12,textDecoration:"none",fontSize:13,fontWeight:800}}>
+                  📲 WhatsApp Balance Reminder bhejo — ₹{balanceFromClient.toLocaleString("en-IN")}
+                </a>
+              )}
+
               {/* ══ 💸 REFUNDS ══ */}
               <div style={{marginTop:24,borderTop:"2px dashed #f3c6c6",paddingTop:16}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -3096,7 +3135,10 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   <div key={r.id} className="prow" style={{border:"1px solid #f3c6c6",background:"#fffafa",marginBottom:10}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
                       <span style={{fontSize:12,color:"#b91c1c",fontWeight:700}}>Refund #{i+1}</span>
-                      <button onClick={()=>rmRefund(r.id)} className="btn btn-danger">✕ Remove</button>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>printRefundReceipt(r)} className="btn btn-sm" title="Client ko refund ka proof">🧾 Receipt</button>
+                        <button onClick={()=>rmRefund(r.id)} className="btn btn-danger">✕ Remove</button>
+                      </div>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1.4fr 1.6fr 1.4fr",gap:10,alignItems:"end"}}>
                       <div><span className="lbl">Amount (₹)</span><input className="mono" type="number" min="0" value={r.amount} onChange={e=>updRefund(r.id,"amount",e.target.value)} placeholder="0"/></div>
