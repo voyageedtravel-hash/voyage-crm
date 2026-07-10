@@ -648,6 +648,7 @@ export default function TravelCRM() {
   const [expandedVendor,setExpandedVendor]=useState(null);
   const [receiptPayment,setReceiptPayment]=useState(null);
   const [proposalOpen,setProposalOpen]=useState(false);
+  const [duesOpen,setDuesOpen]=useState(false);
   const [imgHealth,setImgHealth]=useState(null); // null | "checking" | {ok:n, dead:[urls]}
   const [propFlights,setPropFlights]=useState("with");   // with | without | only
   const [propShowPrice,setPropShowPrice]=useState(true);
@@ -2326,8 +2327,62 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
             <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
             <button onClick={()=>setScreen("reports")} className="btn btn-sm">📊 Reports</button>
+            <button onClick={()=>setDuesOpen(true)} className="btn btn-sm" style={{borderColor:"#f3c6c6",color:"#b91c1c"}}>💸 Dues</button>
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
             <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
+            {duesOpen&&(()=>{
+              const P=(x)=>{const t=Date.parse(x||"");return isNaN(t)?null:t;};
+              const rows=[]; let payable=0, receivable=0;
+              (allDeals||[]).forEach(d0=>{
+                const d=normalizeDeal(d0);
+                const secs=[["🏨",d.hotelVendors],["✈️",d.flightVendors],["🚗",d.landVendors],["🛂",d.visaVendors]];
+                let travel=null;
+                (d.hotelVendors||[]).forEach(h=>{const t=P(h.checkIn); if(t!==null&&(travel===null||t<travel))travel=t;});
+                (d.flightVendors||[]).forEach(f=>(f.sectors||[]).forEach(x=>{const t=P(x.date); if(t!==null&&(travel===null||t<travel))travel=t;}));
+                secs.forEach(([ic,vs])=>(vs||[]).forEach(v=>{
+                  const vi=vendorINR(v); const due=vi.costINR-vi.paidINR;
+                  if(due>0.5){ payable+=due; rows.push({ic,vn:v.name||v.hotelName||v.city||"Vendor",client:d.clientName||"—",dest:d.destination||"",due,travel}); }
+                }));
+                const sc=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].reduce((a,v)=>a+vendorINR(v).sellINR,0);
+                const ref=(d.refunds||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
+                const rec=(d.clientPayments||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
+                receivable+=Math.max(0,(sc-ref)-(rec-ref));
+              });
+              rows.sort((a,b)=>(a.travel===null?9e15:a.travel)-(b.travel===null?9e15:b.travel));
+              const now=Date.now();
+              return (
+                <div onClick={()=>setDuesOpen(false)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                  <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:640,maxHeight:"85vh",overflowY:"auto",padding:"22px 22px 18px",boxShadow:"0 30px 80px rgba(0,0,0,.35)",textAlign:"left"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <span style={{fontSize:16,fontWeight:800,color:"#0f2350"}}>💸 Vendor Dues Board</span>
+                      <button onClick={()=>setDuesOpen(false)} style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",color:"#7d8bab"}}>✕</button>
+                    </div>
+                    <div style={{display:"flex",gap:10,marginBottom:14}}>
+                      <div style={{flex:1,background:"#fdf1f1",border:"1px solid #f3c6c6",borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:10,color:"#b91c1c",fontWeight:800,letterSpacing:1}}>VENDORS KO DENA</div><div className="mono" style={{fontSize:18,fontWeight:800,color:"#b91c1c"}}>{fmtINR(payable)}</div></div>
+                      <div style={{flex:1,background:"#f0faf4",border:"1px solid #cfe9d6",borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:10,color:"#15803d",fontWeight:800,letterSpacing:1}}>CLIENTS SE AANA</div><div className="mono" style={{fontSize:18,fontWeight:800,color:"#15803d"}}>{fmtINR(receivable)}</div></div>
+                      <div style={{flex:1,background:receivable-payable>=0?"#f0faf4":"#fff7ed",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:10,color:"#5a6b8c",fontWeight:800,letterSpacing:1}}>NET POSITION</div><div className="mono" style={{fontSize:18,fontWeight:800,color:receivable-payable>=0?"#15803d":"#c2660a"}}>{fmtINR(receivable-payable)}</div></div>
+                    </div>
+                    {rows.length===0&&<div style={{textAlign:"center",padding:24,color:"#7d8bab",fontSize:13}}>🎉 Koi vendor due pending nahi!</div>}
+                    {rows.map((r,i)=>{
+                      const days=r.travel===null?null:Math.ceil((r.travel-now)/864e5);
+                      const urgent=days!==null&&days<=7&&days>=-1;
+                      return (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,marginBottom:6,background:urgent?"#fdf1f1":"#f8fafd",border:"1px solid "+(urgent?"#f3c6c6":"#e3eaf7")}}>
+                          <span style={{fontSize:15}}>{r.ic}</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12.5,fontWeight:800,color:"#0f2350",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.vn}</div>
+                            <div style={{fontSize:10.5,color:"#7d8bab",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.client}{r.dest?" · "+r.dest:""}</div>
+                          </div>
+                          {days!==null&&<span style={{fontSize:10,fontWeight:800,color:urgent?"#b91c1c":"#5a6b8c",whiteSpace:"nowrap"}}>{days<0?"travel ho chuki":days===0?"AAJ travel!":"travel in "+days+"d"}</span>}
+                          <span className="mono" style={{fontSize:13.5,fontWeight:800,color:"#b91c1c",whiteSpace:"nowrap"}}>{fmtINR(r.due)}</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{fontSize:10,color:"#9aa7c4",marginTop:10}}>Due = vendor cost − vendor ko ab tak paid · Urgent (red) = travel 7 din ke andar · Saved deals se live calculate hota hai</div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
