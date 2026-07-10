@@ -1693,6 +1693,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <img src="${galleryImgs[2]}" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover;border-radius:16px"/>
       </div>`:`<div style="display:flex;gap:10px">${galleryImgs.map(g=>`<img src="${g}" onerror="this.style.display='none'" style="flex:1;min-width:0;height:150px;object-fit:cover;border-radius:16px"/>`).join("")}</div>`}
     </div>`:"";
+    const acceptMsg="I, "+(deal.clientName||"the Client")+", have read and ACCEPT the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1-16) of Voyage-Ed proposal Ref: "+ref+".";
+    const acceptWA="https://wa.me/917009659048?text="+encodeURIComponent(acceptMsg);
     const STATIC_CANCEL_TABLE=`<table style="width:100%;border-collapse:collapse;margin:2px 0 8px;font-size:11px">
         <tr><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left;border-radius:8px 0 0 0">Days Before Departure</th><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left;border-radius:0 8px 0 0">Cancellation Charge</th></tr>
         <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">30 – 16 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#0d1b3e">50% of the total cost</td></tr>
@@ -1777,8 +1779,6 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       })();
     </script>
     ` ;
-    const acceptMsg="I, "+(deal.clientName||"the Client")+", have read and ACCEPT the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1-16) of Voyage-Ed proposal Ref: "+ref+".";
-    const acceptWA="https://wa.me/917009659048?text="+encodeURIComponent(acceptMsg);
     const qrURL="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data="+encodeURIComponent(acceptWA);
 
     const sectorRow=(s)=>{
