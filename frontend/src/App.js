@@ -642,7 +642,6 @@ export default function TravelCRM() {
   const [propCancelMode,setPropCancelMode]=useState("static"); // static | custom
   const [propCancelCustom,setPropCancelCustom]=useState("");
   const [propDays,setPropDays]=useState(null); // null = auto from vendor itinerary; array = day-wise edited
-  const [propRoute,setPropRoute]=useState([]); // [{city,nights,mode,time,dist}] — mode/time/dist = leg to NEXT stop
   const [saveStatus,setSaveStatus]=useState("");
   const [dirty,setDirty]=useState(false);
   const _dealLoadedRef=useRef(false);
@@ -1724,43 +1723,6 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       })();
     </script>
     ` ;
-    const ROUTE_MODES={flight:{i:"✈️",c:"#15803d",n:"Flight"},train:{i:"🚆",c:"#b91c1c",n:"Train"},cruise:{i:"🚢",c:"#1d4ed8",n:"Cruise"},ferry:{i:"⛴️",c:"#0e7490",n:"Ferry"},car:{i:"🚗",c:"#b45309",n:"Private Car"},coach:{i:"🚌",c:"#7c3aed",n:"Coach"}};
-    const routeStops=(propRoute||[]).filter(r=>(r.city||"").trim());
-    const routeHTML = routeStops.length>=2 ? `
-    <div style="margin:0 0 22px">
-      <h2 style="font-size:18px;color:#0d1b3e;margin:0 0 12px">🗺️ Your Journey Route</h2>
-      <div style="background:linear-gradient(135deg,#f8fafd,#fff);border:1px solid #e3eaf7;border-radius:16px;padding:20px 18px 14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
-        <div style="display:flex;flex-wrap:wrap;align-items:flex-start;row-gap:18px">
-          ${routeStops.map((r,i)=>{
-            const M=ROUTE_MODES[r.mode]||ROUTE_MODES.car;
-            const leg = i<routeStops.length-1 ? `
-              <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:86px;flex:1;padding:0 4px;margin-top:6px">
-                <div style="font-size:13px">${M.i}</div>
-                <div style="width:100%;border-top:2px dashed ${M.c};margin:3px 0"></div>
-                <div style="font-size:8.5px;color:${M.c};font-weight:800;letter-spacing:.4px;text-align:center">${M.n}${r.time?` · ${esc(r.time)}`:""}</div>
-                ${r.dist?`<div style="font-size:8px;color:#7d8bab">~${esc(r.dist)}</div>`:""}
-              </div>`:"";
-            return `
-            <div style="display:flex;flex-direction:column;align-items:center;min-width:72px">
-              <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#c9961a,#f0c842);color:#0d1b3e;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(201,150,26,.35);border:2px solid #fff">${i+1}</div>
-              <div style="font-size:11.5px;font-weight:800;color:#0d1b3e;margin-top:5px;text-align:center;line-height:1.3">${esc(r.city)}</div>
-              ${r.nights?`<div style="font-size:9px;color:#c9961a;font-weight:700">${esc(r.nights)} Night${String(r.nights)==="1"?"":"s"}</div>`:""}
-            </div>${leg}`;
-          }).join("")}
-        </div>
-        <div style="margin-top:14px;border-top:1px solid #eef2fa;padding-top:10px">
-          <div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin-bottom:6px">TRAVEL ROUTE OVERVIEW</div>
-          <table style="width:100%;border-collapse:collapse;font-size:10px;color:#4a5772">
-            ${routeStops.slice(0,-1).map((r,i)=>{const M=ROUTE_MODES[r.mode]||ROUTE_MODES.car;return `<tr>
-              <td style="padding:3px 6px 3px 0;font-weight:700;color:#0d1b3e">${M.i} ${esc(r.city)} → ${esc(routeStops[i+1].city)}</td>
-              <td style="padding:3px 6px;color:${M.c};font-weight:700">${M.n}</td>
-              <td style="padding:3px 6px">${r.time?esc(r.time):"—"}</td>
-              <td style="padding:3px 0;text-align:right">${r.dist?"~"+esc(r.dist):""}</td>
-            </tr>`;}).join("")}
-          </table>
-        </div>
-      </div>
-    </div>`:"";
     const qrURL="https://api.qrserver.com/v1/create-qr-code/?size=96x96&data="+encodeURIComponent("https://wa.me/917009659048?text="+encodeURIComponent("Hi! I would like to confirm my "+(deal.destination||"trip")+" proposal (Ref: "+ref+")"));
 
     const sectorRow=(s)=>{
@@ -1927,7 +1889,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${priceBlock}
     ${highlightsHTML}
     ${glimpseHTML}
-    ${routeHTML}
     ${showF?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}`:""}
     ${showH&&hotels.length?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
     ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}`:""}
@@ -2441,39 +2402,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               </div>
             )}
 
-            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>🗺️ ROUTE MAP (optional — Scandinavia-style journey diagram)</div>
-            {propRoute.length===0&&(
-              <button onClick={()=>setPropRoute([{city:"",nights:"",mode:"flight",time:"",dist:""},{city:"",nights:"",mode:"train",time:"",dist:""}])} style={{width:"100%",background:"#f4f7fc",border:"1px dashed #c2d2ee",borderRadius:10,padding:"11px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#334e82",marginBottom:14}}>➕ Add journey route (stops + transport + time + km)</button>
-            )}
-            {propRoute.length>0&&(
-              <div style={{marginBottom:14,background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:12,padding:"10px 12px"}}>
-                {propRoute.map(function(r,i){
-                  const upd=(k,v)=>{const a=propRoute.slice();a[i]={...a[i],[k]:v};setPropRoute(a);};
-                  return <div key={i} style={{marginBottom:8,paddingBottom:8,borderBottom:i<propRoute.length-1?"1px dashed #d8e2f3":"none"}}>
-                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <div style={{minWidth:26,height:26,borderRadius:"50%",background:"linear-gradient(135deg,#c9961a,#f0c842)",color:"#0d1b3e",fontWeight:800,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</div>
-                      <input value={r.city} onChange={e=>upd("city",e.target.value)} placeholder="City (e.g. Copenhagen)" style={{flex:2,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 10px",fontSize:11.5,outline:"none"}}/>
-                      <input value={r.nights} onChange={e=>upd("nights",e.target.value)} placeholder="Nights" style={{width:52,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 8px",fontSize:11.5,outline:"none"}}/>
-                      <button onClick={()=>{const a=propRoute.slice();a.splice(i,1);setPropRoute(a);}} style={{background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
-                    </div>
-                    {i<propRoute.length-1&&(
-                      <div style={{display:"flex",gap:6,marginTop:6,marginLeft:32,alignItems:"center"}}>
-                        <span style={{fontSize:10,color:"#7d8bab"}}>↓ next tak:</span>
-                        <select value={r.mode} onChange={e=>upd("mode",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"6px",fontSize:11,outline:"none",background:"#fff"}}>
-                          <option value="flight">✈️ Flight</option><option value="train">🚆 Train</option><option value="cruise">🚢 Cruise</option><option value="ferry">⛴️ Ferry</option><option value="car">🚗 Car</option><option value="coach">🚌 Coach</option>
-                        </select>
-                        <input value={r.time} onChange={e=>upd("time",e.target.value)} placeholder="6.5 hrs" style={{width:64,border:"1px solid #d4e0f5",borderRadius:8,padding:"6px 8px",fontSize:11,outline:"none"}}/>
-                        <input value={r.dist} onChange={e=>upd("dist",e.target.value)} placeholder="500 km" style={{width:64,border:"1px solid #d4e0f5",borderRadius:8,padding:"6px 8px",fontSize:11,outline:"none"}}/>
-                      </div>
-                    )}
-                  </div>;
-                })}
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>setPropRoute(propRoute.concat([{city:"",nights:"",mode:"train",time:"",dist:""}]))} style={{flex:1,background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#334e82"}}>+ Add stop</button>
-                  <button onClick={()=>setPropRoute([])} style={{flex:1,background:"transparent",border:"1px solid #e3eaf7",borderRadius:8,padding:"8px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#7d8bab"}}>🗑 Remove route</button>
-                </div>
-              </div>
-            )}
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>ITINERARY (DAY-WISE)</div>
             {!propDays&&(
               <button onClick={loadPropDaysForEdit} style={{width:"100%",background:"#f4f7fc",border:"1px dashed #c2d2ee",borderRadius:10,padding:"11px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#334e82",marginBottom:14}}>✏️ Edit itinerary day-wise before generating</button>
