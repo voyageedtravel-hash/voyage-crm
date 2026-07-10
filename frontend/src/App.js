@@ -206,6 +206,10 @@ const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
 
 
 const CLIENT_MODES = ["UPI","Cash deposited by client in bank","Cash collected by Vishal","Cash collected by Sahitya","Bank Transfer","Cheque","Other"];
+const REFUND_MODES = ["Bank Transfer","UPI","Cash"];
+const REFUND_REASONS = ["Service Issue","Visa Rejection","Travel Plan Cancelled","Goodwill / Adjustment","Other"];
+const REFUND_APPROVERS = ["Vishal Sharma","Sahitya Singh"];
+const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUND_REASONS[0],approvedBy:REFUND_APPROVERS[0],date:today(),refNo:"",note:""});
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
 const VISA_STATUS_COLORS = {"Not Applied":"#6b7a99","Not Required":"#5a6b8c","In Progress":"#f59e0b","Approved":"#10b981","Rejected":"#ef4444"};
@@ -335,6 +339,7 @@ const initDeal = {
   landVendors:[emptyLandVendor()],
   visaVendors:[emptyVisaVendor()],
   clientPayments:[],
+  refunds:[],
   attachments:[],
 };
 
@@ -830,7 +835,7 @@ Be concise. If asked to do something you have no action for, explain politely in
         bookedCount:booked.length,
         conversionPct: allDeals.length?((booked.length/allDeals.length)*100).toFixed(1):"0",
         revenueBooked: booked.reduce((s,d)=>s+sellOf(d),0),
-        grossProfitBooked: booked.reduce((s,d)=>s+(sellOf(d)-costOf(d)),0),
+        grossProfitBooked: booked.reduce((s,d)=>s+(sellOf(d)-costOf(d)-sum(d.refunds||[],"amount")),0),
         toCollect: booked.reduce((s,d)=>s+Math.max(0,sellOf(d)-recvOf(d)),0),
         toPayVendors: booked.reduce((s,d)=>s+Math.max(0,costOf(d)-paidVOf(d)),0),
         followUpsDueToday: allDeals.filter(d=>d.followUpDate&&d.followUpDate<=today&&!["Booked","Lost","Cancelled","Travelled"].includes(d.stage||"")).map(d=>({client:d.clientName,dest:d.destination,date:d.followUpDate,priority:d.priority})),
@@ -1190,6 +1195,9 @@ ${text}
   const addCPmt=()=>setDeal(d=>({...d,clientPayments:[...d.clientPayments,emptyPayment(CLIENT_MODES)]}));
   const updCPmt=(pid,key,val)=>setDeal(d=>({...d,clientPayments:d.clientPayments.map(p=>p.id===pid?{...p,[key]:val}:p)}));
   const rmCPmt=(pid)=>setDeal(d=>({...d,clientPayments:d.clientPayments.filter(p=>p.id!==pid)}));
+  const addRefund=()=>setDeal(d=>({...d,refunds:[...(d.refunds||[]),emptyRefund()]}));
+  const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
+  const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
 
   const fileInputRef=useRef();
   const handleFiles=(files)=>{
@@ -1272,10 +1280,12 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const totalCost=hotel.cost+flight.cost+land.cost+visa.cost;
   const totalSell=hotel.sell+flight.sell+land.sell+visa.sell;
   const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
-  const gpm=totalSell-totalCost;
+  const totalRefunded=sum(deal.refunds||[],"amount");
+  const netSell=totalSell-totalRefunded;            // refund => selling cost se minus
+  const gpm=netSell-totalCost;                      // => profit se bhi automatically minus
   // Per-component GST exclusion: exempt sections' amounts are subtracted from GST base
   const exempt = deal.gstExemptSections || [];
-  const gstSell = totalSell - (exempt.includes("flights")?flight.sell:0) - (exempt.includes("hotels")?hotel.sell:0)
+  const gstSell = netSell - (exempt.includes("flights")?flight.sell:0) - (exempt.includes("hotels")?hotel.sell:0)
     - (exempt.includes("land")?land.sell:0) - (exempt.includes("visa")?visa.sell:0);
   const gstCost = totalCost - (exempt.includes("flights")?flight.cost:0) - (exempt.includes("hotels")?hotel.cost:0)
     - (exempt.includes("land")?land.cost:0) - (exempt.includes("visa")?visa.cost:0);
@@ -1287,7 +1297,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const marginPct=totalSell>0?((gpm/totalSell)*100).toFixed(1):"0.0";
   const netMarginPct=totalSell>0?((netProfit/totalSell)*100).toFixed(1):"0.0";
   const totalClientReceived=sum(deal.clientPayments,"amount");
-  const balanceFromClient=totalSell-totalClientReceived;
+  const netClientReceived=totalClientReceived-totalRefunded;   // wapas diya paisa received se minus
+  const balanceFromClient=netSell-netClientReceived;           // = totalSell-totalClientReceived (math same, par net basis pe)
   const balanceToVendors=totalCost-totalPaidToVendors;
 
   const tabs=[
@@ -1342,7 +1353,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       const dt = d.bookedDate||d.createdAt||d.travelDate||"";
       const mon = dt ? new Date(dt).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "Undated";
       if(!byMonth[mon]) byMonth[mon]={mon,deals:0,sell:0,cost:0,profit:0};
-      const s=dSell(d), c=dCost(d);
+      const s=dSell(d), c=dCost(d)+sum(d.refunds||[],"amount"); // refund month ke profit se minus
       byMonth[mon].deals++; byMonth[mon].sell+=s; byMonth[mon].cost+=c; byMonth[mon].profit+=(s-c);
     });
     const months = Object.values(byMonth);
@@ -1608,11 +1619,13 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       ${allDayLines.map((d,i)=>`<div style="text-align:center;min-width:50px"><div style="font-size:19px">${dayIcon(d)}</div><div style="font-size:8.5px;color:#7d8bab;font-weight:800;letter-spacing:.5px">DAY ${i+1}</div></div>`).join(`<div style="color:#c9961a;font-weight:800">›</div>`)}
     </div>`:"";
     const totRec=sum(deal.clientPayments||[],"amount");
+    const totRef=sum(deal.refunds||[],"amount");
     const payBlock=(propShowPrice&&sell>0&&totRec>0)?`<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-top:16px">
       <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT SUMMARY</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
         <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${totRec.toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED — thank you! 🙏</div></div>
-        <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0,sell-totRec).toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
+        ${totRef>0?`<div style="flex:1;min-width:130px;background:#fdf1f1;border-radius:10px;padding:10px 14px"><div style="color:#b91c1c;font-weight:800;font-size:16px">− ₹${totRef.toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">REFUNDED</div></div>`:""}
+        <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0,(sell-totRef)-(totRec-totRef)).toLocaleString("en-IN")}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
       </div>
     </div>`:"";
     const _dead=(imgHealth&&imgHealth.dead)?imgHealth.dead:[];
@@ -2896,7 +2909,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               <button className="btn btn-ind" onClick={addCPmt}>+ Add Payment</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-              {[{l:"Total to Receive",v:fmtINR(totalSell),c:"#1a2c52"},{l:"Received",v:fmtINR(totalClientReceived),c:"#10b981"},{l:"Balance Pending",v:fmtINR(balanceFromClient),c:balanceFromClient>0?"#f97316":"#10b981"}].map((s,i)=>(
+              {[{l:"Total to Receive"+(totalRefunded>0?" (net)":""),v:fmtINR(netSell),c:"#1a2c52"},{l:"Received"+(totalRefunded>0?" (net)":""),v:fmtINR(netClientReceived),c:"#10b981"},...(totalRefunded>0?[{l:"Refunded",v:"− "+fmtINR(totalRefunded),c:"#b91c1c"}]:[]),{l:"Balance Pending",v:fmtINR(balanceFromClient),c:balanceFromClient>0?"#f97316":"#10b981"}].map((s,i)=>(
                 <div key={i} className="stat"><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:4}}>{s.l}</div><div className="mono" style={{fontSize:20,fontWeight:800,color:s.c}}>{s.v}</div></div>
               ))}
             </div>
@@ -2926,6 +2939,43 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   <span className="mono" style={{fontSize:18,fontWeight:800,color:"#10b981"}}>{fmtINR(totalClientReceived)}</span>
                 </div>
               )}
+
+              {/* ══ 💸 REFUNDS ══ */}
+              <div style={{marginTop:24,borderTop:"2px dashed #f3c6c6",paddingTop:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>💸 Refunds to Client</span>
+                  <button onClick={addRefund} className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>+ Add Refund</button>
+                </div>
+                {totalRefunded>totalClientReceived&&(
+                  <div style={{background:"#fdf1f1",border:"1px solid #f3c6c6",borderRadius:8,padding:"8px 12px",fontSize:11.5,color:"#b91c1c",fontWeight:700,marginBottom:10}}>⚠️ Total refund (₹{totalRefunded.toLocaleString("en-IN")}) client se received amount (₹{totalClientReceived.toLocaleString("en-IN")}) se ZYADA hai — amounts check karo</div>
+                )}
+                {(deal.refunds||[]).length===0&&<div style={{textAlign:"center",padding:16,color:"#c9a0a0",fontSize:12}}>No refunds issued.</div>}
+                {(deal.refunds||[]).map((r,i)=>(
+                  <div key={r.id} className="prow" style={{border:"1px solid #f3c6c6",background:"#fffafa",marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                      <span style={{fontSize:12,color:"#b91c1c",fontWeight:700}}>Refund #{i+1}</span>
+                      <button onClick={()=>rmRefund(r.id)} className="btn btn-danger">✕ Remove</button>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1.4fr 1.6fr 1.4fr",gap:10,alignItems:"end"}}>
+                      <div><span className="lbl">Amount (₹)</span><input className="mono" type="number" min="0" value={r.amount} onChange={e=>updRefund(r.id,"amount",e.target.value)} placeholder="0"/></div>
+                      <div><span className="lbl">Mode of Refund</span><select value={r.mode} onChange={e=>updRefund(r.id,"mode",e.target.value)}>{REFUND_MODES.map(m=><option key={m}>{m}</option>)}</select></div>
+                      <div><span className="lbl">Reason</span><select value={r.reason} onChange={e=>updRefund(r.id,"reason",e.target.value)}>{REFUND_REASONS.map(m=><option key={m}>{m}</option>)}</select></div>
+                      <div><span className="lbl">Approved By</span><select value={r.approvedBy} onChange={e=>updRefund(r.id,"approvedBy",e.target.value)}>{REFUND_APPROVERS.map(m=><option key={m}>{m}</option>)}</select></div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1.4fr 3fr",gap:10,alignItems:"end",marginTop:10}}>
+                      <div><span className="lbl">Date</span><input type="date" value={r.date} onChange={e=>updRefund(r.id,"date",e.target.value)}/></div>
+                      <div><span className="lbl">UTR / Ref No.</span><input value={r.refNo} onChange={e=>updRefund(r.id,"refNo",e.target.value)} placeholder="Transaction reference"/></div>
+                      <div><span className="lbl">Note</span><input value={r.note} onChange={e=>updRefund(r.id,"note",e.target.value)} placeholder="e.g. 2 pax dropped, partial visa refund..."/></div>
+                    </div>
+                  </div>
+                ))}
+                {(deal.refunds||[]).length>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fdf1f1",borderRadius:8,padding:"12px 16px",marginTop:6}}>
+                    <span style={{fontWeight:700,color:"#b91c1c"}}>Total Refunded <span style={{fontSize:10.5,fontWeight:600,color:"#c9a0a0"}}>(selling & profit dono se minus)</span></span>
+                    <span className="mono" style={{fontSize:18,fontWeight:800,color:"#b91c1c"}}>− {fmtINR(totalRefunded)}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -3132,7 +3182,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
               <div className="card">
                 <div className="sec-head">Client Cash Flow</div>
-                {[["Total to Receive",fmtINR(totalSell),"#1a2c52"],["Total Received",fmtINR(totalClientReceived),"#10b981"],["Balance Pending",fmtINR(balanceFromClient),balanceFromClient>0?"#f97316":"#10b981"]].map(([l,v,c])=>(
+                {[["Total to Receive"+(totalRefunded>0?" (net)":""),fmtINR(netSell),"#1a2c52"],["Total Received"+(totalRefunded>0?" (net)":""),fmtINR(netClientReceived),"#10b981"],...(totalRefunded>0?[["Refunded","− "+fmtINR(totalRefunded),"#b91c1c"]]:[]),["Balance Pending",fmtINR(balanceFromClient),balanceFromClient>0?"#f97316":"#10b981"]].map(([l,v,c])=>(
                   <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #d4e0f5"}}>
                     <span style={{fontSize:13}}>{l}</span><span className="mono" style={{fontSize:16,fontWeight:800,color:c}}>{v}</span>
                   </div>
