@@ -1743,6 +1743,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       <div class="ve-printsign" style="display:none;font-size:11px;color:#33415e;line-height:2.4">
         I have read and accept the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1–16) of this proposal.<br><br>
         Client Signature: ______________________________ &nbsp;&nbsp;&nbsp; Name: ${esc(deal.clientName)||"____________________"} &nbsp;&nbsp;&nbsp; Date: ________________
+        <div style="margin-top:10px;background:#f0faf4;border:1px solid #c9e8d0;border-radius:10px;padding:8px 14px;font-size:10.5px;line-height:1.7;color:#15803d">
+          ✅ <b>Accept digitally in seconds:</b> WhatsApp us at <b>+91 70096 59048</b> with the message — <b>"I ACCEPT ${esc(ref)}"</b> — or scan the QR at the end of this proposal. Your reply will be treated as acceptance of these terms.
+        </div>
       </div>
     </div>
     <script>
@@ -2073,6 +2076,20 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(!w){window.veToast("Popup blocked — allow popups","error");return;}
     w.document.write(buildProposalHTML());
     w.document.close();
+  }
+  function downloadProposalHTML(){
+    try{ saveToAllDeals(true); }catch(e){}
+    const issues=validateDealForProposal();
+    if(issues.length && !window.confirm("⚠️ PROPOSAL WARNINGS:\n\n"+issues.join("\n")+"\n\nPhir bhi generate karein?")) return;
+    const html=buildProposalHTML();
+    const ref=(deal.reference||deal.clientName||"proposal").toString().replace(/[^a-zA-Z0-9-]+/g,"-");
+    const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="Voyage-Ed-Proposal-"+ref+".html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    window.veToast && window.veToast("Interactive proposal downloaded — WhatsApp pe document ki tarah bhejo. Client browser me kholega toh Accept button kaam karega ✅","success");
   }
   function waProposal(){
     const ph=(deal.contactNo||"").replace(/[^0-9]/g,"");
@@ -2477,6 +2494,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 
             <div style={{display:"flex",gap:10}}>
               <button onClick={openProposal} style={{flex:1,background:"linear-gradient(135deg,#0d1b3e,#1a3060)",color:"#fff",border:"none",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800}}>🖨 Preview / PDF</button>
+              <button onClick={downloadProposalHTML} title="Client browser me kholega toh Accept checkbox + submit kaam karega" style={{flex:1,background:"linear-gradient(135deg,#c9961a,#f0c842)",color:"#0d1b3e",border:"none",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800}}>🌐 Interactive Copy</button>
               <button onClick={waProposal} style={{flex:1,background:"#25d366",color:"#fff",border:"none",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800}}>💬 Send WhatsApp</button>
             </div>
             <div style={{fontSize:10,color:"#8a97b5",marginTop:10,textAlign:"center"}}>PDF: browser print dialog se "Save as PDF" karo, phir WhatsApp pe attach karo</div>
