@@ -649,6 +649,7 @@ export default function TravelCRM() {
   const [receiptPayment,setReceiptPayment]=useState(null);
   const [proposalOpen,setProposalOpen]=useState(false);
   const [duesOpen,setDuesOpen]=useState(false);
+  const [propCompareId,setPropCompareId]=useState("");
   const [imgHealth,setImgHealth]=useState(null); // null | "checking" | {ok:n, dead:[urls]}
   const [propFlights,setPropFlights]=useState("with");   // with | without | only
   const [propShowPrice,setPropShowPrice]=useState(true);
@@ -2215,6 +2216,66 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     setTimeout(()=>URL.revokeObjectURL(a.href),4000);
     window.veToast && window.veToast("Interactive proposal downloaded — WhatsApp pe document ki tarah bhejo. Client browser me kholega toh Accept button kaam karega ✅","success");
   }
+  function _cmpCalc(d0){
+    const d=normalizeDeal(d0);
+    const allV=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+    const refT=(d.refunds||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
+    const sell=Math.max(0,allV.reduce((a,v)=>a+vendorINR(v).sellINR,0)-refT);
+    const hotels=(d.hotelVendors||[]).filter(h=>h.hotelName||h.city).map(h=>({city:h.city,name:h.hotelName,star:h.starRating,room:h.roomCategory,n:Number(h.nights)||nightsBetween(h.checkIn,h.checkOut)||0}));
+    const nights=hotels.reduce((a,h)=>a+(h.n||0),0);
+    const secs=[]; (d.flightVendors||[]).forEach(f=>(f.sectors||[]).concat(f.returnSectors||[]).forEach(x=>{if(x.from||x.to)secs.push(x);}));
+    const itin=(d.landVendors||[]).map(l=>l.itinerary||"").join(" ");
+    const meals=[/breakfast/i.test(itin)||hotels.length?"🍳 Breakfast":"",/lunch/i.test(itin)?"🥗 Lunch":"",/dinner/i.test(itin)?"🍽 Dinner":""].filter(Boolean);
+    const visa=(d.visaVendors||[]).some(v=>(Number(v.sellingPrice)||0)>0||(Number(v.costPrice)||0)>0);
+    const adults=Number(d.adults)||0;
+    return {d,sell,hotels,nights,secs,meals,visa,adults,ref:d.reference||("VE-"+(d._localId||"").slice(-4).toUpperCase())};
+  }
+  function openComparison(){
+    const other=(allDeals||[]).find(x=>x._localId===propCompareId);
+    if(!other){window.veToast("Compare karne ke liye doosri deal chuno","warning");return;}
+    const A=_cmpCalc(deal), B=_cmpCalc(other);
+    const w=window.open("","_blank"); if(!w){window.veToast("Popup blocked","error");return;}
+    const col=(X,tag,color)=>{
+      const pp=X.adults>0&&X.sell>0?Math.round(X.sell/X.adults):0;
+      const wa="https://wa.me/917009659048?text="+encodeURIComponent("I, "+(deal.clientName||"the Client")+", would like to CONFIRM "+tag+" ("+(X.d.destination||"")+", Ref: "+X.ref+") as per the comparison proposal.");
+      return `<div style="flex:1;min-width:270px;background:#fff;border:2px solid ${color};border-radius:18px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="background:${color};color:#fff;padding:10px 16px;font-size:12px;font-weight:800;letter-spacing:1.5px;text-align:center">${tag}</div>
+        <div style="padding:16px 18px;flex:1">
+          <div style="font-family:Georgia,serif;font-size:17px;font-weight:700;color:#0d1b3e;line-height:1.3">${esc(X.d.destination||"—")}</div>
+          <div style="font-size:11px;color:#7d8bab;margin:2px 0 10px">${X.nights?X.nights+" Nights / "+(X.nights+1)+" Days":""}${X.d.travelDates?" · "+esc(X.d.travelDates):""}</div>
+          ${X.sell>0?`<div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:12px;padding:10px 14px;margin-bottom:12px"><div style="color:#f0c842;font-size:9px;letter-spacing:2px;font-weight:800">TOTAL PACKAGE</div><div style="color:#fff;font-size:22px;font-weight:800;font-family:Georgia,serif">₹${X.sell.toLocaleString("en-IN")}<span style="font-size:10px;font-weight:400"> /- all incl.</span></div>${pp?`<div style="color:#c7d2ee;font-size:10px">≈ ₹${pp.toLocaleString("en-IN")} per person · ${X.adults} Adults</div>`:""}</div>`:""}
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin-bottom:5px">STAYS</div>
+          ${X.hotels.length?X.hotels.map(h=>`<div style="font-size:11px;color:#33415e;padding:4px 0;border-bottom:1px dashed #eef2fa"><b>${esc(h.name||h.city||"Hotel")}</b>${h.star?" "+"⭐".repeat(Math.min(5,Number(h.star)||0)):""}<br><span style="color:#7d8bab;font-size:10px">${esc(h.city||"")}${h.room?" · "+esc(h.room):""}${h.n?" · "+h.n+"N":""}</span></div>`).join(""):`<div style="font-size:11px;color:#9aa7c4">—</div>`}
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin:10px 0 5px">FLIGHTS</div>
+          <div style="font-size:11px;color:#33415e">${X.secs.length?X.secs.slice(0,4).map(x=>esc((x.from||"")+" → "+(x.to||""))).join("<br>")+(X.secs.length>4?"<br>+"+(X.secs.length-4)+" more":""):"Not included"}</div>
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin:10px 0 5px">INCLUDED</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">${[...X.meals,X.visa?"🛂 Visa":"","🚗 Transfers","🤝 Trip Manager"].filter(Boolean).map(x=>`<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:4px 9px">${x}</span>`).join("")}</div>
+        </div>
+        <a href="${wa}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);color:#fff;text-align:center;padding:13px;font-size:13px;font-weight:800">✅ CHOOSE ${tag}</a>
+      </div>`;
+    };
+    const diff=Math.abs(A.sell-B.sell);
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voyage-Ed — Compare Your Options</title>
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f9;margin:0;padding:0}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+    <div style="max-width:860px;margin:0 auto;background:#f8fafd;min-height:100vh">
+      <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:22px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="background:#fff;border-radius:10px;padding:6px 12px"><img src="${VE_LOGO}" style="height:36px;display:block"/></div>
+        <div style="text-align:right;color:#fff"><div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">CHOOSE YOUR PERFECT OPTION</div><div style="font-size:12px;color:#c7d2ee">Specially prepared for <b style="color:#f0c842">${esc(deal.clientName)||"you"}</b></div></div>
+      </div>
+      <div style="padding:20px 22px">
+        ${A.sell>0&&B.sell>0&&diff>0?`<div style="text-align:center;margin-bottom:14px;font-size:11.5px;color:#5a6b8c">Difference: <b style="color:#0d1b3e">₹${diff.toLocaleString("en-IN")}</b> — ${A.sell>B.sell?"OPTION A":"OPTION B"} is the premium pick ✨</div>`:""}
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+          ${col(A,"OPTION A","#c9961a")}
+          ${col(B,"OPTION B","#1a3060")}
+        </div>
+        <div style="text-align:center;margin-top:16px">
+          <button class="noprint" onclick="window.print()" style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;cursor:pointer;font-weight:800;font-size:13px">🖨 Print / Save PDF</button>
+          <div style="font-size:9.5px;color:#9aa7c4;margin-top:10px">Prices subject to availability at time of booking · Full itinerary & T&C in the detailed proposal · Voyage-Ed Travels, GMADA Aerocity, Mohali · +91 70096 59048 · enquiry@voyage-ed.com</div>
+        </div>
+      </div>
+    </div></body></html>`);
+    w.document.close();
+  }
   function waProposal(){
     const ph=(deal.contactNo||"").replace(/[^0-9]/g,"");
     if(!ph){window.veToast("Client phone number missing","error");return;}
@@ -2636,6 +2697,14 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 ⏳ Quote valid till {quoteVTDisplay}{deal.quoteValidTill?` — ${quoteDaysLeft} din ${quoteDaysLeft===1?"bacha":"bache"}`:" (generate pe lock hogi)"}
               </span>
               <button onClick={extendQuoteVT} title="+7 din" style={{background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"8px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#334e82"}}>🔄 +7d</button>
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>🆚 COMPARE (Option A = yeh deal)</div>
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <select value={propCompareId} onChange={e=>setPropCompareId(e.target.value)} style={{flex:1,border:"1px solid #d4e0f5",borderRadius:10,padding:"10px",fontSize:12,outline:"none",background:"#fff"}}>
+                <option value="">Option B chuno (doosri deal)...</option>
+                {(allDeals||[]).filter(x=>x._localId!==deal._localId).map(x=><option key={x._localId} value={x._localId}>{(x.clientName||"—")+" · "+(x.destination||"—")}</option>)}
+              </select>
+              <button onClick={openComparison} disabled={!propCompareId} style={{background:propCompareId?"linear-gradient(135deg,#0d1b3e,#1a3060)":"#e3eaf7",color:propCompareId?"#fff":"#9aa7c4",border:"none",borderRadius:10,padding:"10px 16px",cursor:propCompareId?"pointer":"not-allowed",fontSize:12,fontWeight:800}}>🆚 PDF</button>
             </div>
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>CANCELLATION POLICY</div>
             <div style={{display:"flex",gap:8,marginBottom:propCancelMode==="custom"?8:14,flexWrap:"wrap"}}>
