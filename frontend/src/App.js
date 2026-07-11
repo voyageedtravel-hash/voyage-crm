@@ -1421,13 +1421,19 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   },[proposalOpen,propCoverUrl,deal&&deal.destination]); // eslint-disable-line react-hooks/exhaustive-deps
   // ── Autosave: 2s debounce after any change — unsaved-state proposals khatam ──
   const _lastSavedRef=useRef("");
+  const _asDealRef=useRef(deal); _asDealRef.current=deal;
   useEffect(()=>{
     if(!deal||(!(deal.clientName||"").trim()&&!(deal.destination||"").trim())) return;
     const snap=JSON.stringify({...deal,_savedAt:0});
     if(snap===_lastSavedRef.current) return;
-    const t=setTimeout(()=>{ _lastSavedRef.current=snap;
-      try{ saveDeal(deal); setSaveStatus("Draft saved locally · "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})); }catch(e){}
-    },3000);
+    let t;
+    const isTyping=()=>{const a=document.activeElement;return a&&["INPUT","TEXTAREA","SELECT"].indexOf(a.tagName)>=0;};
+    const fire=()=>{
+      if(isTyping()){ t=setTimeout(fire,5000); return; }  // user type kar raha hai — disturb mat karo
+      _lastSavedRef.current=JSON.stringify({..._asDealRef.current,_savedAt:0});
+      try{ saveDeal(_asDealRef.current); setSaveStatus("Draft saved · "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})); }catch(e){}
+    };
+    t=setTimeout(fire,10000);
     return ()=>clearTimeout(t);
   },[deal]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!isLoggedIn) {
