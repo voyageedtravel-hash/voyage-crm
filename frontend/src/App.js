@@ -1303,15 +1303,16 @@ ${text}
 
   const saveToAllDeals = async (silent) => {
     if (!deal.clientName) { if(!silent){window.veToast && window.veToast("Please enter client name first", "warning");} return; }
-    setApiLoading(true);
+    if(!silent) setApiLoading(true);
     // Always keep a local copy first so a deal can NEVER be lost, even if the network fails.
     const persistLocal = (d) => {
       const all = loadAllDeals();
       const idx = all.findIndex(x => (d._id && x._id === d._id) || (d._localId && x._localId === d._localId));
       if (idx >= 0) all[idx] = d; else all.unshift(d);
       saveAllDeals(all); setAllDeals(all);
-      const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd);
-      return nd;
+      // Race-fix: poora deal replace mat karo (user beech me type kar raha ho sakta hai) — sirf server metadata merge
+      setDeal(cur=>{ const merged=normalizeDeal({...cur,_id:d._id||cur._id,_localId:d._localId||cur._localId,_savedAt:d._savedAt}); saveDeal(merged); return merged; });
+      return d;
     };
     try {
       const toSave = { ...deal, _localId: deal._localId || uid(), _savedAt: new Date().toISOString() };
@@ -1332,7 +1333,7 @@ ${text}
       persistLocal(localCopy);
       window.veToast && window.veToast("⚠️ Saved on this device, but server sync failed. Check login/connection.", "warning");
     } finally {
-      setApiLoading(false);
+      if(!silent) setApiLoading(false);
     }
   };
 
@@ -1424,7 +1425,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     if(!deal||(!(deal.clientName||"").trim()&&!(deal.destination||"").trim())) return;
     const snap=JSON.stringify({...deal,_savedAt:0});
     if(snap===_lastSavedRef.current) return;
-    const t=setTimeout(()=>{ _lastSavedRef.current=snap; try{saveToAllDeals(true);}catch(e){} },2000);
+    const t=setTimeout(()=>{ _lastSavedRef.current=snap;
+      try{ saveDeal(deal); setSaveStatus("Draft saved locally · "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})); }catch(e){}
+    },3000);
     return ()=>clearTimeout(t);
   },[deal]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!isLoggedIn) {
