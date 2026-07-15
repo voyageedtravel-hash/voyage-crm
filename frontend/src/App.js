@@ -225,6 +225,7 @@ function PPHelper({onApply}){
     {tot>0&&<button onClick={()=>{onApply(String(tot));setPp("");setN("");}} style={{background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:6,padding:"4px 9px",fontSize:10,fontWeight:800,color:"#334e82",cursor:"pointer",whiteSpace:"nowrap"}}>= ₹{tot.toLocaleString("en-IN")} ✓</button>}
   </div>;
 }
+const OCC_CATS=["Adult — Twin Sharing","Adult — Single Occupancy","Adult — Triple Sharing","Child With Bed (2–11 yrs)","Child Without Bed (2–11 yrs)","Infant (0–2 yrs)","Extra Adult / Mattress"];
 const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUND_REASONS[0],approvedBy:REFUND_APPROVERS[0],date:today(),refNo:"",note:""});
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
@@ -356,6 +357,7 @@ const initDeal = {
   visaVendors:[emptyVisaVendor()],
   clientPayments:[],
   refunds:[],
+  pricingRows:[], usePricingTotal:false,
   attachments:[],
 };
 
@@ -367,7 +369,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","attachments"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","attachments","pricingRows"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   return x; };
 const saveDeal = (d) => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); } catch(e){} };
 const loadVendorNames = () => { try { const v=localStorage.getItem(VENDORS_KEY); return v?JSON.parse(v):[]; } catch(e){return[];} };
@@ -1707,6 +1709,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     return "";
   }
   function propSell(){
+    const prTotal=(deal.pricingRows||[]).reduce((a,r)=>a+((Number(r.count)||0)*(Number(r.pp)||0)),0);
+    if(deal.usePricingTotal&&prTotal>0) return prTotal;
     let vend=[];
     if(propFlights==="only") vend=[...(deal.flightVendors||[])];
     else if(propFlights==="without") vend=[...(deal.hotelVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
@@ -2046,6 +2050,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">TOTAL PACKAGE PRICE</div>
         <div style="font-size:34px;font-weight:800">₹${sell.toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
         ${totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">≈ ₹${Math.round(sell/totalPax).toLocaleString("en-IN")} per person · ${pax}</div>`:""}
+        ${(function(){
+          const rows=(deal.pricingRows||[]).filter(r=>(Number(r.pp)||0)>0);
+          if(!rows.length) return "";
+          return `<table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:10.5px">`+
+            rows.map(r=>{const c=Number(r.count)||0,pp=Number(r.pp)||0;return `<tr>
+              <td style="padding:4px 0;color:#c7d2ee">${esc(r.cat)}</td>
+              <td style="padding:4px 6px;color:#c7d2ee;text-align:center;white-space:nowrap">${c?c+" × ":""}₹${pp.toLocaleString("en-IN")}</td>
+              <td style="padding:4px 0;text-align:right;color:#f0c842;font-weight:800;white-space:nowrap">${c?"₹"+(c*pp).toLocaleString("en-IN"):""}</td></tr>`;}).join("")+
+          `</table>`;
+        })()}
         <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till <b>${quoteVTDisplay}</b>.</div>
       </div>` : `
       <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
@@ -2729,6 +2743,38 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               </span>
               <button onClick={extendQuoteVT} title="+7 din" style={{background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"8px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#334e82"}}>🔄 +7d</button>
             </div>
+            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>💺 OCCUPANCY PRICING (optional — sharing-wise per person)</div>
+            {(deal.pricingRows||[]).length===0&&(
+              <button onClick={()=>setDeal(d=>({...d,pricingRows:[{id:uid(),cat:OCC_CATS[0],count:"2",pp:""}]}))} style={{width:"100%",background:"#f4f7fc",border:"1px dashed #c2d2ee",borderRadius:10,padding:"11px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#334e82",marginBottom:14}}>➕ Twin/Single/Triple/Child-wise pricing likho</button>
+            )}
+            {(deal.pricingRows||[]).length>0&&(()=>{
+              const rows=deal.pricingRows||[];
+              const upd=(id,k,v)=>setDeal(d=>({...d,pricingRows:(d.pricingRows||[]).map(r=>r.id===id?{...r,[k]:v}:r)}));
+              const grand=rows.reduce((a,r)=>a+((Number(r.count)||0)*(Number(r.pp)||0)),0);
+              return (
+                <div style={{marginBottom:14,background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:12,padding:"10px 12px"}}>
+                  {rows.map(r=>{
+                    const line=(Number(r.count)||0)*(Number(r.pp)||0);
+                    return <div key={r.id} style={{display:"flex",gap:6,alignItems:"center",marginBottom:7}}>
+                      <select value={r.cat} onChange={e=>upd(r.id,"cat",e.target.value)} style={{flex:2,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px",fontSize:11,outline:"none",background:"#fff",minWidth:0}}>{OCC_CATS.map(c=><option key={c}>{c}</option>)}</select>
+                      <input className="mono" type="number" value={r.count} onChange={e=>upd(r.id,"count",e.target.value)} placeholder="pax" style={{width:44,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px",fontSize:11,outline:"none"}}/>
+                      <input className="mono" type="number" value={r.pp} onChange={e=>upd(r.id,"pp",e.target.value)} placeholder="₹/person" style={{width:82,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px",fontSize:11,outline:"none"}}/>
+                      <span className="mono" style={{fontSize:10.5,fontWeight:800,color:"#0f2350",whiteSpace:"nowrap",minWidth:66,textAlign:"right"}}>{line>0?"₹"+line.toLocaleString("en-IN"):"—"}</span>
+                      <button onClick={()=>setDeal(d=>({...d,pricingRows:(d.pricingRows||[]).filter(x=>x.id!==r.id)}))} style={{background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"3px 7px",cursor:"pointer",fontSize:10}}>✕</button>
+                    </div>;
+                  })}
+                  <div style={{display:"flex",gap:8,marginBottom:8}}>
+                    <button onClick={()=>setDeal(d=>({...d,pricingRows:[...(d.pricingRows||[]),{id:uid(),cat:OCC_CATS[Math.min((d.pricingRows||[]).length,OCC_CATS.length-1)],count:"",pp:""}]}))} style={{flex:1,background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:8,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#334e82"}}>+ Row</button>
+                    <button onClick={()=>setDeal(d=>({...d,pricingRows:[],usePricingTotal:false}))} style={{flex:1,background:"transparent",border:"1px solid #e3eaf7",borderRadius:8,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#7d8bab"}}>🗑 Clear</button>
+                  </div>
+                  <label style={{display:"flex",gap:8,alignItems:"center",background:grand>0?"#f0faf4":"#fff",border:"1px solid "+(deal.usePricingTotal?"#15803d":"#e3eaf7"),borderRadius:8,padding:"8px 10px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#0f2350"}}>
+                    <input type="checkbox" checked={!!deal.usePricingTotal} onChange={e=>setDeal(d=>({...d,usePricingTotal:e.target.checked}))} style={{width:15,height:15,accentColor:"#15803d"}}/>
+                    Is total ko package price banao: <span className="mono" style={{color:"#15803d"}}>₹{grand.toLocaleString("en-IN")}</span>
+                  </label>
+                  <div style={{fontSize:9.5,color:"#9aa7c4",marginTop:5}}>Ex: 12L total, 6 pax → system khud ₹2L/person dikhata hai. Sharing-wise chahiye toh yahan rows bharo — PDF mein poora breakdown table aayega.</div>
+                </div>
+              );
+            })()}
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>🆚 COMPARE (Option A = yeh deal)</div>
             <div style={{display:"flex",gap:8,marginBottom:14}}>
               <select value={propCompareId} onChange={e=>setPropCompareId(e.target.value)} style={{flex:1,border:"1px solid #d4e0f5",borderRadius:10,padding:"10px",fontSize:12,outline:"none",background:"#fff"}}>
