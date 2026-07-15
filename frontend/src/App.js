@@ -668,6 +668,10 @@ export default function TravelCRM() {
   const [proposalOpen,setProposalOpen]=useState(false);
   const [duesOpen,setDuesOpen]=useState(false);
   const [propCompareId,setPropCompareId]=useState("");
+  const [aiX,setAiX]=useState(null); // "flight"|"hotel"|"land"
+  const [aiXText,setAiXText]=useState("");
+  const [aiXImgs,setAiXImgs]=useState([]);
+  const [aiXBusy,setAiXBusy]=useState(false);
   const [imgHealth,setImgHealth]=useState(null); // null | "checking" | {ok:n, dead:[urls]}
   const [propFlights,setPropFlights]=useState("with");   // with | without | only
   const [propShowPrice,setPropShowPrice]=useState(true);
@@ -1208,6 +1212,48 @@ ${text}
   })}));
   const addSector=(vid,sec)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===vid?{...v,[sec]:[...v[sec],emptySector()]}:v)}));
   const rmSector=(vid,idx,sec)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===vid?{...v,[sec]:v[sec].filter((_,i)=>i!==idx)}:v)}));
+  const AIX_SYS={
+    flight:'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"sectors":[{"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}]}. List sectors in journey order including return. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
+    hotel:'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
+    land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.'
+  };
+  async function runAIExtract(){
+    if(!aiX) return;
+    if(!aiXText.trim()&&aiXImgs.length===0){ window.veToast("Pic paste karo ya email text daalo","warning"); return; }
+    setAiXBusy(true);
+    try{
+      const content=[];
+      aiXImgs.forEach(d=>{ const m=d.match(/^data:(image\/[a-z]+);base64,(.+)$/); if(m) content.push({type:"image",source:{type:"base64",media_type:m[1],data:m[2]}}); });
+      content.push({type:"text",text:(aiXText.trim()||"Extract from the attached image(s).")});
+      const res=await fetch(`${API_BASE}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2500,system:AIX_SYS[aiX],messages:[{role:"user",content}]})});
+      const data=await res.json();
+      const txt=((data.content||[]).map(c=>c.text||"").join("")||"").replace(/```json|```/g,"").trim();
+      const j=JSON.parse(txt);
+      if(aiX==="flight"){
+        const secs=(j.sectors||[]).map(x=>({from:x.from||"",fromName:x.fromName||"",to:x.to||"",toName:x.toName||"",date:x.date||"",arrDate:x.arrDate||"",depTime:x.depTime||"",arrTime:x.arrTime||"",airlineCode:(x.airlineCode||"").toUpperCase(),airlineName:x.airlineName||""}));
+        if(!secs.length) throw new Error("no sectors");
+        const nv={...emptyFlightVendor(),name:j.vendorName||"AI Extracted",costPrice:j.costPrice!=null?String(j.costPrice):"",sectors:secs};
+        setDeal(d=>({...d,flightVendors:[...(d.flightVendors||[]),nv]}));
+        window.veToast("✅ "+secs.length+" flight sector(s) bhar diye — form mein check/edit kar lo","success");
+      }else if(aiX==="hotel"){
+        const hs=(j.hotels||[]);
+        if(!hs.length) throw new Error("no hotels");
+        const nvs=hs.map(h=>({...emptyHotelVendor(),name:h.vendorName||"AI Extracted",city:h.city||"",hotelName:h.hotelName||"",starRating:h.starRating||"",roomCategory:h.roomCategory||"Deluxe Room",checkIn:h.checkIn||"",checkOut:h.checkOut||"",costPrice:h.costPrice!=null?String(h.costPrice):""}));
+        setDeal(d=>({...d,hotelVendors:[...(d.hotelVendors||[]),...nvs]}));
+        window.veToast("✅ "+nvs.length+" hotel(s) bhar diye — check/edit kar lo","success");
+      }else{
+        if(!(j.itinerary||"").trim()) throw new Error("no itinerary");
+        const nv={...emptyLandVendor(),name:j.vendorName||"AI Extracted",itinerary:j.itinerary,costPrice:j.costPrice!=null?String(j.costPrice):""};
+        setDeal(d=>({...d,landVendors:[...(d.landVendors||[]),nv]}));
+        window.veToast("✅ Day-wise itinerary bhar di — check/edit kar lo","success");
+      }
+      setAiX(null); setAiXText(""); setAiXImgs([]);
+    }catch(e){
+      window.veToast("⚠️ Extract nahi ho paya — pic saaf hai? Ya text paste karke try karo","error");
+    }
+    setAiXBusy(false);
+  }
   const addFV=()=>setDeal(d=>({...d,flightVendors:[...d.flightVendors,emptyFlightVendor()]}));
   const rmFV=(id)=>setDeal(d=>({...d,flightVendors:d.flightVendors.filter(v=>v.id!==id)}));
 
@@ -2693,6 +2739,42 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 
       {receiptPayment&&<Receipt deal={deal} payment={receiptPayment} onClose={()=>setReceiptPayment(null)} />}
 
+      {aiX&&(
+        <div onClick={()=>!aiXBusy&&setAiX(null)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"22px",boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
+            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":"Land / Itinerary"}</div>
+            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</div>
+            <div tabIndex={0}
+              onPaste={e=>{
+                const items=Array.from(e.clipboardData.items||[]);
+                const imgs=items.filter(x=>x.type&&x.type.indexOf("image")===0);
+                if(imgs.length){ e.preventDefault(); imgs.forEach(it=>{const f=it.getAsFile(); if(f) window.__veImgToData(f,(d)=>setAiXImgs(a=>[...a,d]));}); }
+              }}
+              style={{border:"2px dashed #c4b5fd",borderRadius:12,padding:"14px",textAlign:"center",fontSize:11.5,color:"#5b21b6",background:"#faf8ff",outline:"none",marginBottom:10,cursor:"text"}}>
+              📋 <b>Click karke Ctrl+V</b> — screenshot/photo paste karo (multiple bhi)
+              <label style={{display:"inline-block",marginLeft:10,background:"#ede9fe",border:"1px solid #c4b5fd",borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:10.5,fontWeight:700}}>📁 Choose
+                <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>{Array.from(e.target.files||[]).forEach(f=>window.__veImgToData(f,(d)=>setAiXImgs(a=>[...a,d]))); e.target.value="";}}/>
+              </label>
+              {aiXImgs.length>0&&(
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10,justifyContent:"center"}}>
+                  {aiXImgs.map((d,i)=>(
+                    <div key={i} style={{position:"relative"}}>
+                      <img src={d} alt="" style={{width:64,height:46,objectFit:"cover",borderRadius:6,border:"1px solid #c4b5fd"}}/>
+                      <button onClick={()=>setAiXImgs(a=>a.filter((_,j)=>j!==i))} style={{position:"absolute",top:-6,right:-6,width:16,height:16,borderRadius:"50%",background:"#b91c1c",color:"#fff",border:"none",fontSize:9,cursor:"pointer",lineHeight:"16px",padding:0}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <textarea value={aiXText} onChange={e=>setAiXText(e.target.value)} rows={5} placeholder={"Ya vendor ka email/message text yahan paste karo...\n(dono bhi de sakte ho — pic + text)"}
+              style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:10,padding:"10px 12px",fontSize:11.5,outline:"none",resize:"vertical",fontFamily:"inherit",lineHeight:1.6,marginBottom:12}}/>
+            <div style={{display:"flex",gap:10}}>
+              <button disabled={aiXBusy} onClick={runAIExtract} style={{flex:2,background:aiXBusy?"#c4b5fd":"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none",borderRadius:11,padding:"13px",cursor:aiXBusy?"wait":"pointer",fontSize:13,fontWeight:800}}>{aiXBusy?"🔎 AI padh raha hai...":"✨ Extract & Auto-Fill"}</button>
+              <button disabled={aiXBusy} onClick={()=>{setAiX(null);setAiXText("");setAiXImgs([]);}} style={{flex:1,background:"transparent",border:"1px solid #e3eaf7",borderRadius:11,padding:"13px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#7d8bab"}}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {proposalOpen&&(
         <div onClick={()=>setProposalOpen(false)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,padding:"26px 26px 22px",width:"100%",maxWidth:520,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
@@ -2987,6 +3069,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>✈️ Flight Vendors</h2>
               {deal.flightVendors.length<10&&<button className="btn btn-ind" onClick={addFV}>+ Add Flight Vendor</button>}
+              <button onClick={()=>setAiX("flight")} className="btn" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Extract (pic/email)</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(flight.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(flight.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(flight.sell-flight.cost),c:(flight.sell-flight.cost)>=0?"#10b981":"#ef4444"},{l:"Balance to Pay",v:fmtINR(flight.cost-flight.paid),c:(flight.cost-flight.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
@@ -3104,6 +3187,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>🏨 Hotel Vendors</h2>
               {deal.hotelVendors.length<10&&<button className="btn btn-ind" onClick={addHV}>+ Add Hotel</button>}
+              <button onClick={()=>setAiX("hotel")} className="btn" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Extract (pic/email)</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(hotel.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(hotel.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(hotel.sell-hotel.cost),c:(hotel.sell-hotel.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(hotel.paid),c:"#4169E1"},{l:"Balance",v:fmtINR(hotel.cost-hotel.paid),c:(hotel.cost-hotel.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
@@ -3213,6 +3297,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <h2 style={{fontSize:18,fontWeight:800}}>🚌 Land Vendors</h2>
               {deal.landVendors.length<10&&<button className="btn btn-ind" onClick={addLV}>+ Add Land Vendor</button>}
+              <button onClick={()=>setAiX("land")} className="btn" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Extract (pic/email)</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(land.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(land.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(land.sell-land.cost),c:(land.sell-land.cost)>=0?"#10b981":"#ef4444"},{l:"Paid",v:fmtINR(land.paid),c:"#4169E1"},{l:"Balance",v:fmtINR(land.cost-land.paid),c:(land.cost-land.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
