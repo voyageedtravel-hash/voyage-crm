@@ -237,6 +237,7 @@ function PPHelper({onApply}){
     </div>
   </div>;
 }
+const OCC_CATS=["Adult — Twin Sharing","Adult — Single Occupancy","Adult — Triple Sharing","Child With Bed (2–11 yrs)","Child Without Bed (2–11 yrs)","Infant (0–2 yrs)","Extra Adult / Mattress"];
 const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUND_REASONS[0],approvedBy:REFUND_APPROVERS[0],date:today(),refNo:"",note:""});
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
