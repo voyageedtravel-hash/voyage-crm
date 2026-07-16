@@ -214,18 +214,29 @@ window.__veImgToData=(file,cb)=>{ try{ const img=new Image(); const url=URL.crea
   img.onload=()=>{ try{ const c=document.createElement("canvas"); const sc=Math.min(1,760/img.width); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc); c.getContext("2d").drawImage(img,0,0,c.width,c.height); cb(c.toDataURL("image/jpeg",0.8)); }catch(e){} URL.revokeObjectURL(url); };
   img.onerror=()=>URL.revokeObjectURL(url); img.src=url; }catch(e){} };
 function PPHelper({onApply}){
-  const [pp,setPp]=React.useState(""); const [n,setN]=React.useState("");
-  const tot=(Number(pp)||0)*(Number(n)||0);
-  const S={width:74,border:"1px solid #d4e0f5",borderRadius:6,padding:"4px 7px",fontSize:10.5,outline:"none"};
-  return <div style={{display:"flex",gap:5,alignItems:"center",marginTop:5}}>
-    <span style={{fontSize:9.5,color:"#7d8bab",fontWeight:700}}>PP:</span>
-    <input className="mono" type="number" placeholder="₹/person" value={pp} onChange={e=>setPp(e.target.value)} style={S}/>
-    <span style={{fontSize:10,color:"#7d8bab"}}>×</span>
-    <input className="mono" type="number" placeholder="pax" value={n} onChange={e=>setN(e.target.value)} style={{...S,width:46}}/>
-    {tot>0&&<button onClick={()=>{onApply(String(tot));setPp("");setN("");}} style={{background:"#eef3fc",border:"1px solid #c2d2ee",borderRadius:6,padding:"4px 9px",fontSize:10,fontWeight:800,color:"#334e82",cursor:"pointer",whiteSpace:"nowrap"}}>= ₹{tot.toLocaleString("en-IN")} ✓</button>}
+  const [open,setOpen]=React.useState(false);
+  const [aPP,setAPP]=React.useState(""); const [aN,setAN]=React.useState("");
+  const [cPP,setCPP]=React.useState(""); const [cN,setCN]=React.useState("");
+  const tot=(Number(aPP)||0)*(Number(aN)||0)+(Number(cPP)||0)*(Number(cN)||0);
+  if(!open) return <button onClick={()=>setOpen(true)} style={{marginTop:4,background:"transparent",border:"none",padding:0,fontSize:10,color:"#6d28d9",fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>👥 per-person se nikaalo</button>;
+  const S={width:70,border:"1px solid #d4e0f5",borderRadius:6,padding:"4px 6px",fontSize:10.5,outline:"none"};
+  const row=(lbl,pp,setPP,n,setN)=>(
+    <div style={{display:"flex",gap:5,alignItems:"center",marginBottom:4}}>
+      <span style={{fontSize:10,color:"#5a6b8c",fontWeight:700,width:38}}>{lbl}</span>
+      <span style={{fontSize:10,color:"#9aa7c4"}}>₹</span>
+      <input className="mono" type="number" placeholder="/person" value={pp} onChange={e=>setPP(e.target.value)} style={S}/>
+      <span style={{fontSize:10,color:"#9aa7c4"}}>×</span>
+      <input className="mono" type="number" placeholder="pax" value={n} onChange={e=>setN(e.target.value)} style={{...S,width:42}}/>
+    </div>);
+  return <div style={{marginTop:6,background:"#faf8ff",border:"1px solid #e2dbfa",borderRadius:8,padding:"8px 10px",maxWidth:250}}>
+    {row("Adult",aPP,setAPP,aN,setAN)}
+    {row("Child",cPP,setCPP,cN,setCN)}
+    <div style={{display:"flex",gap:6,marginTop:2}}>
+      <button disabled={!(tot>0)} onClick={()=>{onApply(String(tot));setOpen(false);setAPP("");setAN("");setCPP("");setCN("");}} style={{flex:1,background:tot>0?"#6d28d9":"#e3eaf7",color:tot>0?"#fff":"#9aa7c4",border:"none",borderRadius:6,padding:"5px 8px",fontSize:10.5,fontWeight:800,cursor:tot>0?"pointer":"not-allowed"}}>= ₹{tot.toLocaleString("en-IN")} — Fill ✓</button>
+      <button onClick={()=>setOpen(false)} style={{background:"transparent",border:"1px solid #e3eaf7",borderRadius:6,padding:"5px 8px",fontSize:10.5,color:"#7d8bab",cursor:"pointer"}}>✕</button>
+    </div>
   </div>;
 }
-const OCC_CATS=["Adult — Twin Sharing","Adult — Single Occupancy","Adult — Triple Sharing","Child With Bed (2–11 yrs)","Child Without Bed (2–11 yrs)","Infant (0–2 yrs)","Extra Adult / Mattress"];
 const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUND_REASONS[0],approvedBy:REFUND_APPROVERS[0],date:today(),refNo:"",note:""});
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
@@ -3102,7 +3113,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                         <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>{fmtINR(costINR-paidINR)}</div>
                       </div>
-                      <button onClick={()=>setExpandedVendor(isExp?null:fv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
+                      <button onClick={()=>setExpandedVendor(isExp?null:fv.id)} className="btn btn-sm" style={{fontSize:11,padding:"5px 10px",fontWeight:800,whiteSpace:"nowrap"}}>{isExp?"▲ Close":"💳 Payments"}</button>
                       <button onClick={()=>rmFV(fv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
@@ -3226,7 +3237,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                         <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(costINR-paidINR)>0?"#ef4444":"#10b981"}}>{fmtINR(costINR-paidINR)}</div>
                       </div>
-                      <button onClick={()=>setExpandedVendor(isExp?null:hv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
+                      <button onClick={()=>setExpandedVendor(isExp?null:hv.id)} className="btn btn-sm" style={{fontSize:11,padding:"5px 10px",fontWeight:800,whiteSpace:"nowrap"}}>{isExp?"▲ Close":"💳 Payments"}</button>
                       <button onClick={()=>rmHV(hv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
@@ -3331,7 +3342,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                         <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PROFIT</div>
                         <div className="mono" style={{fontSize:12,fontWeight:700,color:(sellINR-costINR)>=0?"#10b981":"#ef4444"}}>{fmtINR(sellINR-costINR)}</div>
                       </div>
-                      <button onClick={()=>setExpandedVendor(isExp?null:lv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
+                      <button onClick={()=>setExpandedVendor(isExp?null:lv.id)} className="btn btn-sm" style={{fontSize:11,padding:"5px 10px",fontWeight:800,whiteSpace:"nowrap"}}>{isExp?"▲ Close":"💳 Payments"}</button>
                       <button onClick={()=>rmLV(lv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
@@ -3390,7 +3401,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div style={{flex:"0 0 150px"}}><span className="lbl">Visa Status</span><select value={vv.visaStatus||"Not Applied"} onChange={e=>updVisa(vv.id,"visaStatus",e.target.value)} style={{borderColor:VISA_STATUS_COLORS[vv.visaStatus||"Not Applied"]+"66"}}>{VISA_STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
                     <div style={{display:"flex",gap:6,marginLeft:"auto",alignItems:"center"}}>
                       <span style={{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:700,background:VISA_STATUS_COLORS[vv.visaStatus||"Not Applied"]+"22",color:VISA_STATUS_COLORS[vv.visaStatus||"Not Applied"]}}>{vv.visaStatus||"Not Applied"}</span>
-                      <button onClick={()=>setExpandedVendor(isExp?null:vv.id)} className="btn btn-sm" style={{fontSize:15,padding:"4px 10px"}}>{isExp?"▲":"▼"}</button>
+                      <button onClick={()=>setExpandedVendor(isExp?null:vv.id)} className="btn btn-sm" style={{fontSize:11,padding:"5px 10px",fontWeight:800,whiteSpace:"nowrap"}}>{isExp?"▲ Close":"💳 Payments"}</button>
                       <button onClick={()=>rmVisaV(vv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
