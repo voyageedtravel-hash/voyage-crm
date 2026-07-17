@@ -26,7 +26,8 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: "1mb" }));  // was 10mb — booking payloads don't need that; blocks abuse
+let compression=null; try{ compression=require("compression"); app.use(compression()); }catch(e){ console.warn("compression not installed — run npm i compression"); }
+app.use(express.json({ limit: "2mb" }));  // was 10mb — booking payloads don't need that; blocks abuse
 
 // ─── Basic security headers ───
 app.use((req, res, next) => {
@@ -333,9 +334,36 @@ const start = async () => {
     });
 
     // ─── AI CHAT PROXY ────────────────────────────────────────────────────────
-    app.post("/api/chat", publicLimiter, async (req, res) => {
+    // ── /api/chat hardening: open-proxy abuse band ──
+    const chatLimiter = makeRateLimiter(5);              // 5/min per IP
+    const _chatDaily = new Map();                        // per-IP daily cap
+    const CHAT_DAY_CAP = 80;
+    const ALLOWED_MODELS = new Set(["claude-haiku-4-5-20251001","claude-sonnet-4-6"]);
+    app.post("/api/chat", chatLimiter, async (req, res) => {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+      // browser-origin required (curl/bot direct hits blocked)
+      const org = req.get("origin") || req.get("referer") || "";
+      if (!ALLOWED_ORIGINS.some(o => org.startsWith(o))) {
+        return res.status(403).json({ error: "forbidden" });
+      }
+      // daily cap per IP
+      const ip = (req.headers["x-forwarded-for"] || req.ip || "").split(",")[0].trim();
+      const day = new Date().toISOString().slice(0, 10);
+      const k = ip + "|" + day;
+      const used = (_chatDaily.get(k) || 0) + 1;
+      if (used > CHAT_DAY_CAP) return res.status(429).json({ error: "daily limit reached" });
+      _chatDaily.set(k, used);
+      if (_chatDaily.size > 5000) _chatDaily.clear();
+      // payload clamps
+      const msgs = Array.isArray(req.body.messages) ? req.body.messages.slice(0, 8) : [];
+      let imgCount = 0, tooBig = false;
+      msgs.forEach(m => { if (Array.isArray(m.content)) m.content.forEach(c => {
+        if (c && c.type === "image") { imgCount++; if (c.source && c.source.data && c.source.data.length > 500000) tooBig = true; }
+      }); });
+      if (!msgs.length || imgCount > 4 || tooBig) return res.status(400).json({ error: "invalid payload" });
+      const model = ALLOWED_MODELS.has(req.body.model) ? req.body.model : "claude-haiku-4-5-20251001";
+      const maxTok = Math.min(Number(req.body.max_tokens) || 1000, 3000);
       try {
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -345,10 +373,10 @@ const start = async () => {
             "anthropic-version": "2023-06-01",
           },
           body: JSON.stringify({
-            model: req.body.model || "claude-haiku-4-5-20251001",
-            max_tokens: req.body.max_tokens || 1000,
-            system: req.body.system,
-            messages: req.body.messages,
+            model,
+            max_tokens: maxTok,
+            system: typeof req.body.system === "string" ? req.body.system.slice(0, 6000) : undefined,
+            messages: msgs,
           }),
         });
         const data = await r.json();
