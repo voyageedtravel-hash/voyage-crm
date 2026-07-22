@@ -108,6 +108,49 @@ const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
       ${d.note?`<div style="margin-top:4px;font-size:12px;color:#6b7a99;font-style:italic">Note: ${esc(d.note)}</div>`:""}
     </div>`).join("");
 
+  // ── Tiered 3★/4★/5★ side-by-side comparison ──
+  const starStr = (n)=>"★".repeat(Number(n)||0);
+  const activeTiers = (meta.tiers||[]).filter(t=>t.enabled && (Number(t.totalPrice)>0 || (t.hotels||[]).some(h=>h.hotelName)));
+  let tiersHTML = "";
+  if(activeTiers.length){
+    const cols = activeTiers.map((t,idx)=>{
+      const tPax = meta.pax>0?meta.pax:1;
+      const tTotal = Number(t.totalPrice)||0;
+      const tPer = Math.round(tTotal/tPax);
+      const isFeatured = (idx===1 && activeTiers.length===3) || t.booked; // middle tier or booked highlighted
+      const hotelBlocks = (t.hotels||[]).filter(h=>h.hotelName||h.photoUrl).map(h=>`
+        <div style="margin-bottom:10px">
+          ${h.photoUrl?`<img src="${esc(h.photoUrl)}" alt="${esc(h.hotelName)}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;display:block;margin-bottom:6px" onerror="this.style.display='none'"/>`:""}
+          <div style="font-weight:800;color:#0f2350;font-size:14px">${esc(h.hotelName)}</div>
+          <div style="font-size:12px;color:#5a6b8c">${esc(h.city)}${h.roomCategory?(" · "+esc(h.roomCategory)):""}</div>
+        </div>`).join("") || `<div style="color:#999;font-size:12px;padding:12px 0">Hotel details on request</div>`;
+      const badge = t.booked ? "BOOKED ✓" : (idx===1 && activeTiers.length===3 ? "MOST POPULAR" : "");
+      return `
+      <div style="flex:1;min-width:0;border:${isFeatured?"2px solid #4169E1":"1px solid #d4e0f5"};border-radius:12px;overflow:hidden;background:#fff;${isFeatured?"box-shadow:0 6px 20px rgba(65,105,225,.18)":""}">
+        <div style="background:${t.booked?"linear-gradient(135deg,#15803d,#1a9e4b)":isFeatured?"linear-gradient(135deg,#0f2350,#4169E1)":"#0f2350"};color:#fff;padding:12px 14px;text-align:center">
+          <div style="font-size:15px;font-weight:800;letter-spacing:.5px">${esc(t.label||(t.star+"-Star"))}</div>
+          <div style="color:#ffd76a;font-size:13px;margin-top:2px">${starStr(t.star)}</div>
+          ${badge?`<div style="font-size:10px;letter-spacing:1px;color:#fff;margin-top:3px;font-weight:800">${badge}</div>`:""}
+        </div>
+        <div style="padding:14px">
+          ${hotelBlocks}
+        </div>
+        <div style="padding:14px;border-top:1px dashed #d4e0f5;text-align:center;background:#f4f7fc">
+          <div style="font-size:11px;color:#4169E1;font-weight:800;letter-spacing:1px">PRICE PER PERSON</div>
+          <div style="font-size:24px;font-weight:800;color:#0f2350;margin:2px 0">${inr(tPer)}</div>
+          <div style="font-size:11px;color:#6b7a99">Total ${inr(tTotal)}${meta.pax>0?(" · "+meta.pax+" pax"):""}</div>
+        </div>
+      </div>`;
+    }).join("");
+    tiersHTML = `
+    <div class="sec-title">■ CHOOSE YOUR STAY — 3 OPTIONS</div>
+    <div class="body">
+      <div class="tiers-wrap" style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">${cols}</div>
+      <div style="font-size:12px;color:#6b7a99;margin-top:14px">* All three options cover the same itinerary; only the hotel category and price differ. GST extra as applicable.</div>
+    </div>`;
+  }
+  meta.tiersHTML = tiersHTML;
+
   const incl = (ai.inclusions||[]).map(i=>`<li style="margin-bottom:6px;color:#15803d">✔ ${esc(i)}</li>`).join("");
   const excl = (ai.exclusions||[]).map(i=>`<li style="margin-bottom:6px;color:#b91c1c">✖ ${esc(i)}</li>`).join("");
   const terms = FIXED_TERMS.map((t,i)=>`<li style="margin-bottom:6px;color:#33446b">${esc(t)}</li>`).join("");
@@ -141,7 +184,7 @@ const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
   ul{list-style:none;font-size:13px} ol{margin-left:18px;font-size:13px}
   .foot{background:#0f2350;color:#fff;padding:22px 36px;text-align:center;margin-top:20px}
   .foot a{color:#9db8f5}
-  @media print{.bar{display:none}body{background:#fff}.page{max-width:100%}}
+  @media print{.bar{display:none}body{background:#fff}.page{max-width:100%}.tiers-wrap{display:flex !important;gap:10px !important}.tiers-wrap>div{flex:1 !important}}
   @media(max-width:600px){.flt,.twocol{grid-template-columns:1fr}.hd h1{font-size:22px}}
 </style></head><body>
 <div class="bar">
@@ -171,15 +214,16 @@ const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
   </div>`:""}
   ${hotels.length?`<div class="sec-title">■ HOTEL DETAILS</div><div class="body">${hotelCards}</div>`:""}
   ${(ai.days&&ai.days.length)?`<div class="sec-title">■ DAY-BY-DAY ITINERARY</div><div class="body">${dayRows}</div>`:""}
+  ${meta.tiersHTML || `
   <div class="sec-title">■ PRICING SUMMARY</div>
   <div class="body">
     <div class="price">
-      <div class="opt">TOTAL PACKAGE PRICE</div>
-      <div class="amt">${inr(totalSell)}</div>
-      <div class="per">${meta.pax>0?("Approx "+inr(perPax)+" per person × "+meta.pax+" pax"):""}</div>
+      <div class="opt">PRICE PER PERSON</div>
+      <div class="amt">${meta.pax>0?inr(perPax):inr(totalSell)}</div>
+      <div class="per">${meta.pax>0?("Total package "+inr(totalSell)+" for "+meta.pax+" pax"):""}</div>
     </div>
     <div style="font-size:12px;color:#6b7a99">* GST extra as applicable. Quotation valid for mentioned travel dates only.</div>
-  </div>
+  </div>`}
   ${(incl||excl)?`<div class="sec-title">■ INCLUSIONS &amp; EXCLUSIONS</div>
   <div class="body"><div class="twocol">
     <div><div style="font-weight:800;color:#15803d;margin-bottom:8px">✔ INCLUSIONS</div><ul>${incl}</ul></div>
@@ -292,6 +336,15 @@ const uid = () => Math.random().toString(36).slice(2,9);
 const n = (v) => Number(v)||0;
 const sum = (arr, key) => (arr || []).reduce((s, i) => s + (Number(i[key]) || 0), 0);
 const toINR = (amount,currency,rate) => currency==="INR"?n(amount):n(amount)*n(rate);
+// ── Booked-tier helpers ──────────────────────────────────────────────
+// When a client books a specific star-tier, that tier's total price becomes
+// the deal's selling price. Cost/vendor tracking stays as-is (vendor-based).
+const bookedTierOf = (d) => {
+  if(!d || !d.useTiers || !Array.isArray(d.tiers)) return null;
+  const t = d.tiers.find(x=>x && x.booked && Number(x.totalPrice)>0);
+  return t || null;
+};
+const tierSellINR = (d) => { const t=bookedTierOf(d); return t?Number(t.totalPrice)||0:null; };
 const fmtINR = (val) => "₹"+(Math.round(n(val))).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
 const nightsBetween = (checkIn, checkOut) => {
@@ -333,6 +386,18 @@ const emptyHotelVendor = () => ({
   checkIn:"", checkOut:"", nights:0,
   costPrice:"", sellingPrice:"", payments:[],
 });
+// ── Tiered options (3★ / 4★ / 5★) — each tier has its own hotels + total price ──
+const emptyTierHotel = () => ({ id:uid(), hotelName:"", city:"", photoUrl:"", roomCategory:"" });
+const emptyTier = (star, label) => ({
+  id:uid(), star, label, enabled:false, booked:false,
+  hotels:[emptyTierHotel()],
+  totalPrice:"",   // total package selling price for this tier (INR)
+});
+const defaultTiers = () => ([
+  emptyTier(3,"3-Star"),
+  emptyTier(4,"4-Star"),
+  emptyTier(5,"5-Star"),
+]);
 const emptyLandVendor = () => ({
   id:uid(), name:"", currency:"INR", exchangeRate:"",
   itinerary:"", costPrice:"", sellingPrice:"", payments:[],
@@ -370,6 +435,7 @@ const initDeal = {
   clientPayments:[],
   refunds:[],
   pricingRows:[], usePricingTotal:false,
+  tiers:defaultTiers(), useTiers:false,
   attachments:[],
 };
 
@@ -382,6 +448,10 @@ const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","attachments","pricingRows"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  // Tiered options — guarantee 3 tiers exist for older deals
+  if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
+  x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
+  if(typeof x.useTiers!=="boolean") x.useTiers=false;
   return x; };
 const saveDeal = (d) => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); } catch(e){} };
 const loadVendorNames = () => { try { const v=localStorage.getItem(VENDORS_KEY); return v?JSON.parse(v):[]; } catch(e){return[];} };
@@ -758,7 +828,7 @@ export default function TravelCRM() {
   const aiContext=()=>{
     // Compact snapshot of current data for the AI to reason over
     const dv=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-    const sellOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const sellOf=(d)=>{ const ts=tierSellINR(d); return ts!=null?ts:dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0); };
     const recvOf=(d)=>sum(d.clientPayments||[],"amount");
     return {
       totalDeals:allDeals.length,
@@ -869,7 +939,7 @@ Be concise. If asked to do something you have no action for, explain politely in
     setBriefBusy(true); setBriefText("");
     try{
       const dv=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-      const sellOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+      const sellOf=(d)=>{ const ts=tierSellINR(d); return ts!=null?ts:dv(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0); };
       const costOf=(d)=>dv(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
       const recvOf=(d)=>sum(d.clientPayments||[],"amount");
       const paidVOf=(d)=>dv(d).reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
@@ -988,7 +1058,7 @@ The days array length MUST equal ${skeleton.length}. Inclusions/exclusions: 5-7 
       });
 
       // 3. Build branded print-ready HTML and open in new window
-      const html = buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate});
+      const html = buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate,tiers:(deal.useTiers?deal.tiers:[])});
       const w = window.open("","_blank");
       if(!w){ window.veToast && window.veToast("Allow popups to view the quotation","warning"); setQuoteBusy(false); return; }
       w.document.write(html); w.document.close();
@@ -1225,7 +1295,7 @@ ${text}
   const addSector=(vid,sec)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===vid?{...v,[sec]:[...v[sec],emptySector()]}:v)}));
   const rmSector=(vid,idx,sec)=>setDeal(d=>({...d,flightVendors:d.flightVendors.map(v=>v.id===vid?{...v,[sec]:v[sec].filter((_,i)=>i!==idx)}:v)}));
   const AIX_SYS={
-    flight:'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"sectors":[{"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}]}. List sectors in journey order including return. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
+    flight:'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back (e.g. DEL→BKK, then BKK→SIN, then SIN→DEL, or DEL→LON…PAR→DEL) — put every leg in "sectors" in journey order, leave "returnSectors" empty. Detect the origin as the very first departure city and check whether the final leg lands back there to distinguish return vs multi-city. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
     hotel:'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
     land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.'
   };
@@ -1243,11 +1313,31 @@ ${text}
       const txt=((data.content||[]).map(c=>c.text||"").join("")||"").replace(/```json|```/g,"").trim();
       const j=JSON.parse(txt);
       if(aiX==="flight"){
-        const secs=(j.sectors||[]).map(x=>({from:x.from||"",fromName:x.fromName||"",to:x.to||"",toName:x.toName||"",date:x.date||"",arrDate:x.arrDate||"",depTime:x.depTime||"",arrTime:x.arrTime||"",airlineCode:(x.airlineCode||"").toUpperCase(),airlineName:x.airlineName||""}));
+        const mapSec=(x)=>({from:x.from||"",fromName:x.fromName||"",to:x.to||"",toName:x.toName||"",date:x.date||"",arrDate:x.arrDate||"",depTime:x.depTime||"",arrTime:x.arrTime||"",airlineCode:(x.airlineCode||"").toUpperCase(),airlineName:x.airlineName||""});
+        const secs=(j.sectors||[]).map(mapSec);
+        let retSecs=(j.returnSectors||[]).map(mapSec);
         if(!secs.length) throw new Error("no sectors");
-        const nv={...emptyFlightVendor(),name:j.vendorName||"AI Extracted",costPrice:j.costPrice!=null?String(j.costPrice):"",sectors:secs};
+        // Decide trip type: trust AI, but self-correct obvious cases.
+        let ftype=(j.flightType||"").toLowerCase();
+        if(!["one-way","return","multi-city"].includes(ftype)){
+          // fallback: if last sector lands back at first origin -> return, else one-way/multi
+          const orig=(secs[0].from||"").toUpperCase();
+          const lastTo=(secs[secs.length-1].to||"").toUpperCase();
+          ftype = (retSecs.length||lastTo===orig) ? (retSecs.length?"return":"multi-city") : "one-way";
+        }
+        // If AI marked return but didn't split, move the homebound legs into returnSectors.
+        if(ftype==="return" && !retSecs.length && secs.length>1){
+          const orig=(secs[0].from||"").toUpperCase();
+          let splitAt=-1;
+          for(let i=1;i<secs.length;i++){ if((secs[i].from||"").toUpperCase()===(secs[i-1].to||"").toUpperCase()) continue; }
+          // find where a leg departs from the outbound destination back toward origin
+          for(let i=1;i<secs.length;i++){ if((secs[i].to||"").toUpperCase()===orig || (secs[i].from||"").toUpperCase()===(secs[secs.length-1].from||"").toUpperCase()){ splitAt=i; break; } }
+          if(splitAt>0){ retSecs=secs.splice(splitAt); }
+        }
+        const nv={...emptyFlightVendor(),name:j.vendorName||"AI Extracted",costPrice:j.costPrice!=null?String(j.costPrice):"",flightType:ftype,sectors:secs,returnSectors:retSecs.length?retSecs:[emptySector()]};
         setDeal(d=>({...d,flightVendors:[...(d.flightVendors||[]),nv]}));
-        window.veToast("✅ "+secs.length+" flight sector(s) bhar diye — form mein check/edit kar lo","success");
+        const tlabel = ftype==="return"?"return (2-way)":ftype==="multi-city"?"multi-city":"one-way";
+        window.veToast("✅ "+tlabel+" flight — "+secs.length+(retSecs.length?"+"+retSecs.length:"")+" sector(s) bhar diye. Check kar lo","success");
       }else if(aiX==="hotel"){
         const hs=(j.hotels||[]);
         if(!hs.length) throw new Error("no hotels");
@@ -1445,7 +1535,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const land=sectionCalc(deal.landVendors);
   const visa=sectionCalc(deal.visaVendors);
   const totalCost=hotel.cost+flight.cost+land.cost+visa.cost;
-  const totalSell=hotel.sell+flight.sell+land.sell+visa.sell;
+  const _bookedTierSell=tierSellINR(deal);           // if a star-tier is booked, its price = selling
+  const totalSell=_bookedTierSell!=null?_bookedTierSell:(hotel.sell+flight.sell+land.sell+visa.sell);
   const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
   const totalRefunded=sum(deal.refunds||[],"amount");
   const netSell=totalSell-totalRefunded;            // refund => selling cost se minus
@@ -1520,7 +1611,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   if(screen==="reports"){
     const allD = loadAllDeals();
     const dvAll = (d)=>[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
-    const dSell = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+    const dSell = (d)=>{ const ts=tierSellINR(d); return ts!=null?ts:dvAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0); };
     const dCost = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
     const isBooked = (d)=>(d.status||d.stage)==="Booked";
     const inr = (x)=>"₹"+Math.round(x).toLocaleString("en-IN");
@@ -1767,6 +1858,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     return "";
   }
   function propSell(){
+    const ts=tierSellINR(deal);
+    if(ts!=null) return ts;
     const prTotal=(deal.pricingRows||[]).reduce((a,r)=>a+((Number(r.count)||0)*(Number(r.pp)||0)),0);
     if(deal.usePricingTotal&&prTotal>0) return prTotal;
     let vend=[];
@@ -2709,7 +2802,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               return (`${d.clientName||""} ${d.destination||""} ${d.dealNumber||""} ${d.contactNo||""}`).toLowerCase().includes(q);
             }).map(d=>{
               const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-              const dSell=all.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+              const _ts=tierSellINR(d);
+              const dSell=_ts!=null?_ts:all.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
               const dCost=all.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
               const dGpm=dSell-dCost;
               const dRec=sum(d.clientPayments||[],"amount");
@@ -2868,6 +2962,57 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   <div style={{fontSize:9.5,color:"#9aa7c4",marginTop:5}}>Ex: 12L total, 6 pax → system khud ₹2L/person dikhata hai. Sharing-wise chahiye toh yahan rows bharo — PDF mein poora breakdown table aayega.</div>
                 </div>
               );
+            })()}
+            <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>🏨 3★ / 4★ / 5★ OPTIONS (optional — teeno ek PDF mein side-by-side)</div>
+            <label style={{display:"flex",gap:8,alignItems:"center",background:deal.useTiers?"#f0f5ff":"#fff",border:"1px solid "+(deal.useTiers?"#4169E1":"#e3eaf7"),borderRadius:8,padding:"9px 11px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#0f2350",marginBottom:deal.useTiers?10:14}}>
+              <input type="checkbox" checked={!!deal.useTiers} onChange={e=>setDeal(d=>({...d,useTiers:e.target.checked}))} style={{width:15,height:15,accentColor:"#4169E1"}}/>
+              3 options wali comparison PDF banao (client ko teeno choices dikhao)
+            </label>
+            {deal.useTiers&&(()=>{
+              const updTier=(tid,k,v)=>setDeal(d=>({...d,tiers:(d.tiers||[]).map(t=>t.id===tid?{...t,[k]:v}:t)}));
+              const updTierHotel=(tid,hid,k,v)=>setDeal(d=>({...d,tiers:(d.tiers||[]).map(t=>t.id!==tid?t:{...t,hotels:(t.hotels||[]).map(h=>h.id===hid?{...h,[k]:v}:h)})}));
+              const addTierHotel=(tid)=>setDeal(d=>({...d,tiers:(d.tiers||[]).map(t=>t.id!==tid?t:{...t,hotels:[...(t.hotels||[]),emptyTierHotel()]})}));
+              const rmTierHotel=(tid,hid)=>setDeal(d=>({...d,tiers:(d.tiers||[]).map(t=>t.id!==tid?t:{...t,hotels:(t.hotels||[]).filter(h=>h.id!==hid)})}));
+              const pax=(Number(deal.adults)||0)+(Number(deal.children)||0);
+              return <div style={{marginBottom:14,display:"flex",flexDirection:"column",gap:10}}>
+                {(deal.tiers||[]).map(t=>{
+                  const per=pax>0&&Number(t.totalPrice)>0?Math.round(Number(t.totalPrice)/pax):0;
+                  return <div key={t.id} style={{border:"1px solid "+(t.enabled?"#4169E1":"#e3eaf7"),borderRadius:12,padding:"11px 12px",background:t.enabled?"#fbfdff":"#fafafa"}}>
+                    <label style={{display:"flex",gap:8,alignItems:"center",cursor:"pointer",marginBottom:t.enabled?9:0}}>
+                      <input type="checkbox" checked={!!t.enabled} onChange={e=>updTier(t.id,"enabled",e.target.checked)} style={{width:15,height:15,accentColor:"#4169E1"}}/>
+                      <span style={{fontWeight:800,color:"#0f2350",fontSize:13}}>{t.label}</span>
+                      <span style={{color:"#f0c842",fontSize:12}}>{"★".repeat(t.star)}</span>
+                    </label>
+                    {t.enabled&&<div>
+                      {(t.hotels||[]).map(h=>(
+                        <div key={h.id} style={{background:"#fff",border:"1px solid #e8eef8",borderRadius:9,padding:"8px 9px",marginBottom:7}}>
+                          <div style={{display:"flex",gap:6,marginBottom:6}}>
+                            <input value={h.hotelName} onChange={e=>updTierHotel(t.id,h.id,"hotelName",e.target.value)} placeholder="Hotel name" style={{flex:2,border:"1px solid #d4e0f5",borderRadius:7,padding:"7px",fontSize:11,outline:"none",minWidth:0}}/>
+                            <input value={h.city} onChange={e=>updTierHotel(t.id,h.id,"city",e.target.value)} placeholder="City" style={{flex:1,border:"1px solid #d4e0f5",borderRadius:7,padding:"7px",fontSize:11,outline:"none",minWidth:0}}/>
+                            {(t.hotels||[]).length>1&&<button onClick={()=>rmTierHotel(t.id,h.id)} style={{background:"transparent",border:"1px solid #fdeaea",color:"#b91c1c",borderRadius:6,padding:"3px 7px",cursor:"pointer",fontSize:10}}>✕</button>}
+                          </div>
+                          <div style={{display:"flex",gap:6}}>
+                            <input value={h.photoUrl} onChange={e=>updTierHotel(t.id,h.id,"photoUrl",e.target.value)} placeholder="Photo URL (https://...)" style={{flex:2,border:"1px solid #d4e0f5",borderRadius:7,padding:"7px",fontSize:11,outline:"none",minWidth:0}}/>
+                            <input value={h.roomCategory} onChange={e=>updTierHotel(t.id,h.id,"roomCategory",e.target.value)} placeholder="Room type" style={{flex:1,border:"1px solid #d4e0f5",borderRadius:7,padding:"7px",fontSize:11,outline:"none",minWidth:0}}/>
+                          </div>
+                        </div>
+                      ))}
+                      <button onClick={()=>addTierHotel(t.id)} style={{background:"#eef3fc",border:"1px dashed #c2d2ee",borderRadius:7,padding:"6px",cursor:"pointer",fontSize:10.5,fontWeight:700,color:"#334e82",width:"100%",marginBottom:8}}>+ Aur hotel is tier mein</button>
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <span style={{fontSize:11,fontWeight:700,color:"#5a6b8c",whiteSpace:"nowrap"}}>Total package ₹</span>
+                        <input className="mono" type="number" value={t.totalPrice} onChange={e=>updTier(t.id,"totalPrice",e.target.value)} placeholder="e.g. 1135500" style={{flex:1,border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12,outline:"none",minWidth:0}}/>
+                        {per>0&&<span className="mono" style={{fontSize:11,fontWeight:800,color:"#15803d",whiteSpace:"nowrap"}}>≈₹{per.toLocaleString("en-IN")}/pp</span>}
+                      </div>
+                      <button onClick={()=>setDeal(d=>({...d,status:t.booked?d.status:"Booked",tiers:(d.tiers||[]).map(x=>x.id===t.id?{...x,booked:!x.booked}:{...x,booked:false})}))}
+                        style={{marginTop:8,width:"100%",border:"none",borderRadius:8,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:800,letterSpacing:.3,
+                        background:t.booked?"linear-gradient(135deg,#15803d,#1a9e4b)":"#eef3fc",color:t.booked?"#fff":"#334e82"}}>
+                        {t.booked?"✓ CLIENT BOOKED THIS TIER — selling price locked":"📌 Client ne yeh choose kiya — Book this tier"}
+                      </button>
+                    </div>}
+                  </div>;
+                })}
+                <div style={{fontSize:9.5,color:"#9aa7c4"}}>Har tier mein hotel + photo URL + total price bharo. Quotation generate karne pe teeno side-by-side aa jayenge, per-person price bada dikhega. Kam se kam 1 tier tick + price zaroori.</div>
+              </div>;
             })()}
             <div style={{fontSize:11,fontWeight:700,color:"#5a6b8c",letterSpacing:.5,marginBottom:6}}>🆚 COMPARE (Option A = yeh deal)</div>
             <div style={{display:"flex",gap:8,marginBottom:14}}>
