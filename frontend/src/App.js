@@ -346,6 +346,91 @@ const bookedTierOf = (d) => {
 };
 const tierSellINR = (d) => { const t=bookedTierOf(d); return t?Number(t.totalPrice)||0:null; };
 const fmtINR = (val) => "₹"+(Math.round(n(val))).toLocaleString("en-IN");
+
+// ── UNIFIED DEAL STATUS (single source of truth) ─────────────────────
+// One list drives everything: pipeline funnel, filters, tabs, reports.
+const DEAL_STAGES = ["New Lead","Contacted","Quoted","Negotiation","Booked","Completed","Cancelled","Lost"];
+const STAGE_META = {
+  "New Lead":{icon:"🆕",color:"#6b7a99",bg:"#eef3fc"},
+  "Contacted":{icon:"📞",color:"#4169E1",bg:"#eaf0ff"},
+  "Quoted":{icon:"📄",color:"#7c3aed",bg:"#f3ecff"},
+  "Negotiation":{icon:"🤝",color:"#f97316",bg:"#fff1e6"},
+  "Booked":{icon:"✅",color:"#15803d",bg:"#e6f7ee"},
+  "Completed":{icon:"🏁",color:"#0891b2",bg:"#e0f7fb"},
+  "Cancelled":{icon:"⛔",color:"#b91c1c",bg:"#fdeaea"},
+  "Lost":{icon:"❌",color:"#94a3b8",bg:"#f1f5f9"},
+};
+// Legacy `status` field kept in sync so older reports keep working.
+const STAGE_TO_STATUS = {"New Lead":"Not Actioned","Contacted":"In Progress","Quoted":"Quoted",
+  "Negotiation":"In Progress","Booked":"Booked","Completed":"Completed","Cancelled":"Cancelled","Lost":"Cancelled"};
+// Read a deal's stage, healing legacy rows that only had `status`.
+const stageOf = (d) => {
+  if(!d) return "New Lead";
+  if(d.stage && DEAL_STAGES.includes(d.stage)) return d.stage;
+  if(d.stage==="Travelled") return "Completed";
+  const s=d.status||"";
+  if(s==="Booked") return "Booked";
+  if(s==="Completed") return "Completed";
+  if(s==="Cancelled") return "Cancelled";
+  if(s==="Quoted") return "Quoted";
+  if(s==="In Progress") return "Contacted";
+  return "New Lead";
+};
+const isBookedStage = (d) => { const s=stageOf(d); return s==="Booked"||s==="Completed"; };
+
+// ── DATE INTELLIGENCE ────────────────────────────────────────────────
+const _ymd = (v) => { if(!v) return ""; const s=String(v); return s.length>=10?s.slice(0,10):""; };
+// Query date = when the enquiry was created (stable; never changes on edit)
+const queryDateOf = (d) => _ymd(d && (d.createdAt || d._createdAt || d._savedAt));
+// Travel date = earliest of first flight departure / first hotel check-in
+const travelDateOf = (d) => {
+  if(!d) return "";
+  let best="";
+  const take=(v)=>{ const x=_ymd(v); if(x && (!best || x<best)) best=x; };
+  (d.hotelVendors||[]).forEach(h=>take(h.checkIn));
+  (d.flightVendors||[]).forEach(f=>{
+    (f.sectors||[]).forEach(s=>take(s.date));
+    (f.returnSectors||[]).forEach(s=>take(s.date));
+  });
+  return best;
+};
+// Booking date = date the client's FIRST payment landed
+const bookingDateOf = (d) => {
+  if(!d) return "";
+  let best="";
+  (d.clientPayments||[]).forEach(p=>{ const x=_ymd(p.date); if(x && (!best || x<best)) best=x; });
+  return best;
+};
+// A booked trip whose travel date has passed is Completed.
+const shouldAutoComplete = (d) => {
+  if(stageOf(d)!=="Booked") return false;
+  const t=travelDateOf(d);
+  return !!t && t < new Date().toISOString().slice(0,10);
+};
+
+// ── UNIFIED DEAL FINANCE (one formula used everywhere) ───────────────
+// Fixes the mismatch where dashboard, booked-rollup and deal list each
+// computed "client pending" differently (aggregate vs per-deal netting).
+const dealFinance = (d) => {
+  const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+  const vendorSell=V.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+  const ts=tierSellINR(d);
+  const sell = ts!=null ? ts : vendorSell;
+  const cost=V.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+  const vendorPaid=V.reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
+  const refunded=sum(d.refunds||[],"amount");
+  const clientRec=sum(d.clientPayments||[],"amount");
+  const netSell=sell-refunded;
+  const gpm=netSell-cost;
+  const bal=netSell-clientRec;
+  return {
+    sell, netSell, cost, refunded, gpm,
+    vendorPaid, vendorDue:Math.max(0,cost-vendorPaid),
+    clientRec,
+    clientDue:Math.max(0,bal),        // money still to COLLECT
+    clientAdvance:Math.max(0,-bal),   // client overpaid → refundable
+  };
+};
 const today = () => new Date().toISOString().split("T")[0];
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -452,6 +537,12 @@ const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
   if(typeof x.useTiers!=="boolean") x.useTiers=false;
+  // Stable query date — never changes on edit (older deals backfilled from first save)
+  if(!x.createdAt) x.createdAt = x._savedAt || new Date().toISOString();
+  // Heal legacy stage/status into the unified list, then auto-complete past trips
+  x.stage = stageOf(x);
+  if(shouldAutoComplete(x)) x.stage = "Completed";
+  x.status = STAGE_TO_STATUS[x.stage] || x.status || "Not Actioned";
   return x; };
 const saveDeal = (d) => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); } catch(e){} };
 const loadVendorNames = () => { try { const v=localStorage.getItem(VENDORS_KEY); return v?JSON.parse(v):[]; } catch(e){return[];} };
@@ -459,7 +550,12 @@ const saveVendorName = (name) => {
   const list = loadVendorNames();
   if(name && !list.includes(name)){ list.push(name); try{localStorage.setItem(VENDORS_KEY,JSON.stringify(list));}catch(e){} }
 };
-const loadAllDeals = () => { try { const d=localStorage.getItem(DEALS_KEY); return d?JSON.parse(d):[]; } catch(e){return[];} };
+const loadAllDeals = () => { try { const d=localStorage.getItem(DEALS_KEY); const arr=d?JSON.parse(d):[];
+  // Auto-advance: a Booked trip whose travel date has passed becomes Completed.
+  let changed=false;
+  const out=arr.map(x=>{ if(shouldAutoComplete(x)){ changed=true; return {...x,stage:"Completed",status:"Completed"}; } return x; });
+  if(changed){ try{ localStorage.setItem(DEALS_KEY, JSON.stringify(out)); }catch(e){} }
+  return out; } catch(e){return[];} };
 const saveAllDeals = (deals) => {
   try {
     if (!Array.isArray(deals)) return;
@@ -778,6 +874,8 @@ export default function TravelCRM() {
   // Dashboard date range
   const [dateFrom,setDateFrom]=useState("");
   const [dateTo,setDateTo]=useState("");
+  const [dateMode,setDateMode]=useState("query");   // query | travel | booking
+  const [stageTab,setStageTab]=useState("All");     // deal-list status tab
   const [dealFilter,setDealFilter]=useState("");
   const [dealSearch,setDealSearch]=useState("");
   // AI Assistant
@@ -836,7 +934,7 @@ export default function TravelCRM() {
       followUpsDue:allDeals.filter(d=>d.followUpDate&&d.followUpDate<=new Date().toISOString().slice(0,10)).map(d=>({client:d.clientName,date:d.followUpDate})),
       toCollect:allDeals.filter(d=>(d.status||d.stage)==="Booked").reduce((s,d)=>s+Math.max(0,sellOf(d)-recvOf(d)),0),
       currentDeal:deal.clientName?{client:deal.clientName,destination:deal.destination,stage:deal.stage,status:deal.status}:null,
-      stages:PIPELINE_STAGES,
+      stages:DEAL_STAGES,
     };
   };
 
@@ -1412,9 +1510,9 @@ ${text}
   };
   const duplicateDeal=()=>{
     const copy=normalizeDeal({...JSON.parse(JSON.stringify(deal)),
-      _localId:uid(), _savedAt:new Date().toISOString(),
+      _localId:uid(), _savedAt:new Date().toISOString(), createdAt:new Date().toISOString(),
       clientName:(deal.clientName||"Client")+" (Copy)",
-      clientPayments:[], refunds:[], status:"Lead"});
+      clientPayments:[], refunds:[], stage:"New Lead", status:"Not Actioned"});
     delete copy._id;
     const all=loadAllDeals(); all.unshift(copy); saveAllDeals(all); setAllDeals(all);
     setDeal(copy); saveDeal(copy);
@@ -1513,7 +1611,7 @@ ${text}
     window.veToast && window.veToast("Deal deleted", "success");
   };
 
-  const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal};setDeal(d);saveDeal(d);setTab("client");} };
+  const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal,createdAt:new Date().toISOString(),_localId:uid()};setDeal(d);saveDeal(d);setTab("client");} };
   const openDeal=(d)=>{ const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd); setScreen("deal"); setTab("client"); };
 
   const vendorINR=(v)=>({
@@ -1613,7 +1711,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const dvAll = (d)=>[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
     const dSell = (d)=>{ const ts=tierSellINR(d); return ts!=null?ts:dvAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0); };
     const dCost = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
-    const isBooked = (d)=>(d.status||d.stage)==="Booked";
+    const isBooked = (d)=>isBookedStage(d);
     const inr = (x)=>"₹"+Math.round(x).toLocaleString("en-IN");
 
     // ── 1. REPEAT CUSTOMERS: group by phone (fallback name) ──
@@ -1641,7 +1739,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     // ── 3. MONTHLY P&L: bucket booked deals by month ──
     const byMonth = {};
     allD.filter(isBooked).forEach(d=>{
-      const dt = d.bookedDate||d.createdAt||d.travelDate||"";
+      const dt = bookingDateOf(d)||travelDateOf(d)||queryDateOf(d)||"";
       const mon = dt ? new Date(dt).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "Undated";
       if(!byMonth[mon]) byMonth[mon]={mon,deals:0,sell:0,cost:0,profit:0};
       const s=dSell(d), c=dCost(d)+sum(d.refunds||[],"amount"); // refund month ke profit se minus
@@ -2498,9 +2596,17 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
   }
 
   if(screen==="dashboard"){
-    // Date-range filter (defaults to all-time if blank)
+    // Date-range filter — user picks WHICH date to filter on
+    const DATE_MODES={
+      query:{label:"Query Date",hint:"jis din enquiry bani",get:queryDateOf},
+      travel:{label:"Travel Date",hint:"pehli flight / pehla hotel check-in",get:travelDateOf},
+      booking:{label:"Booking Date",hint:"client ki pehli payment",get:bookingDateOf},
+    };
+    const dm=DATE_MODES[dateMode]||DATE_MODES.query;
     const inRange=(d)=>{
-      const ds=(d._savedAt||"").slice(0,10);
+      if(!dateFrom && !dateTo) return true;
+      const ds=dm.get(d);
+      if(!ds) return false;               // no such date on this deal → excluded
       if(dateFrom && ds<dateFrom) return false;
       if(dateTo && ds>dateTo) return false;
       return true;
@@ -2516,29 +2622,26 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     const hotLeads=allDeals.filter(d=>(d.priority==="Hot 🔥"||d.priority==="High")&&!["Booked","Cancelled","Travelled","Lost"].includes(d.stage||""));
     // Client payments pending on BOOKED deals (money to collect)
     const dealAll=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-    const pendingCollections=allDeals.filter(d=>{
-      if((d.status||d.stage)!=="Booked") return false;
-      const sell=dealAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-      const recv=sum(d.clientPayments||[],"amount");
-      return sell-recv>1;
-    }).map(d=>{
-      const sell=dealAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-      const recv=sum(d.clientPayments||[],"amount");
-      return {...d,_due:sell-recv};
-    }).sort((a,b)=>b._due-a._due);
+    // NOTE: all money now flows through dealFinance() so every screen agrees.
+    const pendingCollections=allDeals.filter(isBookedStage)
+      .map(d=>({...d,_due:dealFinance(d).clientDue}))
+      .filter(d=>d._due>1).sort((a,b)=>b._due-a._due);
     const totalToCollect=pendingCollections.reduce((s,d)=>s+d._due,0);
+    // Clients who have overpaid — money we owe back (was silently netted off before)
+    const clientAdvances=allDeals.filter(isBookedStage)
+      .map(d=>({...d,_adv:dealFinance(d).clientAdvance}))
+      .filter(d=>d._adv>1).sort((a,b)=>b._adv-a._adv);
+    const totalAdvance=clientAdvances.reduce((s,d)=>s+d._adv,0);
     // Vendor payments we owe on booked deals
-    const vendorDues=allDeals.filter(d=>(d.status||d.stage)==="Booked").map(d=>{
-      const cost=dealAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
-      const paid=dealAll(d).reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
-      return {...d,_owe:cost-paid};
-    }).filter(d=>d._owe>1).sort((a,b)=>b._owe-a._owe);
+    const vendorDues=allDeals.filter(isBookedStage)
+      .map(d=>({...d,_owe:dealFinance(d).vendorDue}))
+      .filter(d=>d._owe>1).sort((a,b)=>b._owe-a._owe);
     const totalToPay=vendorDues.reduce((s,d)=>s+d._owe,0);
     // Pipeline funnel counts
-    const funnel=PIPELINE_STAGES.map(st=>({stage:st,count:allDeals.filter(d=>(d.stage||"New Lead")===st).length}));
+    const funnel=DEAL_STAGES.map(st=>({stage:st,count:allDeals.filter(d=>stageOf(d)===st).length}));
     // Conversion rate
     const totalLeads=allDeals.length;
-    const bookedCount=allDeals.filter(d=>(d.stage==="Booked"||d.status==="Booked")).length;
+    const bookedCount=allDeals.filter(isBookedStage).length;
     const convRate=totalLeads>0?((bookedCount/totalLeads)*100).toFixed(1):"0";
 
     // Financial roll-up — per-deal GST mode respected (FIX: was always 18%)
@@ -2551,21 +2654,23 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       return d.gstMode==="package" ? s*GST_RATE_PACKAGE : (g>0?g*GST_RATE_PROFIT:0);
     };
     const rollup=(deals)=>{
-      const sell=deals.reduce((s,d)=>s+dealSell(d),0);
-      const cost=deals.reduce((s,d)=>s+dealCost(d),0);
+      const F=deals.map(dealFinance);
+      const add=(k)=>F.reduce((s,f)=>s+f[k],0);
+      const sell=add("sell"), cost=add("cost");
       const gpm=sell-cost;
       const gst=deals.reduce((s,d)=>s+dealGst(d),0);  // per-deal GST, not flat 18%
       const net=gpm-gst;
-      const vendorPaid=deals.reduce((s,d)=>s+dealVendors(d).reduce((ss,v)=>ss+sum(v.payments||[],"amount"),0),0);
-      const vendorDue=cost-vendorPaid;
-      const clientRec=deals.reduce((s,d)=>s+sum(d.clientPayments||[],"amount"),0);
-      const clientDue=sell-clientRec;
-      return {count:deals.length,sell,cost,gpm,gst,net,vendorPaid,vendorDue,clientRec,clientDue};
+      return {count:deals.length,sell,cost,gpm,gst,net,
+        vendorPaid:add("vendorPaid"), vendorDue:add("vendorDue"),
+        clientRec:add("clientRec"),
+        clientDue:add("clientDue"),        // sum of positive dues — real money to collect
+        clientAdvance:add("clientAdvance") // overpayments, shown separately
+      };
     };
 
-    // Split by status — Booked and Cancelled tracked SEPARATELY
-    const bookedDeals=rangedDeals.filter(d=>(d.status||"")==="Booked");
-    const cancelledDeals=rangedDeals.filter(d=>(d.status||"")==="Cancelled");
+    // Split by stage — Booked/Completed vs Cancelled tracked SEPARATELY
+    const bookedDeals=rangedDeals.filter(isBookedStage);
+    const cancelledDeals=rangedDeals.filter(d=>["Cancelled","Lost"].includes(stageOf(d)));
     const B=rollup(bookedDeals);
     const C=rollup(cancelledDeals);
     const rangeLabel=(dateFrom||dateTo)?`${dateFrom||"start"} → ${dateTo||"today"}`:"All time";
@@ -2646,13 +2751,22 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         <div style={{maxWidth:1120,margin:"0 auto",padding:"28px 32px"}}>
           {/* Date range filter */}
           <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:22,background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:12,padding:"14px 18px"}}>
+            <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Filter by</div>
+              <select value={dateMode} onChange={e=>setDateMode(e.target.value)} style={{background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:6,color:"#1a2c52",padding:"7px 10px",fontWeight:700,cursor:"pointer"}}>
+                <option value="query">🗓️ Query Date</option>
+                <option value="travel">✈️ Travel Date</option>
+                <option value="booking">💰 Booking Date</option>
+              </select></div>
             <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>From</div>
               <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:6,color:"#1a2c52",padding:"7px 10px"}}/></div>
             <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>To</div>
               <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:6,color:"#1a2c52",padding:"7px 10px"}}/></div>
             {(dateFrom||dateTo)&&<button onClick={()=>{setDateFrom("");setDateTo("");}} className="btn btn-sm">Clear</button>}
-            <div style={{flex:1}}></div>
-            <div style={{fontSize:11,color:"#6b7a99"}}>Showing: <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+            <div style={{flex:1,minWidth:120}}></div>
+            <div style={{fontSize:11,color:"#6b7a99",textAlign:"right"}}>
+              <div><b style={{color:"#0f2350"}}>{dm.label}</b> · {rangedDeals.length} deals</div>
+              <div style={{fontSize:10,color:"#9aa7c4"}}>{dm.hint} · <b style={{color:"#c9961a"}}>{rangeLabel}</b></div>
+            </div>
           </div>
 
           {/* ═══ AI DAILY BRIEF ═══ */}
@@ -2753,6 +2867,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981"},
               {l:"Client Received",v:fmtINR(B.clientRec),c:"#10b981"},
               {l:"Client Pending",v:fmtINR(B.clientDue),c:B.clientDue>0?"#f59e0b":"#10b981"},
+              ...(B.clientAdvance>0?[{l:"Client Advance (refundable)",v:fmtINR(B.clientAdvance),c:"#7c3aed"}]:[]),
             ].map((s,i)=>(
               <div key={i} style={{background:"#ffffff",border:"1px solid #15803d",borderRadius:12,padding:"16px 18px"}}>
                 <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
@@ -2781,7 +2896,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
           </div>
 
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase"}}>All Deals ({allDeals.length})</div>
+            <div style={{fontSize:12,color:"#6b7a99",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase"}}>Queries ({allDeals.length})</div>
             <div style={{display:"flex",gap:8}}>
               <button onClick={exportAllDeals} className="btn btn-sm" title="Saari deals ki JSON file download — Google Drive me safe rakho">⬇️ Backup</button>
               <label className="btn btn-sm" style={{cursor:"pointer"}} title="Backup file se deals wapas lao (naya device / data loss)">⬆️ Restore
@@ -2790,30 +2905,58 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             </div>
           </div>
           {allDeals.length===0&&<div style={{textAlign:"center",padding:40,color:"#a9bce0",background:"#ffffff",borderRadius:12,border:"1px dashed #d4e0f5"}}>No deals saved yet. Create a new deal and save it.</div>}
-          <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
             <input value={dealSearch} onChange={e=>setDealSearch(e.target.value)} placeholder="🔍 Search client, destination, deal no..."
               style={{flex:"1 1 260px",background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:8,color:"#1a2c52",padding:"10px 14px",fontSize:13,outline:"none"}}/>
-            <span style={{fontSize:11,color:"#6b7a99"}}>{(()=>{const q=dealSearch.toLowerCase().trim();return q?allDeals.filter(d=>(`${d.clientName} ${d.destination} ${d.dealNumber} ${d.contactNo}`).toLowerCase().includes(q)).length:allDeals.length;})()} deals</span>
+          </div>
+          {/* ── Status tabs — click a stage to see only those queries ── */}
+          <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
+            {(()=>{
+              const q=dealSearch.toLowerCase().trim();
+              const searched=allDeals.filter(d=>!q||(`${d.clientName||""} ${d.destination||""} ${d.dealNumber||""} ${d.contactNo||""}`).toLowerCase().includes(q));
+              const counts={All:searched.length};
+              DEAL_STAGES.forEach(s=>{counts[s]=searched.filter(d=>stageOf(d)===s).length;});
+              return ["All",...DEAL_STAGES].map(s=>{
+                const m=STAGE_META[s]||{icon:"📋",color:"#0f2350",bg:"#eef3fc"};
+                const on=stageTab===s;
+                return <button key={s} onClick={()=>setStageTab(s)}
+                  style={{border:"1px solid "+(on?m.color:"#d4e0f5"),background:on?m.color:"#fff",color:on?"#fff":m.color,
+                    borderRadius:20,padding:"7px 13px",cursor:"pointer",fontSize:11.5,fontWeight:800,letterSpacing:.2,
+                    display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}>
+                  <span>{s==="All"?"📋":m.icon}</span>{s}
+                  <span style={{background:on?"rgba(255,255,255,.25)":m.bg,color:on?"#fff":m.color,
+                    borderRadius:10,padding:"1px 7px",fontSize:10.5,fontWeight:800}}>{counts[s]||0}</span>
+                </button>;
+              });
+            })()}
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {allDeals.filter(d=>{
+              if(stageTab!=="All" && stageOf(d)!==stageTab) return false;
               const q=dealSearch.toLowerCase().trim();
               if(!q) return true;
               return (`${d.clientName||""} ${d.destination||""} ${d.dealNumber||""} ${d.contactNo||""}`).toLowerCase().includes(q);
-            }).map(d=>{
-              const all=[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
-              const _ts=tierSellINR(d);
-              const dSell=_ts!=null?_ts:all.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-              const dCost=all.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
-              const dGpm=dSell-dCost;
-              const dRec=sum(d.clientPayments||[],"amount");
+            }).sort((a,b)=>(queryDateOf(b)||"").localeCompare(queryDateOf(a)||"")).map(d=>{
+              const _F=dealFinance(d);
+              const dSell=_F.sell, dCost=_F.cost, dGpm=_F.gpm, dRec=_F.clientRec;
+              const _stage=stageOf(d), _sm=STAGE_META[_stage]||{icon:"📋",color:"#6b7a99",bg:"#eef3fc"};
+              const _qd=queryDateOf(d), _td=travelDateOf(d), _bd=bookingDateOf(d);
+              const _shortD=(x)=>x?new Date(x).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):"—";
               return (
                 <div key={d._id} onClick={()=>openDeal(d)} style={{background:"#ffffff",border:"1px solid #d4e0f5",borderRadius:10,padding:"14px 20px",cursor:"pointer",display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr 1fr",gap:12,alignItems:"center",transition:"border .2s"}}
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#f97316"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#d4e0f5"}>
                   <div>
-                    <div style={{fontWeight:700,fontSize:14}}>{d.clientName||"Unnamed Client"}</div>
-                    <div style={{fontSize:12,color:"#6b7a99"}}>{d.destination||"No destination"} · {d.travelDates||"No dates"}</div>
+                    <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:7}}>
+                      {d.clientName||"Unnamed Client"}
+                      <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:_sm.bg,color:_sm.color}}>{_sm.icon} {_stage}</span>
+                    </div>
+                    <div style={{fontSize:12,color:"#6b7a99"}}>{d.destination||"No destination"}</div>
+                    <div style={{fontSize:10,color:"#9aa7c4",marginTop:3,display:"flex",gap:9,flexWrap:"wrap"}}>
+                      <span title="Query date">🗓️ {_shortD(_qd)}</span>
+                      <span title="Travel date" style={{color:_td&&_td>=new Date().toISOString().slice(0,10)?"#0891b2":"#9aa7c4"}}>✈️ {_shortD(_td)}</span>
+                      <span title="Booking date">💰 {_shortD(_bd)}</span>
+                    </div>
                   </div>
                   <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>SELLING</div><div style={{fontFamily:"monospace",fontWeight:700}}>{fmtINR(dSell)}</div></div>
                   <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div></div>
@@ -3105,13 +3248,13 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
-              <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}
-                title="Deal status (used in dashboard Booked/Cancelled totals)"
-                style={{background:(deal.status==="Booked"?"#e6f7ee":deal.status==="Cancelled"?"#fdeaea":"#eef3fc"),
-                  border:"1px solid "+(deal.status==="Booked"?"#16a34a":deal.status==="Cancelled"?"#dc2626":"#c2d2ee"),
-                  color:(deal.status==="Booked"?"#15803d":deal.status==="Cancelled"?"#b91c1c":"#1a2c52"),
+              <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>({...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned"}));}}
+                title="Deal status — dashboard tabs, funnel aur totals sab isi se chalte hain"
+                style={{background:((STAGE_META[stageOf(deal)]||{}).bg||"#eef3fc"),
+                  border:"1px solid "+((STAGE_META[stageOf(deal)]||{}).color||"#c2d2ee"),
+                  color:((STAGE_META[stageOf(deal)]||{}).color||"#1a2c52"),
                   borderRadius:7,padding:"7px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
+                {DEAL_STAGES.map(s=><option key={s} value={s}>{(STAGE_META[s]||{}).icon} {s}</option>)}
               </select>
               <button onClick={newDeal} className="btn btn-sm">+ New</button>
               <button onClick={duplicateDeal} className="btn btn-sm" title="Same package naye client ke liye — payments/refunds fresh">⧉ Duplicate</button>
@@ -3176,9 +3319,9 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div className="card" style={{borderColor:"#4169E1"}}>
               <div className="sec-head" style={{color:"#4169E1"}}>🎯 Lead Tracking</div>
               <div className="grid3" style={{marginBottom:6}}>
-                <div><span className="lbl">Pipeline Stage</span>
-                  <select value={deal.stage||"New Lead"} onChange={e=>upd("stage",e.target.value)}>
-                    {PIPELINE_STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+                <div><span className="lbl">Deal Status</span>
+                  <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>({...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned"}));}}>
+                    {DEAL_STAGES.map(s=><option key={s} value={s}>{(STAGE_META[s]||{}).icon} {s}</option>)}
                   </select></div>
                 <div><span className="lbl">Priority</span>
                   <select value={deal.priority||"Normal"} onChange={e=>upd("priority",e.target.value)}>
@@ -3191,11 +3334,24 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <option value="">— select —</option>
                     {LEAD_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
                   </select></div>
-                <div><span className="lbl">Booking Status</span>
-                  <select value={deal.status||"Not Actioned"} onChange={e=>upd("status",e.target.value)}>
-                    {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
-                  </select></div>
               </div>
+              {/* Auto-derived dates — no manual entry, no duplication */}
+              {(()=>{
+                const F=(x)=>x?new Date(x).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"—";
+                const td=travelDateOf(deal), bd=bookingDateOf(deal);
+                const past=td&&td<new Date().toISOString().slice(0,10);
+                return <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+                  {[{i:"🗓️",l:"Query Date",v:F(queryDateOf(deal)),h:"auto — jis din query bani"},
+                    {i:"✈️",l:"Travel Date",v:F(td),h:"auto — pehli flight / pehla hotel check-in"},
+                    {i:"💰",l:"Booking Date",v:F(bd),h:"auto — client ki pehli payment"}].map((c,i)=>(
+                    <div key={i} title={c.h} style={{flex:"1 1 150px",background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:9,padding:"8px 11px"}}>
+                      <div style={{fontSize:9,color:"#7d8bab",letterSpacing:.8,textTransform:"uppercase"}}>{c.i} {c.l}</div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:"#0f2350",marginTop:2}}>{c.v}</div>
+                    </div>
+                  ))}
+                </div>;
+              })()}
+              {shouldAutoComplete(deal)&&<div style={{marginTop:8,background:"#e0f7fb",border:"1px solid #a5e5ef",borderRadius:9,padding:"8px 11px",fontSize:11.5,color:"#0e7490",fontWeight:700}}>🏁 Travel date nikal chuki hai — ye deal apne-aap <b>Completed</b> ho jayegi.</div>}
             </div>
             <div className="card">
               <div className="sec-head">Client Information</div>
