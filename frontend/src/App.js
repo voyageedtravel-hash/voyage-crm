@@ -650,8 +650,6 @@ const usersAPI = {
 };
 
 // Deal status options used in dashboard filtering + deal dropdown
-const STATUS_OPTIONS = ["Not Actioned","In Progress","Quoted","Booked","Cancelled","Completed"];
-const PIPELINE_STAGES = ["New Lead","Contacted","Quoted","Negotiation","Booked","Travelled","Lost"];
 const LEAD_SOURCES = ["WhatsApp","Instagram","Website","Referral","Walk-in","Call","Facebook","Google","Other"];
 const PRIORITIES = ["Low","Normal","High","Hot 🔥"];
 const ccCard=(border)=>({background:"#f4f7fc",border:"1px solid "+border,borderRadius:10,padding:"14px 16px",cursor:"pointer",transition:"transform .15s"});
@@ -2621,17 +2619,11 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     // Hot leads not yet booked
     const hotLeads=allDeals.filter(d=>(d.priority==="Hot 🔥"||d.priority==="High")&&!["Booked","Cancelled","Travelled","Lost"].includes(d.stage||""));
     // Client payments pending on BOOKED deals (money to collect)
-    const dealAll=(d)=>[...d.hotelVendors||[],...d.flightVendors||[],...d.landVendors||[],...d.visaVendors||[]];
     // NOTE: all money now flows through dealFinance() so every screen agrees.
     const pendingCollections=allDeals.filter(isBookedStage)
       .map(d=>({...d,_due:dealFinance(d).clientDue}))
       .filter(d=>d._due>1).sort((a,b)=>b._due-a._due);
     const totalToCollect=pendingCollections.reduce((s,d)=>s+d._due,0);
-    // Clients who have overpaid — money we owe back (was silently netted off before)
-    const clientAdvances=allDeals.filter(isBookedStage)
-      .map(d=>({...d,_adv:dealFinance(d).clientAdvance}))
-      .filter(d=>d._adv>1).sort((a,b)=>b._adv-a._adv);
-    const totalAdvance=clientAdvances.reduce((s,d)=>s+d._adv,0);
     // Vendor payments we owe on booked deals
     const vendorDues=allDeals.filter(isBookedStage)
       .map(d=>({...d,_owe:dealFinance(d).vendorDue}))
@@ -2938,7 +2930,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               return (`${d.clientName||""} ${d.destination||""} ${d.dealNumber||""} ${d.contactNo||""}`).toLowerCase().includes(q);
             }).sort((a,b)=>(queryDateOf(b)||"").localeCompare(queryDateOf(a)||"")).map(d=>{
               const _F=dealFinance(d);
-              const dSell=_F.sell, dCost=_F.cost, dGpm=_F.gpm, dRec=_F.clientRec;
+              const dSell=_F.sell, dGpm=_F.gpm, dRec=_F.clientRec;
               const _stage=stageOf(d), _sm=STAGE_META[_stage]||{icon:"📋",color:"#6b7a99",bg:"#eef3fc"};
               const _qd=queryDateOf(d), _td=travelDateOf(d), _bd=bookingDateOf(d);
               const _shortD=(x)=>x?new Date(x).toLocaleDateString("en-IN",{day:"2-digit",month:"short"}):"—";
@@ -3339,7 +3331,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               {(()=>{
                 const F=(x)=>x?new Date(x).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"—";
                 const td=travelDateOf(deal), bd=bookingDateOf(deal);
-                const past=td&&td<new Date().toISOString().slice(0,10);
                 return <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
                   {[{i:"🗓️",l:"Query Date",v:F(queryDateOf(deal)),h:"auto — jis din query bani"},
                     {i:"✈️",l:"Travel Date",v:F(td),h:"auto — pehli flight / pehla hotel check-in"},
