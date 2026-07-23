@@ -142,6 +142,13 @@ const start = async () => {
     });
 
     // READ all deals
+    // FIX (real bug, real repo): this had NO projection and NO limit — every
+    // full deal document, including base64 file attachments inside dealData,
+    // was pulled from MongoDB *and* shipped to the browser on every single
+    // dashboard load. That single line was responsible for the bulk of both
+    // the "Service-Initiated" (DB read) and "HTTP Responses" (egress to
+    // browser) bandwidth on Render. Attachments stay fully available on the
+    // single-deal route below; the list view never rendered them anyway.
     app.get("/api/leads", authMiddleware, async (req, res) => {
       try {
         const filter = {};
@@ -153,7 +160,11 @@ const start = async () => {
             { dealNumber: { $regex: req.query.search, $options: "i" } },
           ];
         }
-        const leads = await Lead.find(filter).sort({ _id: -1 });
+        const limit = Math.min(Number(req.query.limit) || 500, 1000);
+        const leads = await Lead.find(filter)
+          .select("-dealData.attachments")
+          .sort({ _id: -1 })
+          .limit(limit);
         res.json(leads);
       } catch (err) {
         res.status(500).json({ error: err.message });
