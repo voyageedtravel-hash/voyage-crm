@@ -1705,45 +1705,65 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 // ── USERS SCREEN (admin only) ─────────────────────────────────────────────
   // ─── 📊 REPORTS SCREEN (repeat customers, vendor performance, monthly P&L) ──
   if(screen==="reports"){
-    const allD = loadAllDeals();
-    const dvAll = (d)=>[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
-    const dSell = (d)=>{ const ts=tierSellINR(d); return ts!=null?ts:dvAll(d).reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0); };
-    const dCost = (d)=>dvAll(d).reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+    const allD = loadAllDeals().map(normalizeDeal);
     const isBooked = (d)=>isBookedStage(d);
     const inr = (x)=>"₹"+Math.round(x).toLocaleString("en-IN");
 
-    // ── 1. REPEAT CUSTOMERS: group by phone (fallback name) ──
+    // ── 1. REPEAT CUSTOMERS ──
+    // A repeat customer is someone who BOOKED more than once — not someone who
+    // simply enquired twice. Value counts booked revenue only, never open quotes.
     const byCust = {};
     allD.forEach(d=>{
       const key = (d.contactNo||"").replace(/[^0-9]/g,"").slice(-10) || (d.clientName||"").toLowerCase().trim();
       if(!key) return;
       if(!byCust[key]) byCust[key]={name:d.clientName,phone:d.contactNo,deals:[]};
+      if(d.clientName && !byCust[key].name) byCust[key].name=d.clientName;
+      if(d.contactNo && !byCust[key].phone) byCust[key].phone=d.contactNo;
       byCust[key].deals.push(d);
     });
-    const repeats = Object.values(byCust).filter(c=>c.deals.length>1)
-      .map(c=>({...c, total:c.deals.reduce((s,d)=>s+dSell(d),0), booked:c.deals.filter(isBooked).length}))
-      .sort((a,b)=>b.deals.length-a.deals.length);
+    const repeats = Object.values(byCust)
+      .map(c=>{
+        const bookedDeals=c.deals.filter(isBooked);
+        return {...c, enquiries:c.deals.length, booked:bookedDeals.length,
+          total:bookedDeals.reduce((s,d)=>s+dealFinance(d).netSell,0)};
+      })
+      .filter(c=>c.booked>1)
+      .sort((a,b)=>b.total-a.total||b.booked-a.booked);
 
-    // ── 2. VENDOR PERFORMANCE: aggregate by vendor name ──
+    // ── 2. VENDOR PERFORMANCE ──
+    // Only booked/completed deals count as real business. Per-vendor selling
+    // price is often blank when the deal is priced at package/tier level, so a
+    // margin is shown ONLY where that vendor actually has a selling price —
+    // otherwise it read as a fake loss (cost with zero sell).
     const byVendor = {};
-    allD.forEach(d=>dvAll(d).forEach(v=>{
-      const name=(v.name||"").trim(); if(!name) return;
-      if(!byVendor[name]) byVendor[name]={name,deals:0,sell:0,cost:0,profit:0};
-      const s=toINR(v.sellingPrice,v.currency,v.exchangeRate), c=toINR(v.costPrice,v.currency,v.exchangeRate);
-      byVendor[name].deals++; byVendor[name].sell+=s; byVendor[name].cost+=c; byVendor[name].profit+=(s-c);
-    }));
-    const vendors = Object.values(byVendor).sort((a,b)=>b.profit-a.profit);
+    allD.filter(isBooked).forEach(d=>{
+      [...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].forEach(v=>{
+        const raw=(v.name||"").trim(); if(!raw) return;
+        const key=raw.toLowerCase();                     // "trip jack" and "Trip Jack" are one vendor
+        if(!byVendor[key]) byVendor[key]={name:raw,deals:0,cost:0,paid:0,sell:0,priced:0};
+        const c=toINR(v.costPrice,v.currency,v.exchangeRate);
+        const s=toINR(v.sellingPrice,v.currency,v.exchangeRate);
+        const b=byVendor[key];
+        b.deals++; b.cost+=c; b.paid+=sum(v.payments||[],"amount");
+        if(s>0){ b.sell+=s; b.priced+=c; }               // margin only on priced lines
+      });
+    });
+    const vendors = Object.values(byVendor)
+      .filter(v=>v.cost>0||v.sell>0)                     // drop empty placeholder rows
+      .map(v=>({...v, due:Math.max(0,v.cost-v.paid), margin:v.sell>0?v.sell-v.priced:null}))
+      .sort((a,b)=>b.cost-a.cost);
 
-    // ── 3. MONTHLY P&L: bucket booked deals by month ──
+    // ── 3. MONTHLY P&L (chronological, refunds net off revenue) ──
     const byMonth = {};
     allD.filter(isBooked).forEach(d=>{
       const dt = bookingDateOf(d)||travelDateOf(d)||queryDateOf(d)||"";
+      const key = dt ? dt.slice(0,7) : "0000-00";
       const mon = dt ? new Date(dt).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "Undated";
-      if(!byMonth[mon]) byMonth[mon]={mon,deals:0,sell:0,cost:0,profit:0};
-      const s=dSell(d), c=dCost(d)+sum(d.refunds||[],"amount"); // refund month ke profit se minus
-      byMonth[mon].deals++; byMonth[mon].sell+=s; byMonth[mon].cost+=c; byMonth[mon].profit+=(s-c);
+      if(!byMonth[key]) byMonth[key]={key,mon,deals:0,sell:0,cost:0,profit:0};
+      const F=dealFinance(d);
+      byMonth[key].deals++; byMonth[key].sell+=F.netSell; byMonth[key].cost+=F.cost; byMonth[key].profit+=F.gpm;
     });
-    const months = Object.values(byMonth);
+    const months = Object.values(byMonth).sort((a,b)=>a.key.localeCompare(b.key));
 
     const card = {background:"#fff",border:"1px solid #d4e0f5",borderRadius:12,padding:"18px 20px",marginBottom:18};
     const th = {textAlign:"left",padding:"8px 10px",fontSize:11,letterSpacing:.5,color:"#5a6b8c",borderBottom:"2px solid #d4e0f5"};
@@ -1764,14 +1784,14 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           {/* REPEAT CUSTOMERS */}
           <div style={card}>
             <div style={{fontSize:16,fontWeight:800,color:"#4169E1",marginBottom:4}}>🔁 Repeat Customers</div>
-            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Clients who came back more than once — your most loyal, easiest to upsell.</div>
-            {repeats.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No repeat customers yet.</div> :
+            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Clients who <b>booked</b> more than once — your most loyal, easiest to upsell. Value = booked revenue only.</div>
+            {repeats.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No repeat customers yet — koi client abhi tak do baar book nahi hua.</div> :
             <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr><th style={th}>CLIENT</th><th style={th}>PHONE</th><th style={th}>TRIPS</th><th style={th}>BOOKED</th><th style={th}>TOTAL VALUE</th></tr></thead>
+              <thead><tr><th style={th}>CLIENT</th><th style={th}>PHONE</th><th style={th}>BOOKED TRIPS</th><th style={th}>ENQUIRIES</th><th style={th}>BOOKED VALUE</th></tr></thead>
               <tbody>{repeats.map((c,i)=>(
                 <tr key={i}><td style={{...td,fontWeight:700}}>{c.name||"—"}</td><td style={td}>{c.phone||"—"}</td>
-                  <td style={td}><span style={{background:"#e8efff",color:"#4169E1",padding:"2px 8px",borderRadius:10,fontWeight:700}}>{c.deals.length}×</span></td>
-                  <td style={td}>{c.booked}</td><td style={{...td,fontWeight:700}}>{inr(c.total)}</td></tr>
+                  <td style={td}><span style={{background:"#e6f7ee",color:"#15803d",padding:"2px 8px",borderRadius:10,fontWeight:700}}>{c.booked}×</span></td>
+                  <td style={td}>{c.enquiries}</td><td style={{...td,fontWeight:700}}>{inr(c.total)}</td></tr>
               ))}</tbody>
             </table></div>}
           </div>
@@ -1779,14 +1799,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
           {/* VENDOR PERFORMANCE */}
           <div style={card}>
             <div style={{fontSize:16,fontWeight:800,color:"#4169E1",marginBottom:4}}>🤝 Vendor Performance</div>
-            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Which vendors you use most and which give the best margin.</div>
+            <div style={{fontSize:12,color:"#6b7a99",marginBottom:14}}>Booked deals only. <b>Business given</b> = kitna kaam diya · <b>Still to pay</b> = bakaya · Margin sirf wahan dikhta hai jahan us vendor ka selling price bhara hai.</div>
             {vendors.length===0 ? <div style={{color:"#6b7a99",fontSize:13}}>No vendor data yet.</div> :
             <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr><th style={th}>VENDOR</th><th style={th}>TIMES USED</th><th style={th}>TOTAL COST</th><th style={th}>TOTAL SELL</th><th style={th}>PROFIT</th></tr></thead>
+              <thead><tr><th style={th}>VENDOR</th><th style={th}>TIMES USED</th><th style={th}>BUSINESS GIVEN</th><th style={th}>STILL TO PAY</th><th style={th}>MARGIN</th></tr></thead>
               <tbody>{vendors.map((v,i)=>(
                 <tr key={i}><td style={{...td,fontWeight:700}}>{v.name}</td><td style={td}>{v.deals}</td>
-                  <td style={td}>{inr(v.cost)}</td><td style={td}>{inr(v.sell)}</td>
-                  <td style={{...td,fontWeight:700,color:v.profit>=0?"#15803d":"#b91c1c"}}>{inr(v.profit)}</td></tr>
+                  <td style={td}>{inr(v.cost)}</td>
+                  <td style={{...td,fontWeight:700,color:v.due>0?"#b91c1c":"#15803d"}}>{v.due>0?inr(v.due):"Settled"}</td>
+                  <td style={{...td,fontWeight:700,color:v.margin===null?"#9aa7c4":v.margin>=0?"#15803d":"#b91c1c"}}>
+                    {v.margin===null?<span title="Is vendor ka per-line selling price nahi bhara — deal package/tier level pe priced hai">—</span>:inr(v.margin)}</td></tr>
               ))}</tbody>
             </table></div>}
           </div>
@@ -1811,7 +1833,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 <td style={{...td,fontWeight:800}}>{months.reduce((s,m)=>s+m.deals,0)}</td>
                 <td style={{...td,fontWeight:800}}>{inr(months.reduce((s,m)=>s+m.sell,0))}</td>
                 <td style={{...td,fontWeight:800}}>{inr(months.reduce((s,m)=>s+m.cost,0))}</td>
-                <td style={{...td,fontWeight:800,color:"#15803d"}}>{inr(months.reduce((s,m)=>s+m.profit,0))}</td>
+                <td style={{...td,fontWeight:800,color:months.reduce((s,m)=>s+m.profit,0)>=0?"#15803d":"#b91c1c"}}>{inr(months.reduce((s,m)=>s+m.profit,0))}</td>
               </tr></tfoot>
             </table></div>}
           </div>
