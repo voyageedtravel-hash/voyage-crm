@@ -2135,6 +2135,10 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   function fmtD(d){ if(!d) return ""; try{return new Date(d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});}catch(e){return d;} }
   function buildProposalHTML(){
     let cover=propCover();
+    // Stay options (3★/4★/5★) — detected up front so the stats row, price
+    // block and stays section all stay consistent.
+    const _tiers = (deal.useTiers ? (deal.tiers||[]) : []).filter(t=>
+      t.enabled && (Number(t.totalPrice)>0 || (t.hotels||[]).some(h=>h.hotelName||h.photoUrl)));
     const pax=`${deal.adults||0} Adults${Number(deal.children)>0?`, ${deal.children} Children`:""}${Number(deal.infants)>0?`, ${deal.infants} Infants`:""}`;
     const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
     const nightsTotal=hotels.reduce((s,h)=>s+(Number(h.nights)||0),0);
@@ -2159,7 +2163,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       return"📍";};
     const statsRibbon=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px">
       ${nightsTotal?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${nightsTotal}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">NIGHTS</div></div>`:""}
-      ${showH&&hotels.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${hotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${hotels.length>1?"S":""}</div></div>`:""}
+      ${_tiers.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${_tiers.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">STAY OPTIONS</div></div>`
+        :(showH&&hotels.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${hotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${hotels.length>1?"S":""}</div></div>`:"")}
       ${showF&&flights.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${flights.reduce((s,f)=>s+((f.sectors||[]).filter(x=>x.from||x.to).length)+((f.returnSectors||[]).filter(x=>x.from||x.to).length),0)}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">FLIGHT SECTORS</div></div>`:""}
       ${allDayLines.length?`<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${allDayLines.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">CURATED DAYS</div></div>`:""}
       <div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${totalPax||"–"}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">TRAVELLER${totalPax>1?"S":""}</div></div>
@@ -2358,7 +2363,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
     const hotelBlocks = showH ? hotels.map(h=>`
       <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
-        ${h.photoUrl?`<img src="${esc(h.photoUrl)}" style="width:100%;height:170px;object-fit:cover;border-radius:12px;margin-bottom:14px" onerror="this.style.display='none'"/>`:""}
+        ${h.photoUrl?`<img src="${esc(h.photoUrl)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>`:""}
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
           <div>
             <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${esc((h.city||"").toUpperCase())}${h.country?" · "+esc(h.country.toUpperCase()):""}</div>
@@ -2459,11 +2464,54 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       return mealSummary+_cards;
     })() : "";
 
+    // ── Multiple stay options (3★ / 4★ / 5★) in ONE proposal ──
+    // Same destination, same itinerary — only the hotel category and price
+    // change, so the client can compare and pick without us sending 3 PDFs.
+    const tierOptionsBlock = _tiers.length ? (()=>{
+      const cols=_tiers.map((t,i)=>{
+        const tot=Number(t.totalPrice)||0;
+        const pp=totalPax>0&&tot>0?Math.round(tot/totalPax):0;
+        const feat=t.booked||(_tiers.length===3&&i===1);
+        const badge=t.booked?"✓ YOUR CHOICE":(_tiers.length===3&&i===1?"MOST POPULAR":"");
+        const hs=(t.hotels||[]).filter(h=>h.hotelName||h.photoUrl).map(h=>`
+          <div style="margin-bottom:10px">
+            ${h.photoUrl?`<img src="${esc(h.photoUrl)}" style="width:100%;height:auto;max-height:150px;object-fit:contain;background:#f4f7fc;border-radius:9px;margin-bottom:7px;display:block" onerror="this.style.display='none'"/>`:""}
+            <div style="font-size:14px;font-weight:800;color:#0d1b3e;line-height:1.3">${esc(h.hotelName)||"Hotel"}</div>
+            <div style="font-size:11px;color:#5a6b8c;margin-top:2px">${esc(h.city)}${h.roomCategory?" · "+esc(h.roomCategory):""}</div>
+          </div>`).join("") || `<div style="color:#9aa7c4;font-size:11px;padding:14px 0">Hotel details on request</div>`;
+        return `
+        <div style="flex:1;min-width:180px;border:${feat?"2px solid #1a3060":"1px solid #e3eaf7"};border-radius:14px;overflow:hidden;background:#fff;${feat?"box-shadow:0 6px 20px rgba(13,27,62,.14)":""}">
+          <div style="background:${t.booked?"linear-gradient(135deg,#15803d,#1a9e4b)":feat?"linear-gradient(135deg,#0d1b3e,#1a3060)":"#0d1b3e"};color:#fff;padding:11px 13px;text-align:center">
+            <div style="font-size:14px;font-weight:800;letter-spacing:.4px">${esc(t.label||(t.star+"-Star"))}</div>
+            <div style="color:#f0c842;font-size:12px;margin-top:2px">${"★".repeat(Number(t.star)||0)}<span style="color:rgba(255,255,255,.3)">${"★".repeat(Math.max(0,5-(Number(t.star)||0)))}</span></div>
+            ${badge?`<div style="font-size:9px;letter-spacing:1px;font-weight:800;margin-top:3px">${badge}</div>`:""}
+          </div>
+          <div style="padding:13px">${hs}</div>
+          ${tot>0?`<div style="padding:12px 13px;border-top:1px dashed #e3eaf7;text-align:center;background:#f8fafd">
+            <div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PRICE PER PERSON</div>
+            <div style="font-size:23px;font-weight:800;color:#0d1b3e;margin:2px 0;font-family:Georgia,serif">₹${(pp||tot).toLocaleString("en-IN")}</div>
+            <div style="font-size:10.5px;color:#5a6b8c">Total ₹${tot.toLocaleString("en-IN")}${totalPax>1?" · "+pax:""}</div>
+          </div>`:""}
+        </div>`;
+      }).join("");
+      return `
+      <h2 style="font-size:22px;color:#0d1b3e;margin:22px 0 6px">🏨 Choose Your Stay</h2>
+      <div style="font-size:12px;color:#5a6b8c;margin-bottom:14px">Same itinerary, same inclusions — sirf hotel category aur price alag hai. Jo pasand aaye wo choose kijiye.</div>
+      <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap;margin-bottom:6px">${cols}</div>
+      <div style="font-size:10.5px;color:#8894b0;margin-bottom:16px">* All options include the same flights, transfers and sightseeing. GST extra as applicable.</div>`;
+    })() : "";
+
+    const _perPax = totalPax>0 ? Math.round(sell/totalPax) : 0;
+    const _tierMin = _tiers.length ? Math.min(...(_tiers.map(t=>Number(t.totalPrice)||0).filter(v=>v>0)).concat([Infinity])) : Infinity;
+    const _fromPP = (_tierMin!==Infinity && totalPax>0) ? Math.round(_tierMin/totalPax) : 0;
+    // Per-person leads, total supports it — a package reads far cheaper that way.
     const priceBlock = propShowPrice && sell>0 ? `
       <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:18px;padding:26px 28px;color:#fff;margin:8px 0 18px">
-        <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">TOTAL PACKAGE PRICE</div>
-        <div style="font-size:34px;font-weight:800">₹${sell.toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
-        ${totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">≈ ₹${Math.round(sell/totalPax).toLocaleString("en-IN")} per person · ${pax}</div>`:""}
+        <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">${_fromPP?"STARTING FROM · PER PERSON":"PRICE PER PERSON"}</div>
+        <div style="font-size:34px;font-weight:800">₹${(_fromPP||_perPax||sell).toLocaleString("en-IN")}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
+        ${_fromPP
+          ? `<div style="font-size:12px;opacity:.85;margin-top:4px">${_tiers.length} stay options below${totalPax>1?" · "+pax:""}</div>`
+          : (totalPax>1?`<div style="font-size:12px;opacity:.85;margin-top:4px">Total package ₹${sell.toLocaleString("en-IN")} · ${pax}</div>`:"")}
         ${(function(){
           const rows=(deal.pricingRows||[]).filter(r=>(Number(r.pp)||0)>0);
           if(!rows.length) return "";
@@ -2515,7 +2563,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${highlightsHTML}
     ${glimpseHTML}
     ${showF?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}`:""}
-    ${showH&&hotels.length?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
+    ${tierOptionsBlock}
+    ${showH&&hotels.length&&!tierOptionsBlock?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
     ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}`:""}
 
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
