@@ -1093,7 +1093,6 @@ Be concise. If asked to do something you have no action for, explain politely in
   // Builds the quotation HTML for ANY deal (not just the open one) so a single
   // enquiry can export every destination package in one document.
   const buildQuoteHTMLFor = async (deal) => {
-    {
       // 1. Gather structured data from the deal
       const fmtDate = (d)=>{ if(!d) return ""; try{ return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }catch{return d;} };
       const flights = (deal.flightVendors||[]).flatMap(fv=>{
@@ -1174,7 +1173,6 @@ The days array length MUST equal ${skeleton.length}. Inclusions/exclusions: 5-7 
 
       // 3. Build branded print-ready HTML
       return buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate,tiers:(deal.useTiers?deal.tiers:[])});
-    }
   };
 
   // Single destination — the currently open package.
