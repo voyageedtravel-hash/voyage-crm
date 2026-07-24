@@ -392,6 +392,11 @@ const siblingsOf = (d, all) => {
   if(!eid) return d?[d]:[];
   return (all||[]).filter(x=>enquiryIdOf(x)===eid);
 };
+// Once the client books one destination, the others are effectively off the
+// table — so they're frozen (greyed, read-only feel) rather than deleted, and
+// can be explicitly re-opened if the client wants a fresh quote on one.
+const enquiryHasBooking = (sibs) => (sibs||[]).some(isBookedStage);
+const isFrozenPkg = (p, sibs) => enquiryHasBooking(sibs) && !isBookedStage(p) && !p.unfrozen;
 
 // ── DATE INTELLIGENCE ────────────────────────────────────────────────
 const _ymd = (v) => { if(!v) return ""; const s=String(v); return s.length>=10?s.slice(0,10):""; };
@@ -1192,8 +1197,14 @@ The days array length MUST equal ${skeleton.length}. Inclusions/exclusions: 5-7 
   // Every destination in this enquiry, merged into ONE document.
   const generateCombinedQuotation = async () => {
     if(!deal.clientName){ window.veToast && window.veToast("Add client name first","warning"); return; }
-    const pkgs = siblingsOf(deal, loadAllDeals()).filter(p=>(p.destination||"").trim() || (p.hotelVendors||[]).length || (p.flightVendors||[]).length);
-    if(pkgs.length<2){ window.veToast && window.veToast("Is enquiry mein sirf ek destination hai — normal quotation use karo","warning"); return; }
+    const allNow = loadAllDeals();
+    const sibsAll = siblingsOf(deal, allNow);
+    // Skip packages the client already passed on — a booked enquiry's PDF
+    // should show what they chose (and anything reopened for re-quoting).
+    const pkgs = sibsAll
+      .filter(p=>!isFrozenPkg(p,sibsAll))
+      .filter(p=>(p.destination||"").trim() || (p.hotelVendors||[]).length || (p.flightVendors||[]).length);
+    if(pkgs.length<2){ window.veToast && window.veToast("Is enquiry mein sirf ek active destination hai — normal quotation use karo","warning"); return; }
     setQuoteBusy(true);
     try {
       const bodies=[]; const failed=[];
@@ -1679,6 +1690,36 @@ ${text}
     const all = loadAllDeals().filter(x => !((d._id && x._id===d._id) || (d._localId && x._localId===d._localId)));
     saveAllDeals(all); setAllDeals(all);
     window.veToast && window.veToast("Deal deleted", "success");
+  };
+
+  // ── Delete ONE destination package from an enquiry ──
+  const deletePackage = async (p) => {
+    const all0 = loadAllDeals();
+    const sibs = siblingsOf(p, all0);
+    const label = (p.destination||"").trim() || "this package";
+    const isCurrent = (p._localId&&p._localId===deal._localId)||(p._id&&p._id===deal._id);
+    if(!window.confirm(`Delete "${label}"?\n\nIs destination ke hotels, flights, pricing aur payments permanently delete ho jayenge. Baaki destinations safe rahenge.`)) return;
+    try { if (p._id) await leadsAPI.remove(p._id); }
+    catch(e){ console.warn("Server delete failed:", e?.message); }
+    const all = all0.filter(x => !((p._id && x._id===p._id) || (p._localId && x._localId===p._localId)));
+    saveAllDeals(all); setAllDeals(all);
+    if(isCurrent){
+      const rest = sibs.filter(x => !((p._id && x._id===p._id) || (p._localId && x._localId===p._localId)));
+      if(rest.length) openDeal(rest[0]);          // jump to a surviving destination
+      else setScreen("deals");                     // that was the last one
+    }
+    window.veToast && window.veToast(`🗑️ "${label}" delete ho gaya`,"success");
+  };
+
+  // ── Freeze / unfreeze a package the client didn't choose ──
+  const setPkgUnfrozen = (p, unfrozen) => {
+    const all = loadAllDeals().map(x =>
+      ((p._id && x._id===p._id) || (p._localId && x._localId===p._localId)) ? {...x, unfrozen} : x);
+    saveAllDeals(all); setAllDeals(all);
+    if((p._localId&&p._localId===deal._localId)||(p._id&&p._id===deal._id)){
+      setDeal(d=>{ const nd={...d,unfrozen}; saveDeal(nd); return nd; });
+    }
+    window.veToast && window.veToast(unfrozen?"🔓 Package unfreeze — ab re-quote kar sakte ho":"🔒 Package wapas freeze ho gaya","success");
   };
 
   const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal,createdAt:new Date().toISOString(),_localId:uid()};setDeal(d);saveDeal(d);setTab("client");} };
@@ -3068,9 +3109,11 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                       {d.clientName||"Unnamed Client"}
                       <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:_sm.bg,color:_sm.color}}>{_sm.icon} {_stage}</span>
-                      {(()=>{ const n=siblingsOf(d,allDeals).length; return n>1
-                        ? <span title="Is client ki enquiry mein itne destinations hain" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:"#e0f7fb",color:"#0e7490"}}>🗺️ {n} destinations</span>
-                        : null; })()}
+                      {(()=>{ const sb=siblingsOf(d,allDeals);
+                        return <>
+                          {sb.length>1&&<span title="Is client ki enquiry mein itne destinations hain" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:"#e0f7fb",color:"#0e7490"}}>🗺️ {sb.length} destinations</span>}
+                          {isFrozenPkg(d,sb)&&<span title="Client ne is enquiry ka dusra destination book kiya" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:"#f1f5f9",color:"#94a3b8"}}>🔒 Not chosen</span>}
+                        </>; })()}
                     </div>
                     <div style={{fontSize:12,color:"#6b7a99"}}>{d.destination||"No destination"}</div>
                     <div style={{fontSize:10,color:"#9aa7c4",marginTop:3,display:"flex",gap:9,flexWrap:"wrap"}}>
@@ -3450,15 +3493,31 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     const on=(p._localId&&p._localId===deal._localId)||(p._id&&p._id===deal._id);
                     const st=stageOf(p), m=STAGE_META[st]||{icon:"📋",color:"#6b7a99",bg:"#eef3fc"};
                     const val=dealFinance(p).sell;
-                    return <button key={p._localId||p._id} onClick={()=>{ if(!on) openDeal(p); }}
-                      style={{border:"1px solid "+(on?"#0891b2":"#d4e0f5"),background:on?"#e0f7fb":"#fff",borderRadius:11,
-                        padding:"9px 13px",cursor:on?"default":"pointer",textAlign:"left",minWidth:132}}>
-                      <div style={{fontSize:12.5,fontWeight:800,color:"#0f2350"}}>{on?"📍 ":""}{p.destination||"(no destination)"}</div>
-                      <div style={{fontSize:9.5,marginTop:3,display:"flex",alignItems:"center",gap:5}}>
-                        <span style={{background:m.bg,color:m.color,padding:"1px 6px",borderRadius:8,fontWeight:800}}>{m.icon} {st}</span>
-                        {val>0&&<span className="mono" style={{color:"#6b7a99"}}>{fmtINR(val)}</span>}
-                      </div>
-                    </button>;
+                    const frozen=isFrozenPkg(p,sibs);
+                    return <div key={p._localId||p._id} style={{position:"relative"}}>
+                      <button onClick={()=>{ if(!on) openDeal(p); }}
+                        title={frozen?"Client ne dusra destination book kiya — ye package freeze hai":""}
+                        style={{border:"1px solid "+(on?"#0891b2":frozen?"#e2e8f0":"#d4e0f5"),
+                          background:on?"#e0f7fb":frozen?"#f8fafc":"#fff",borderRadius:11,
+                          padding:"9px 13px",paddingRight:sibs.length>1?26:13,cursor:on?"default":"pointer",
+                          textAlign:"left",minWidth:132,opacity:frozen&&!on?0.6:1,width:"100%"}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:frozen?"#64748b":"#0f2350",
+                          textDecoration:frozen?"line-through":"none"}}>
+                          {on?"📍 ":frozen?"🔒 ":""}{p.destination||"(no destination)"}
+                        </div>
+                        <div style={{fontSize:9.5,marginTop:3,display:"flex",alignItems:"center",gap:5}}>
+                          <span style={{background:frozen?"#f1f5f9":m.bg,color:frozen?"#94a3b8":m.color,padding:"1px 6px",borderRadius:8,fontWeight:800}}>
+                            {frozen?"Not chosen":`${m.icon} ${st}`}</span>
+                          {val>0&&<span className="mono" style={{color:"#6b7a99"}}>{fmtINR(val)}</span>}
+                        </div>
+                      </button>
+                      {sibs.length>1&&<button onClick={(e)=>{e.stopPropagation();deletePackage(p);}}
+                        title="Ye destination delete karo"
+                        style={{position:"absolute",top:5,right:5,border:"none",background:"transparent",
+                          color:"#cbd5e1",cursor:"pointer",fontSize:13,lineHeight:1,padding:2,fontWeight:700}}
+                        onMouseEnter={e=>e.currentTarget.style.color="#dc2626"}
+                        onMouseLeave={e=>e.currentTarget.style.color="#cbd5e1"}>✕</button>}
+                    </div>;
                   })}
                   <button onClick={addDestination}
                     style={{border:"1px dashed #0891b2",background:"#f8feff",color:"#0e7490",borderRadius:11,
@@ -3466,13 +3525,39 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     ➕ Add Destination
                   </button>
                 </div>
-                {sibs.length>1&&<div style={{marginTop:11,paddingTop:10,borderTop:"1px dashed #d4e0f5"}}>
+                {/* Frozen banner for the package currently open */}
+                {isFrozenPkg(deal,sibs)&&<div style={{marginTop:11,background:"#fffbeb",border:"1px solid #fde68a",
+                  borderRadius:10,padding:"11px 13px",display:"flex",gap:11,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{flex:"1 1 220px",fontSize:12,color:"#92400e",lineHeight:1.55}}>
+                    🔒 <b>Ye package freeze hai</b> — client ne <b>{(sibs.find(isBookedStage)||{}).destination||"dusra destination"}</b> book kar liya hai.
+                    Dekh sakte ho, par re-quote karne ke liye pehle unfreeze karo.
+                  </div>
+                  <button onClick={()=>setPkgUnfrozen(deal,true)}
+                    style={{border:"none",borderRadius:8,padding:"9px 15px",cursor:"pointer",fontSize:11.5,
+                      fontWeight:800,background:"#d97706",color:"#fff",whiteSpace:"nowrap"}}>
+                    🔓 Unfreeze &amp; Re-quote
+                  </button>
+                </div>}
+                {/* Manually unfrozen — offer to put it back */}
+                {deal.unfrozen&&enquiryHasBooking(sibs)&&!isBookedStage(deal)&&<div style={{marginTop:11,
+                  background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"9px 13px",
+                  display:"flex",gap:11,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{flex:"1 1 220px",fontSize:11.5,color:"#166534"}}>🔓 Ye package re-quote ke liye khula hai.</div>
+                  <button onClick={()=>setPkgUnfrozen(deal,false)}
+                    style={{border:"1px solid #bbf7d0",borderRadius:8,padding:"7px 13px",cursor:"pointer",
+                      fontSize:11,fontWeight:800,background:"#fff",color:"#166534",whiteSpace:"nowrap"}}>
+                    Wapas freeze karo
+                  </button>
+                </div>}
+                {(()=>{ const active=sibs.filter(p=>!isFrozenPkg(p,sibs));
+                  if(active.length<2) return null;
+                  return <div style={{marginTop:11,paddingTop:10,borderTop:"1px dashed #d4e0f5"}}>
                   <button onClick={generateCombinedQuotation} disabled={!!quoteBusy}
                     style={{width:"100%",border:"none",borderRadius:9,padding:"10px",cursor:quoteBusy?"default":"pointer",
                       fontSize:12,fontWeight:800,background:quoteBusy?"#cbd5e1":"linear-gradient(135deg,#0891b2,#0e7490)",color:"#fff"}}>
-                    {typeof quoteBusy==="string"?quoteBusy:quoteBusy?"Building…":`📄 Download ALL ${sibs.length} destinations in one PDF`}
+                    {typeof quoteBusy==="string"?quoteBusy:quoteBusy?"Building…":`📄 Download ALL ${active.length} destinations in one PDF`}
                   </button>
-                </div>}
+                </div>; })()}
               </div>;
             })()}
             <div className="card" style={{borderColor:"#4169E1"}}>
