@@ -378,6 +378,21 @@ const stageOf = (d) => {
 };
 const isBookedStage = (d) => { const s=stageOf(d); return s==="Booked"||s==="Completed"; };
 
+// ── MULTI-DESTINATION ENQUIRIES ──────────────────────────────────────
+// One client enquiry can carry several destination packages (Dubai +
+// Singapore + Bali). Each package stays its own record — so vendors,
+// pricing, tiers and PDFs all keep working exactly as before — but they
+// share an enquiryId, which is what groups them in the list and lets us
+// export one combined quotation.
+const enquiryIdOf = (d) => (d && (d.enquiryId || d._localId)) || "";
+// Fields that describe the CLIENT, not the package — kept in sync across siblings.
+const CLIENT_FIELDS = ["clientName","contactNo","email","leadSource","priority","followUpDate"];
+const siblingsOf = (d, all) => {
+  const eid = enquiryIdOf(d);
+  if(!eid) return d?[d]:[];
+  return (all||[]).filter(x=>enquiryIdOf(x)===eid);
+};
+
 // ── DATE INTELLIGENCE ────────────────────────────────────────────────
 const _ymd = (v) => { if(!v) return ""; const s=String(v); return s.length>=10?s.slice(0,10):""; };
 // Query date = when the enquiry was created (stable; never changes on edit)
@@ -521,6 +536,7 @@ const initDeal = {
   refunds:[],
   pricingRows:[], usePricingTotal:false,
   tiers:defaultTiers(), useTiers:false,
+  enquiryId:"",        // shared across every destination package of one client enquiry
   attachments:[],
 };
 
@@ -539,6 +555,9 @@ const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   if(typeof x.useTiers!=="boolean") x.useTiers=false;
   // Stable query date — never changes on edit (older deals backfilled from first save)
   if(!x.createdAt) x.createdAt = x._savedAt || new Date().toISOString();
+  // Every deal belongs to an enquiry; legacy deals become a one-package enquiry.
+  if(!x._localId) x._localId = uid();
+  if(!x.enquiryId) x.enquiryId = x._localId;
   // Heal legacy stage/status into the unified list, then auto-complete past trips
   x.stage = stageOf(x);
   if(shouldAutoComplete(x)) x.stage = "Completed";
@@ -1071,10 +1090,10 @@ Be concise. If asked to do something you have no action for, explain politely in
   };
 
   // ─── PROFESSIONAL QUOTATION / ITINERARY BUILDER (print-to-PDF) ────────────
-  const generateQuotation = async () => {
-    if(!deal.clientName){ window.veToast && window.veToast("Add client name first","warning"); return; }
-    setQuoteBusy(true);
-    try {
+  // Builds the quotation HTML for ANY deal (not just the open one) so a single
+  // enquiry can export every destination package in one document.
+  const buildQuoteHTMLFor = async (deal) => {
+    {
       // 1. Gather structured data from the deal
       const fmtDate = (d)=>{ if(!d) return ""; try{ return new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }catch{return d;} };
       const flights = (deal.flightVendors||[]).flatMap(fv=>{
@@ -1153,13 +1172,55 @@ The days array length MUST equal ${skeleton.length}. Inclusions/exclusions: 5-7 
         };
       });
 
-      // 3. Build branded print-ready HTML and open in new window
-      const html = buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate,tiers:(deal.useTiers?deal.tiers:[])});
+      // 3. Build branded print-ready HTML
+      return buildQuotationHTML(deal, flights, hotels, parsed, {pax,totalNights,fmtDate,tiers:(deal.useTiers?deal.tiers:[])});
+    }
+  };
+
+  // Single destination — the currently open package.
+  const generateQuotation = async () => {
+    if(!deal.clientName){ window.veToast && window.veToast("Add client name first","warning"); return; }
+    setQuoteBusy(true);
+    try {
+      const html = await buildQuoteHTMLFor(deal);
       const w = window.open("","_blank");
-      if(!w){ window.veToast && window.veToast("Allow popups to view the quotation","warning"); setQuoteBusy(false); return; }
+      if(!w){ window.veToast && window.veToast("Allow popups to view the quotation","warning"); return; }
       w.document.write(html); w.document.close();
     } catch(e){
       window.veToast && window.veToast("Quotation failed: "+e.message,"error");
+    } finally { setQuoteBusy(false); }
+  };
+
+  // Every destination in this enquiry, merged into ONE document.
+  const generateCombinedQuotation = async () => {
+    if(!deal.clientName){ window.veToast && window.veToast("Add client name first","warning"); return; }
+    const pkgs = siblingsOf(deal, loadAllDeals()).filter(p=>(p.destination||"").trim() || (p.hotelVendors||[]).length || (p.flightVendors||[]).length);
+    if(pkgs.length<2){ window.veToast && window.veToast("Is enquiry mein sirf ek destination hai — normal quotation use karo","warning"); return; }
+    setQuoteBusy(true);
+    try {
+      const bodies=[]; const failed=[];
+      for(let i=0;i<pkgs.length;i++){
+        const p=pkgs[i];
+        setQuoteBusy(`Building ${i+1}/${pkgs.length} — ${p.destination||"package"}…`);
+        try{
+          const html=await buildQuoteHTMLFor(normalizeDeal(p));
+          const m=html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+          bodies.push({html, inner:m?m[1]:html, dest:p.destination||"Package "+(i+1)});
+        }catch(err){ failed.push(p.destination||("Package "+(i+1))); }
+      }
+      if(!bodies.length) throw new Error("Koi bhi package build nahi hua");
+      // Reuse the first document's <head> (all packages share identical CSS),
+      // then stack each destination with a print page-break between them.
+      const first=bodies[0].html;
+      const head=(first.match(/<head[^>]*>[\s\S]*?<\/head>/i)||[""])[0];
+      const sep=`<div style="page-break-before:always;height:0"></div>`;
+      const combined=`<!DOCTYPE html><html>${head}<body>${bodies.map(b=>b.inner).join(sep)}</body></html>`;
+      const w=window.open("","_blank");
+      if(!w){ window.veToast && window.veToast("Allow popups to view the quotation","warning"); return; }
+      w.document.write(combined); w.document.close();
+      window.veToast && window.veToast(`✅ ${bodies.length} destinations ek PDF mein`+(failed.length?` (${failed.join(", ")} skip hue)`:""), failed.length?"warning":"success");
+    } catch(e){
+      window.veToast && window.veToast("Combined quotation failed: "+e.message,"error");
     } finally { setQuoteBusy(false); }
   };
 
@@ -1571,6 +1632,19 @@ ${text}
       const all = loadAllDeals();
       const idx = all.findIndex(x => (d._id && x._id === d._id) || (d._localId && x._localId === d._localId));
       if (idx >= 0) all[idx] = d; else all.unshift(d);
+      // Client details belong to the ENQUIRY, not one package — push them to
+      // every sibling destination so they never drift out of sync.
+      const eid = enquiryIdOf(d);
+      if(eid){
+        const patch = {};
+        CLIENT_FIELDS.forEach(k=>{ if(d[k]!==undefined) patch[k]=d[k]; });
+        for(let i=0;i<all.length;i++){
+          const s=all[i];
+          if(enquiryIdOf(s)!==eid) continue;
+          if((s._localId&&s._localId===d._localId)||(s._id&&s._id===d._id)) continue;
+          all[i]={...s,...patch};
+        }
+      }
       saveAllDeals(all); setAllDeals(all);
       // Race-fix: poora deal replace mat karo (user beech me type kar raha ho sakta hai) — sirf server metadata merge
       setDeal(cur=>{ const merged=normalizeDeal({...cur,_id:d._id||cur._id,_localId:d._localId||cur._localId,_savedAt:d._savedAt}); saveDeal(merged); return merged; });
@@ -1611,6 +1685,34 @@ ${text}
 
   const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal,createdAt:new Date().toISOString(),_localId:uid()};setDeal(d);saveDeal(d);setTab("client");} };
   const openDeal=(d)=>{ const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd); setScreen("deal"); setTab("client"); };
+
+  // ── Add another destination to the SAME client enquiry ──
+  // Client details carry over; vendors, pricing and payments start blank so
+  // each destination is quoted, tracked and booked independently.
+  const addDestination=()=>{
+    if(!(deal.clientName||"").trim()){ window.veToast && window.veToast("Pehle client ka naam bharo","warning"); return; }
+    const eid = enquiryIdOf(deal) || uid();
+    // Make sure the current package is stamped with the shared enquiry id first.
+    const cur = {...deal, enquiryId:eid, _localId:deal._localId||uid()};
+    const fresh = normalizeDeal({
+      ...initDeal,
+      _localId: uid(),
+      createdAt: new Date().toISOString(),
+      enquiryId: eid,
+      clientName: deal.clientName, contactNo: deal.contactNo, email: deal.email,
+      leadSource: deal.leadSource, priority: deal.priority, followUpDate: deal.followUpDate,
+      adults: deal.adults, children: deal.children, infants: deal.infants,
+      destination: "",
+      stage: "New Lead", status: "Not Actioned",
+    });
+    const all = loadAllDeals();
+    const idx = all.findIndex(x=>(cur._id&&x._id===cur._id)||(cur._localId&&x._localId===cur._localId));
+    if(idx>=0) all[idx]=cur; else all.unshift(cur);
+    all.unshift(fresh);
+    saveAllDeals(all); setAllDeals(all);
+    setDeal(fresh); saveDeal(fresh); setTab("client");
+    window.veToast && window.veToast("➕ Naya destination add ho gaya — same client, alag package","success");
+  };
 
   const vendorINR=(v)=>({
     costINR:toINR(v.costPrice,v.currency,v.exchangeRate),
@@ -1724,7 +1826,11 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const repeats = Object.values(byCust)
       .map(c=>{
         const bookedDeals=c.deals.filter(isBooked);
-        return {...c, enquiries:c.deals.length, booked:bookedDeals.length,
+        // Count distinct ENQUIRIES, not packages — a client who asked for Dubai +
+        // Singapore + Bali in one go is one enquiry, not three repeat visits.
+        const bookedTrips=new Set(bookedDeals.map(enquiryIdOf)).size;
+        const enquiries=new Set(c.deals.map(enquiryIdOf)).size;
+        return {...c, enquiries, booked:bookedTrips,
           total:bookedDeals.reduce((s,d)=>s+dealFinance(d).netSell,0)};
       })
       .filter(c=>c.booked>1)
@@ -2961,9 +3067,12 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   onMouseEnter={e=>e.currentTarget.style.borderColor="#f97316"}
                   onMouseLeave={e=>e.currentTarget.style.borderColor="#d4e0f5"}>
                   <div>
-                    <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:7}}>
+                    <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                       {d.clientName||"Unnamed Client"}
                       <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:_sm.bg,color:_sm.color}}>{_sm.icon} {_stage}</span>
+                      {(()=>{ const n=siblingsOf(d,allDeals).length; return n>1
+                        ? <span title="Is client ki enquiry mein itne destinations hain" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:"#e0f7fb",color:"#0e7490"}}>🗺️ {n} destinations</span>
+                        : null; })()}
                     </div>
                     <div style={{fontSize:12,color:"#6b7a99"}}>{d.destination||"No destination"}</div>
                     <div style={{fontSize:10,color:"#9aa7c4",marginTop:3,display:"flex",gap:9,flexWrap:"wrap"}}>
@@ -3330,6 +3439,44 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         {/* ══ CLIENT TAB ══ */}
         {tab==="client"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {/* ── Destinations in this enquiry ── */}
+            {(()=>{
+              const sibs=siblingsOf(deal, allDeals);
+              const showAlways=(deal.clientName||"").trim();
+              if(!showAlways) return null;
+              return <div className="card" style={{borderColor:"#0891b2"}}>
+                <div className="sec-head" style={{color:"#0891b2"}}>🗺️ Destinations in this Enquiry {sibs.length>1&&<span style={{fontSize:11,fontWeight:700,background:"#e0f7fb",color:"#0e7490",padding:"2px 9px",borderRadius:10,marginLeft:6}}>{sibs.length} packages</span>}</div>
+                <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:10}}>Ek hi client, alag-alag destinations. Har package ka apna hotel, pricing aur status hota hai — client details sab mein same rehti hain.</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {sibs.map(p=>{
+                    const on=(p._localId&&p._localId===deal._localId)||(p._id&&p._id===deal._id);
+                    const st=stageOf(p), m=STAGE_META[st]||{icon:"📋",color:"#6b7a99",bg:"#eef3fc"};
+                    const val=dealFinance(p).sell;
+                    return <button key={p._localId||p._id} onClick={()=>{ if(!on) openDeal(p); }}
+                      style={{border:"1px solid "+(on?"#0891b2":"#d4e0f5"),background:on?"#e0f7fb":"#fff",borderRadius:11,
+                        padding:"9px 13px",cursor:on?"default":"pointer",textAlign:"left",minWidth:132}}>
+                      <div style={{fontSize:12.5,fontWeight:800,color:"#0f2350"}}>{on?"📍 ":""}{p.destination||"(no destination)"}</div>
+                      <div style={{fontSize:9.5,marginTop:3,display:"flex",alignItems:"center",gap:5}}>
+                        <span style={{background:m.bg,color:m.color,padding:"1px 6px",borderRadius:8,fontWeight:800}}>{m.icon} {st}</span>
+                        {val>0&&<span className="mono" style={{color:"#6b7a99"}}>{fmtINR(val)}</span>}
+                      </div>
+                    </button>;
+                  })}
+                  <button onClick={addDestination}
+                    style={{border:"1px dashed #0891b2",background:"#f8feff",color:"#0e7490",borderRadius:11,
+                      padding:"9px 15px",cursor:"pointer",fontSize:12,fontWeight:800,minWidth:132}}>
+                    ➕ Add Destination
+                  </button>
+                </div>
+                {sibs.length>1&&<div style={{marginTop:11,paddingTop:10,borderTop:"1px dashed #d4e0f5"}}>
+                  <button onClick={generateCombinedQuotation} disabled={!!quoteBusy}
+                    style={{width:"100%",border:"none",borderRadius:9,padding:"10px",cursor:quoteBusy?"default":"pointer",
+                      fontSize:12,fontWeight:800,background:quoteBusy?"#cbd5e1":"linear-gradient(135deg,#0891b2,#0e7490)",color:"#fff"}}>
+                    {typeof quoteBusy==="string"?quoteBusy:quoteBusy?"Building…":`📄 Download ALL ${sibs.length} destinations in one PDF`}
+                  </button>
+                </div>}
+              </div>;
+            })()}
             <div className="card" style={{borderColor:"#4169E1"}}>
               <div className="sec-head" style={{color:"#4169E1"}}>🎯 Lead Tracking</div>
               <div className="grid3" style={{marginBottom:6}}>
