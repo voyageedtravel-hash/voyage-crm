@@ -299,18 +299,19 @@ const emptyCancellation = () => ({
   reason:"Client Request",
   status:"Pending",
   date:today(),
-  paxCancelled:"",              // number of travellers cancelling
-  cancelledValue:"",           // gross ₹ being cancelled (auto or manual)
-  // Refund is what YOU decide to give back. Enter EITHER a per-person figure
-  // OR a total — whichever is filled drives the other. Penalty & profit are
-  // then derived, not entered.
-  refundEntryMode:"total",     // "total" | "perPerson"
-  refundPerPerson:"",
-  refundTotal:"",
+  paxCancelled:"",              // travellers cancelling
+  amountMode:"total",           // "total" | "perPerson" — how the 3 fields are entered
+  // Open 3-way calculator. Fill any TWO, the third is derived:
+  //   Client Paid (cancelled portion)  =  Vendor Penalty  +  My Profit  +  Client Refund
+  // Vendor Penalty + My Profit = what the company keeps; the rest is refund.
+  lockedOut:"refund",           // which field is auto-calculated: "penalty" | "profit" | "refund"
+  vendorPenalty:"",             // total ₹ (or per-person, per amountMode)
+  myProfit:"",
+  clientRefund:"",
+  cancelledPaid:"",             // client-paid amount for cancelled pax (auto from deposit, editable)
   refundMode:REFUND_MODES[0],
   approvedBy:REFUND_APPROVERS[0],
   refNo:"",
-  supplierRecovery:"",         // ₹ recoverable back from suppliers (optional)
   note:"",
 });
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
@@ -488,53 +489,64 @@ const dealFinance = (d) => {
   };
 };
 const today = () => new Date().toISOString().split("T")[0];
-// Compute the money outcome of a cancellation. Refund-driven: the user enters
-// how many pax cancel and how much refund goes back (per-person or total); the
-// system derives penalty and the true profit/loss. Uses raw sell/cost to avoid
-// a circular dependency with dealFinance.
+// Open 3-way cancellation calculator. The client-paid amount for the cancelled
+// travellers splits three ways:
+//     Client Paid  =  Vendor Penalty  +  My Profit  +  Client Refund
+// The user fills any TWO of {penalty, profit, refund}; the third is derived.
+// "Retained" (what the company keeps) = penalty + profit. Amounts can be
+// entered per-person or as a total. No dependence on package cost, so parking
+// the whole selling price in one component never distorts anything.
 const cancelCompute = (c, d) => {
   const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
   const ts=tierSellINR(d);
-  // Deal totals — profit is always measured at DEAL level, so it doesn't
-  // matter which component the user parked the selling price / cost in.
   const sell = ts!=null ? ts : V.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-  const cost = V.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
   const clientRec = sum(d.clientPayments||[],"amount");
-  const pax = (Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
+  const paxTotal = (Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
   const isFull = c.type === "Full Cancellation";
-  const nCancel = isFull ? (pax||1) : (Number(c.paxCancelled)||0);
+  const nCancel = isFull ? (paxTotal||1) : (Number(c.paxCancelled)||0);
+  const per = c.amountMode==="perPerson";
+  const div = per ? (nCancel||1) : 1;   // divisor to turn totals into per-person for display
 
-  // Gross value being cancelled (revenue side): full = whole package;
-  // partial = entered value, else a per-head share of the package.
-  let gross = Number(c.cancelledValue)||0;
-  if(!gross){
-    if(isFull) gross = sell;
-    else if(pax>0 && nCancel>0) gross = Math.round(sell/pax*nCancel);
+  // Client-paid amount attributable to the cancelled travellers.
+  // Auto = client's received money × (cancelled pax / total pax); editable.
+  let paidTotal = Number(c.cancelledPaid)||0;
+  if(!paidTotal){
+    if(isFull) paidTotal = clientRec;
+    else if(paxTotal>0 && nCancel>0) paidTotal = Math.round(clientRec/paxTotal*nCancel);
   }
 
-  // Refund the client gets back — driven by user input, per-person or total.
-  let refund = 0;
-  if(c.refundEntryMode==="perPerson") refund = (Number(c.refundPerPerson)||0) * (nCancel||1);
-  else refund = Number(c.refundTotal)||0;
-  refund = Math.max(0, Math.min(refund, clientRec, gross));   // can't exceed paid or the cancelled value
-  const refundPP = nCancel>0 ? Math.round(refund/nCancel) : refund;
+  // Read the three fields, converting per-person entries to totals.
+  const toTotal = (v)=> (Number(v)||0) * (per ? nCancel : 1);
+  let penalty = toTotal(c.vendorPenalty);
+  let profit  = toTotal(c.myProfit);
+  let refund  = toTotal(c.clientRefund);
 
-  // Penalty = what the company retains from the client's money.
-  const penalty = Math.max(0, gross - refund);
+  // Derive whichever field the user left as the "locked out" (auto) one.
+  const has = (v)=> v!=="" && v!==null && v!==undefined;
+  const lk = c.lockedOut||"refund";
+  if(lk==="refund")  refund  = paidTotal - penalty - profit;
+  else if(lk==="penalty") penalty = paidTotal - profit - refund;
+  else if(lk==="profit")  profit  = paidTotal - penalty - refund;
+  // If the chosen auto field was actually typed into, respect the two that ARE
+  // filled and still derive the empty one (keeps it forgiving).
+  if(lk!=="refund" && !has(c.vendorPenalty) && has(c.myProfit) && has(c.clientRefund)) penalty = paidTotal - profit - refund;
+  if(lk!=="profit"  && !has(c.myProfit) && has(c.vendorPenalty) && has(c.clientRefund)) profit  = paidTotal - penalty - refund;
+  if(lk!=="refund"  && !has(c.clientRefund) && has(c.vendorPenalty) && has(c.myProfit)) refund  = paidTotal - penalty - profit;
 
-  // Supplier cost that still applies to the cancelled portion (per-head share).
-  const costShare = (isFull ? cost : (pax>0 ? Math.round(cost/pax*nCancel) : 0));
-  // Cost we can still recover from suppliers (e.g. refundable hotel) — optional.
-  const supplierRecover = Number(c.supplierRecovery)||0;
-  const netCost = Math.max(0, costShare - supplierRecover);
+  penalty=Math.round(penalty); profit=Math.round(profit); refund=Math.round(refund);
+  const retained = penalty + profit;          // what the company keeps in total
+  const overflow = (penalty+profit+refund) - paidTotal;   // ≠0 ⇒ inputs don't reconcile
 
-  // TRUE profit/loss on the cancelled portion:
-  //   what we keep from the client (penalty)  −  what we still owe suppliers
-  const profit = penalty - netCost;
-
-  return { isFull, pax, nCancel, gross, refund, refundPP, penalty, netCost,
-    profit, isLoss: profit<0,
-    penaltyPct: gross>0 ? Math.round(penalty/gross*100) : 0 };
+  return { isFull, paxTotal, nCancel, per, div,
+    paidTotal, penalty, profit, refund, retained, overflow,
+    isLoss: profit<0,
+    // per-person views
+    paidPP:  nCancel>0?Math.round(paidTotal/nCancel):paidTotal,
+    penaltyPP:nCancel>0?Math.round(penalty/nCancel):penalty,
+    profitPP: nCancel>0?Math.round(profit/nCancel):profit,
+    refundPP: nCancel>0?Math.round(refund/nCancel):refund,
+    dealProfit: sell, // unused placeholder kept for compatibility
+  };
 };
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -4231,6 +4243,9 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               {(deal.cancellations||[]).map(c=>{
                 const R=cancelCompute(c,deal);
                 const pending=c.status==="Pending";
+                const per=c.amountMode==="perPerson";
+                const setLock=(f)=>updCancellation(c.id,"lockedOut",f);
+                const money=(x)=>"₹"+Math.round(x).toLocaleString("en-IN");
                 return <div key={c.id} style={{border:"1px solid "+(pending?"#f3c6c6":"#e3eaf7"),background:pending?"#fffafa":"#fbfdff",borderRadius:13,padding:"14px 15px",marginBottom:11}}>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:11}}>
                     <select value={c.type} onChange={e=>updCancellation(c.id,"type",e.target.value)}
@@ -4247,61 +4262,76 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <button onClick={()=>rmCancellation(c.id)} title="Delete" style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:14,fontWeight:700}}>✕</button>
                   </div>
 
-                  {/* Inputs: how many cancel, cancelled value, and the refund you give */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(115px,1fr))",gap:9,marginBottom:10}}>
-                    {c.type==="Partial Cancellation"&&<div>
-                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelled</div>
-                      <input type="number" value={c.paxCancelled} onChange={e=>updCancellation(c.id,"paxCancelled",e.target.value)} placeholder={"of "+R.pax} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
-                    </div>}
-                    {c.type==="Full Cancellation"&&<div>
-                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelling</div>
-                      <div style={{padding:"8px",fontSize:12,color:"#0f2350",fontWeight:700,background:"#f4f7fc",borderRadius:8,border:"1px solid #e3eaf7"}}>{R.nCancel} (all)</div>
-                    </div>}
+                  {/* Pax + client-paid base */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:9,marginBottom:11}}>
+                    {c.type==="Partial Cancellation"
+                      ? <div>
+                          <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelled</div>
+                          <input type="number" value={c.paxCancelled} onChange={e=>updCancellation(c.id,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                        </div>
+                      : <div>
+                          <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelling</div>
+                          <div style={{padding:"8px",fontSize:12,color:"#0f2350",fontWeight:700,background:"#f4f7fc",borderRadius:8,border:"1px solid #e3eaf7"}}>{R.nCancel} (all)</div>
+                        </div>}
                     <div>
-                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Cancelled Value ₹</div>
-                      <input type="number" value={c.cancelledValue} onChange={e=>updCancellation(c.id,"cancelledValue",e.target.value)} placeholder={"auto "+R.gross} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Supplier Recovery ₹</div>
-                      <input type="number" value={c.supplierRecovery} onChange={e=>updCancellation(c.id,"supplierRecovery",e.target.value)} placeholder="0" title="Cost you can claw back from suppliers (refundable hotel/flight)" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Client Paid (cancelled pax)</div>
+                      <input type="number" value={c.cancelledPaid} onChange={e=>updCancellation(c.id,"cancelledPaid",e.target.value)} placeholder={"auto "+R.paidTotal} title="In cancelled travellers ne jitna deposit diya. Auto = total deposit ka per-head share." style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                      <div style={{fontSize:9.5,color:"#94a3b8",marginTop:2}}>{R.nCancel>0?money(R.paidPP)+"/person":""}</div>
                     </div>
                   </div>
 
-                  {/* Refund entry — YOU decide the refund, per-person or total */}
-                  <div style={{background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:10,padding:"11px 12px",marginBottom:11}}>
-                    <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
-                      <span style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase"}}>Refund to Client — enter as</span>
-                      <div style={{display:"flex",gap:0,border:"1px solid #d4e0f5",borderRadius:7,overflow:"hidden"}}>
+                  {/* Open 3-way calculator */}
+                  <div style={{background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:11,padding:"12px 13px",marginBottom:11}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase"}}>Cancellation Calculator</span>
+                      <span style={{fontSize:10,color:"#94a3b8"}}>— koi bhi 2 bharo, teesra auto</span>
+                      <div style={{marginLeft:"auto",display:"flex",border:"1px solid #d4e0f5",borderRadius:7,overflow:"hidden"}}>
                         {[["total","Total ₹"],["perPerson","Per Person ₹"]].map(([v,l])=>(
-                          <button key={v} onClick={()=>updCancellation(c.id,"refundEntryMode",v)}
-                            style={{border:"none",padding:"5px 11px",fontSize:11,fontWeight:800,cursor:"pointer",
-                              background:c.refundEntryMode===v?"#0d1b3e":"#fff",color:c.refundEntryMode===v?"#fff":"#6b7a99"}}>{l}</button>
+                          <button key={v} onClick={()=>updCancellation(c.id,"amountMode",v)}
+                            style={{border:"none",padding:"5px 10px",fontSize:11,fontWeight:800,cursor:"pointer",
+                              background:c.amountMode===v?"#0d1b3e":"#fff",color:c.amountMode===v?"#fff":"#6b7a99"}}>{l}</button>
                         ))}
                       </div>
                     </div>
-                    {c.refundEntryMode==="perPerson"
-                      ? <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                          <input type="number" value={c.refundPerPerson} onChange={e=>updCancellation(c.id,"refundPerPerson",e.target.value)} placeholder="₹ per person" style={{flex:"1 1 130px",border:"1px solid #d4e0f5",borderRadius:8,padding:"9px",fontSize:13,fontWeight:700}}/>
-                          <span style={{fontSize:12,color:"#6b7a99"}}>× {R.nCancel} pax = <b className="mono" style={{color:"#0f2350"}}>{fmtINR(R.refund)}</b></span>
-                        </div>
-                      : <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                          <input type="number" value={c.refundTotal} onChange={e=>updCancellation(c.id,"refundTotal",e.target.value)} placeholder="₹ total refund" style={{flex:"1 1 130px",border:"1px solid #d4e0f5",borderRadius:8,padding:"9px",fontSize:13,fontWeight:700}}/>
-                          {R.nCancel>0&&<span style={{fontSize:12,color:"#6b7a99"}}>≈ <b className="mono" style={{color:"#0f2350"}}>{fmtINR(R.refundPP)}</b>/person</span>}
-                        </div>}
-                    {(Number(c.refundTotal)>R.gross||Number(c.refundPerPerson)*R.nCancel>R.gross)&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Refund cancelled value se zyada tha — cancelled value tak cap kar diya.</div>}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:9}}>
+                      {[
+                        {name:"penalty", label:"Vendor Penalty", raw:c.vendorPenalty, comp:R.penalty, key:"vendorPenalty", hint:"Jo vendor/airline ne cancellation charge liya"},
+                        {name:"profit",  label:"Mera Profit",    raw:c.myProfit,     comp:R.profit,  key:"myProfit",     hint:"Is cancellation pe aap kitna rakhna chahte ho"},
+                        {name:"refund",  label:"Client Refund",   raw:c.clientRefund, comp:R.refund,  key:"clientRefund", hint:"Client ko wapas jaayega"},
+                      ].map(f=>{
+                        const isAuto=c.lockedOut===f.name;
+                        const shown=isAuto ? (per?(R.nCancel>0?Math.round(f.comp/R.nCancel):f.comp):f.comp) : f.raw;
+                        return <div key={f.name} title={f.hint}
+                          style={{border:"1px solid "+(isAuto?"#0891b2":"#d4e0f5"),borderRadius:9,padding:"9px 10px",
+                            background:isAuto?"#ecfeff":"#fff",position:"relative"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <span style={{fontSize:9.5,color:isAuto?"#0e7490":"#6b7a99",fontWeight:800,letterSpacing:.4,textTransform:"uppercase"}}>{f.label}</span>
+                            {isAuto
+                              ? <span style={{fontSize:8,fontWeight:800,color:"#0891b2",background:"#cffafe",borderRadius:10,padding:"1px 6px"}}>AUTO</span>
+                              : <button onClick={()=>setLock(f.name)} title="Isko auto-calculate banao" style={{border:"none",background:"transparent",color:"#c2d2ee",cursor:"pointer",fontSize:11,fontWeight:800}}>= auto</button>}
+                          </div>
+                          {isAuto
+                            ? <div className="mono" style={{fontSize:17,fontWeight:800,color:f.name==="profit"&&R.profit<0?"#dc2626":"#0f2350"}}>{money(shown)}</div>
+                            : <input type="number" value={f.raw} onChange={e=>updCancellation(c.id,f.key,e.target.value)}
+                                placeholder={per?"₹/person":"₹ total"} className="mono"
+                                style={{width:"100%",border:"none",outline:"none",fontSize:17,fontWeight:800,color:"#0f2350",background:"transparent",padding:0}}/>}
+                          {!isAuto && R.nCancel>0 && f.raw!=="" && <div style={{fontSize:9,color:"#94a3b8",marginTop:2}}>{per?money((Number(f.raw)||0)*R.nCancel)+" total":money(Math.round((Number(f.raw)||0)/R.nCancel))+"/person"}</div>}
+                        </div>;
+                      })}
+                    </div>
+                    {Math.abs(R.overflow)>1 && <div style={{fontSize:10.5,color:"#b45309",marginTop:8}}>⚠️ Penalty + Profit + Refund (₹{(R.penalty+R.profit+R.refund).toLocaleString("en-IN")}) client-paid (₹{R.paidTotal.toLocaleString("en-IN")}) se {R.overflow>0?"zyada":"kam"} hai — ek field ko "= auto" pe daal do ya amount check karo.</div>}
                   </div>
 
-                  {/* Outcome: penalty retained, refund, and true profit/loss */}
-                  <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:11}}>
-                    <div style={{flex:"1 1 84px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Cancelled</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#fff"}}>{fmtINR(R.gross)}</div></div>
-                    <div style={{flex:"1 1 84px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Refund</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#60a5fa"}}>{fmtINR(R.refund)}</div></div>
-                    <div style={{flex:"1 1 84px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Retained</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#f0a04b"}}>{fmtINR(R.penalty)}</div></div>
-                    <div style={{flex:"1 1 84px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
-                      <div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>{R.isLoss?"Loss":"Profit"}</div>
-                      <div className="mono" style={{fontSize:15,fontWeight:800,color:R.isLoss?"#f87171":"#4ade80"}}>{R.isLoss?"− ":""}{fmtINR(Math.abs(R.profit))}</div>
+                  {/* Outcome */}
+                  <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
+                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Client Paid</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#fff"}}>{money(R.paidTotal)}</div></div>
+                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
+                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Vendor Penalty</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#f0a04b"}}>{money(R.penalty)}</div></div>
+                    <div style={{flex:"1 1 78px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
+                      <div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>{R.isLoss?"My Loss":"My Profit"}</div>
+                      <div className="mono" style={{fontSize:14,fontWeight:800,color:R.isLoss?"#f87171":"#4ade80"}}>{R.isLoss?"− ":""}{money(Math.abs(R.profit))}</div>
                     </div>
                   </div>
-                  <div style={{fontSize:10,color:"#94a3b8",marginTop:-4,marginBottom:10}}>Profit = retained ₹{R.penalty.toLocaleString("en-IN")} − supplier cost ₹{R.netCost.toLocaleString("en-IN")}{Number(c.supplierRecovery)>0?" (after ₹"+Number(c.supplierRecovery).toLocaleString("en-IN")+" recovery)":""}. Deal-level, so it doesn't matter which component held the price.</div>
 
                   <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
                     <select value={c.status} onChange={e=>confirmCancellation(c.id,e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:11.5,fontWeight:700}}>
