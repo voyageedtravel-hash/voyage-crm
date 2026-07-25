@@ -292,6 +292,24 @@ const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUN
 // stage automatically.
 const CANCEL_REASONS = ["Client Request","Visa Rejection","Medical / Emergency","Supplier / Operational","Payment Not Received","Force Majeure","Other"];
 const CANCEL_STATUS = ["Pending","Refund Approved","Refund Processed","No Refund Due","Closed"];
+// ── TRAVELLER MODEL (CRM 3.0 — post-booking detail) ──────────────────
+// Entered once when a deal is Booked; every component, room, sector and
+// cancellation then references travellers by id (checkbox / drag-drop), so a
+// name is never retyped. Only first & last name are mandatory.
+const TRAVELLER_TYPES = ["Adult","Child (with bed)","Child (without bed)","Infant"];
+const SALUTATIONS = ["Mr","Mrs","Ms","Mstr","Miss","Dr"];
+const SALUT_GENDER = {Mr:"Male",Mstr:"Male",Mrs:"Female",Ms:"Female",Miss:"Female",Dr:""};
+const emptyTraveller = (lead=false) => ({
+  id:uid(),
+  firstName:"", lastName:"",
+  salutation:"Mr", type:"Adult",
+  dob:"",
+  isLead:lead,
+  passportNo:"", idType:"Passport",
+  passportIssue:"", passportExpiry:"", nationality:"Indian",
+});
+const travellerName = (t) => `${t.salutation?t.salutation+" ":""}${(t.firstName||"").trim()} ${(t.lastName||"").trim()}`.trim() || "(unnamed)";
+
 // ── CANCELLATION MODEL (component-level, per lead) ────────────────────
 // A cancellation can hit the whole package or specific components, and
 // different components can lose a different number of travellers. Each
@@ -642,6 +660,7 @@ const emptyFlightVendor = () => ({
 const initDeal = {
   clientName:"", contactNo:"", email:"",
   adults:"2", children:"0", infants:"0", rooms:"1",
+  travellers:[],   // CRM 3.0: populated at booking; empty = pre-booking mode
   modeOfQuery:"Call", travelDates:"", destination:"", quoteValidTill:"",
   remarks:"",
   gstMode:"profit",
@@ -673,7 +692,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   // Tiered options — guarantee 3 tiers exist for older deals
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
@@ -1709,6 +1728,37 @@ ${text}
     setDeal(copy); saveDeal(copy);
     window.veToast && window.veToast("Deal duplicate ho gayi — same package, payments/refunds fresh. Client name update kar lo ✏️","success");
   };
+  // ── Traveller handlers (CRM 3.0) ──
+  const addTraveller=()=>setDeal(d=>{
+    if((d.travellers||[]).length>=99){ window.veToast&&window.veToast("Max 99 travellers","warning"); return d; }
+    const lead=(d.travellers||[]).length===0;
+    return {...d,travellers:[...(d.travellers||[]),emptyTraveller(lead)]};
+  });
+  const updTraveller=(tid,key,val)=>setDeal(d=>({...d,travellers:(d.travellers||[]).map(t=>{
+    if(t.id!==tid) return t;
+    const nt={...t,[key]:val};
+    if(key==="salutation" && SALUT_GENDER[val]) nt.gender=SALUT_GENDER[val];
+    return nt;
+  })}));
+  const rmTraveller=(tid)=>setDeal(d=>{
+    let travellers=(d.travellers||[]).filter(t=>t.id!==tid);
+    if(travellers.length && !travellers.some(t=>t.isLead)) travellers=travellers.map((t,i)=>i===0?{...t,isLead:true}:t);
+    return {...d,travellers};
+  });
+  const setLeadTraveller=(tid)=>setDeal(d=>({...d,travellers:(d.travellers||[]).map(t=>({...t,isLead:t.id===tid}))}));
+  // Seed travellers from pax counts + lead name when a deal first becomes Booked.
+  const seedTravellers=()=>setDeal(d=>{
+    if((d.travellers||[]).length) return d;   // already has travellers
+    const rows=[];
+    const nameParts=(d.clientName||"").trim().split(/\s+/);
+    const A=Number(d.adults)||0, C=Number(d.children)||0, I=Number(d.infants)||0;
+    for(let i=0;i<A;i++){ const t=emptyTraveller(i===0); if(i===0&&nameParts.length){ t.firstName=nameParts[0]; t.lastName=nameParts.slice(1).join(" "); } rows.push(t); }
+    for(let i=0;i<C;i++){ const t=emptyTraveller(); t.type="Child (with bed)"; rows.push(t); }
+    for(let i=0;i<I;i++){ const t=emptyTraveller(); t.type="Infant"; rows.push(t); }
+    if(!rows.length) rows.push(emptyTraveller(true));
+    return {...d,travellers:rows};
+  });
+
   const addRefund=()=>setDeal(d=>({...d,refunds:[...(d.refunds||[]),emptyRefund()]}));
   const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
   const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
@@ -1966,8 +2016,11 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   const balanceFromClient=netSell-netClientReceived;           // = totalSell-totalClientReceived (math same, par net basis pe)
   const balanceToVendors=totalCost-totalPaidToVendors;
 
+  const lbl3={fontSize:9,color:"#6b7a99",letterSpacing:.5,textTransform:"uppercase",marginBottom:3};
+  const inp3={width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 8px",fontSize:12,outline:"none",fontFamily:"inherit"};
   const tabs=[
     {id:"client",label:"👤 Client"},
+    ...(isBookedStage(deal)?[{id:"travellers",label:"🧑‍🤝‍🧑 Travellers"}]:[]),
     {id:"flights",label:"✈️ Flights"},
     {id:"hotels",label:"🏨 Hotels"},
     {id:"land",label:"🚌 Land"},
@@ -4195,6 +4248,59 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         )}
 
         {/* ══ PAYMENTS TAB ══ */}
+        {tab==="travellers"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div className="card" style={{borderColor:"#0891b2"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:6}}>
+                <div className="sec-head" style={{color:"#0891b2",margin:0}}>🧑‍🤝‍🧑 Travellers <span style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>({(deal.travellers||[]).length})</span></div>
+                <div style={{display:"flex",gap:8}}>
+                  {(deal.travellers||[]).length===0 && <button onClick={seedTravellers} className="btn btn-sm" style={{background:"#e0f7fb",color:"#0e7490",border:"1px solid #a5e5ef"}}>✨ Auto-fill from {(Number(deal.adults)||0)+(Number(deal.children)||0)+(Number(deal.infants)||0)} pax</button>}
+                  <button onClick={addTraveller} className="btn btn-ind">+ Add Traveller</button>
+                </div>
+              </div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:14}}>Har traveller ka naam ek baar daalo — aage rooms, flights aur cancellation mein inhe checkbox se use karoge. Sirf First &amp; Last name zaroori hai.</div>
+
+              {(deal.travellers||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:13,padding:"22px 0"}}>Koi traveller nahi. "Auto-fill" ya "Add Traveller" se shuru karo.</div>}
+
+              {(deal.travellers||[]).map((t,i)=>{
+                const nameMissing=!(t.firstName||"").trim() || !(t.lastName||"").trim();
+                const expSoon = t.passportExpiry && (new Date(t.passportExpiry)-new Date())/(1000*60*60*24) < 180;
+                return <div key={t.id} style={{border:"1px solid "+(t.isLead?"#c9942a":nameMissing?"#f3c6c6":"#e3eaf7"),borderRadius:12,padding:"13px 15px",marginBottom:10,background:t.isLead?"#fffdf6":"#fff"}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+                    <span style={{fontSize:12,fontWeight:800,color:"#94a3b8",minWidth:20}}>{i+1}</span>
+                    {t.isLead
+                      ? <span style={{fontSize:9,fontWeight:800,letterSpacing:.5,padding:"2px 8px",borderRadius:20,background:"#faf1dc",color:"#c9942a"}}>★ LEAD PAX</span>
+                      : <button onClick={()=>setLeadTraveller(t.id)} style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:20,background:"#f1f5f9",color:"#94a3b8",border:"none",cursor:"pointer"}}>set as lead</button>}
+                    <span style={{marginLeft:"auto",fontSize:12.5,fontWeight:700,color:"#0f2350"}}>{travellerName(t)}</span>
+                    <button onClick={()=>rmTraveller(t.id)} title="Remove" style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:14,fontWeight:700}}>✕</button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+                    <div><div style={lbl3}>Salutation</div>
+                      <select value={t.salutation} onChange={e=>updTraveller(t.id,"salutation",e.target.value)} style={inp3}>{SALUTATIONS.map(s=><option key={s}>{s}</option>)}</select></div>
+                    <div><div style={lbl3}>First Name *</div>
+                      <input value={t.firstName} onChange={e=>updTraveller(t.id,"firstName",e.target.value)} placeholder="required" style={{...inp3,borderColor:(t.firstName||"").trim()?"#d4e0f5":"#f3c6c6"}}/></div>
+                    <div><div style={lbl3}>Last Name / Surname *</div>
+                      <input value={t.lastName} onChange={e=>updTraveller(t.id,"lastName",e.target.value)} placeholder="required" style={{...inp3,borderColor:(t.lastName||"").trim()?"#d4e0f5":"#f3c6c6"}}/></div>
+                    <div><div style={lbl3}>Type</div>
+                      <select value={t.type} onChange={e=>updTraveller(t.id,"type",e.target.value)} style={inp3}>{TRAVELLER_TYPES.map(s=><option key={s}>{s}</option>)}</select></div>
+                    <div><div style={lbl3}>Date of Birth</div>
+                      <input type="date" value={t.dob} onChange={e=>updTraveller(t.id,"dob",e.target.value)} style={inp3}/></div>
+                    <div><div style={lbl3}>ID Type</div>
+                      <select value={t.idType} onChange={e=>updTraveller(t.id,"idType",e.target.value)} style={inp3}><option>Passport</option><option>Aadhaar</option><option>Other</option></select></div>
+                    <div><div style={lbl3}>{t.idType} No.</div>
+                      <input value={t.passportNo} onChange={e=>updTraveller(t.id,"passportNo",e.target.value)} style={inp3}/></div>
+                    {t.idType==="Passport"&&<><div><div style={lbl3}>Passport Issue</div>
+                      <input type="date" value={t.passportIssue} onChange={e=>updTraveller(t.id,"passportIssue",e.target.value)} style={inp3}/></div>
+                    <div><div style={lbl3}>Passport Expiry</div>
+                      <input type="date" value={t.passportExpiry} onChange={e=>updTraveller(t.id,"passportExpiry",e.target.value)} style={{...inp3,borderColor:expSoon?"#f0a04b":"#d4e0f5"}}/></div></>}
+                  </div>
+                  {expSoon&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Passport 6 mahine ke andar expire ho raha hai — travel se pehle check karo.</div>}
+                </div>;
+              })}
+            </div>
+          </div>
+        )}
+
         {tab==="payments"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
