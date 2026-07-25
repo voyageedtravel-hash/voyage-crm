@@ -158,7 +158,7 @@ const buildQuotationHTML = (deal, flights, hotels, ai, meta) => {
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Quotation — ${esc(deal.clientName)}</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:Calibri,'Segoe UI',system-ui,sans-serif}
   body{background:#eef3fc;color:#1a2c52;padding:0}
   .page{max-width:820px;margin:0 auto;background:#fff}
   .bar{position:sticky;top:0;background:#0f2350;padding:12px 20px;display:flex;gap:10px;justify-content:flex-end;z-index:10}
@@ -651,6 +651,7 @@ const emptyHotelVendor = () => ({
   id:uid(), name:"", currency:"INR", exchangeRate:"",
   country:"", city:"", hotelName:"", photoUrl:"", starRating:"", roomCategory:"Deluxe Room",
   checkIn:"", checkOut:"", nights:0,
+  confirmationNo:"",          // supplier booking reference — printed on vouchers
   costPrice:"", sellingPrice:"", payments:[],
 });
 // ── Tiered options (3★ / 4★ / 5★) — each tier has its own hotels + total price ──
@@ -667,7 +668,8 @@ const defaultTiers = () => ([
 ]);
 const emptyLandVendor = () => ({
   id:uid(), name:"", currency:"INR", exchangeRate:"",
-  itinerary:"", costPrice:"", sellingPrice:"", payments:[],
+  itinerary:"", confirmationNo:"",
+  costPrice:"", sellingPrice:"", payments:[],
 });
 const emptyPayment = (modes) => ({id:uid(),amount:"",mode:modes[0],date:today(),note:""});
 const emptySector = () => ({
@@ -2310,7 +2312,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const td = {padding:"9px 10px",fontSize:13,color:"#1a2c52",borderBottom:"1px solid #eef3fc"};
 
     return (
-      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Segoe UI',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
         <style>{dashStyles}</style>
         <div style={{background:"#fff",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
@@ -2386,14 +2388,14 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   if(screen==="users"){
     if(!isAdmin){
       return (
-        <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"'Segoe UI',sans-serif"}}>
+        <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16,fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
           <div style={{fontSize:18,fontWeight:700}}>🔒 Admin access only</div>
           <button onClick={()=>setScreen("dashboard")} className="btn btn-ind">← Back to Dashboard</button>
         </div>
       );
     }
     return (
-      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Segoe UI',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
         <style>{dashStyles}</style>
         <div style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div>
@@ -2528,6 +2530,92 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   }
   function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
   function fmtD(d){ if(!d) return ""; try{return new Date(d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});}catch(e){return d;} }
+  // ── VOUCHERS (hotel / land) — same navy-gold identity as the itinerary ──
+  function buildVouchersHTML(){
+    const esc=(x)=>String(x==null?"":x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+    const ref=deal.dealNumber||("VE"+String(Date.now()).slice(-6));
+    const fmtD=(d)=>{ if(!d) return "—"; const x=new Date(d); return isNaN(x)?esc(d):x.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); };
+    const guests=(deal.travellers||[]).filter(t=>!t.cancelled);
+    const guestList = guests.length
+      ? guests.map((t,i)=>`<tr><td style="padding:5px 10px;border-bottom:1px solid #eef1f7;font-size:11.5px;color:#7d8bab;width:26px">${i+1}</td><td style="padding:5px 10px;border-bottom:1px solid #eef1f7;font-size:12.5px;color:#0d1b3e;font-weight:700">${esc(travellerName(t))}</td><td style="padding:5px 10px;border-bottom:1px solid #eef1f7;font-size:11px;color:#5a6b8c;text-align:right">${esc(t.type)}</td></tr>`).join("")
+      : `<tr><td colspan="3" style="padding:8px 10px;font-size:12.5px;color:#0d1b3e;font-weight:700">${esc(deal.clientName||"Guest")}</td></tr>`;
+    const paxLine=`${deal.adults||0} Adult${Number(deal.adults)===1?"":"s"}${Number(deal.children)>0?`, ${deal.children} Child`:""}${Number(deal.infants)>0?`, ${deal.infants} Infant`:""}`;
+
+    const shell=(title,badge,rows,extra)=>`
+      <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 2px 14px rgba(13,27,62,.09);margin-bottom:22px;page-break-inside:avoid">
+        <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:16px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:9.5px;letter-spacing:2.5px;color:#f0c842;font-weight:800">${badge}</div>
+            <div style="font-size:19px;color:#fff;font-weight:800;margin-top:2px">${esc(title)}</div>
+          </div>
+          <div style="background:#fff;border-radius:9px;padding:5px 11px"><img src="${VE_LOGO}" style="height:30px;display:block"/></div>
+        </div>
+        <div style="padding:16px 22px">
+          <table style="width:100%;border-collapse:collapse">${rows}</table>
+          ${extra||""}
+        </div>
+      </div>`;
+    const row=(k,v,hi)=>`<tr><td style="padding:7px 0;font-size:10px;letter-spacing:1.2px;color:#8b98b4;font-weight:800;text-transform:uppercase;width:38%;vertical-align:top">${k}</td><td style="padding:7px 0;font-size:${hi?"15px":"13px"};color:#0d1b3e;font-weight:${hi?"800":"600"}">${v}</td></tr>`;
+
+    const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
+    const lands=(deal.landVendors||[]).filter(l=>(l.itinerary||"").trim()||l.name);
+
+    const hotelCards=hotels.map(h=>{
+      const nights=Number(h.nights)||0;
+      return shell(h.hotelName||"Hotel Stay","HOTEL VOUCHER",
+        row("Confirmation No.", h.confirmationNo?`<span style="background:#faf1dc;border:1px solid #e8d6a8;border-radius:6px;padding:3px 10px;font-family:monospace;letter-spacing:1px;color:#8a6d1f">${esc(h.confirmationNo)}</span>`:"<span style='color:#b9c3d6'>To be advised</span>",true)
+        + row("City", esc(h.city||"—"))
+        + row("Room Category", esc(h.roomCategory||"—"))
+        + row("Check-in", fmtD(h.checkIn))
+        + row("Check-out", fmtD(h.checkOut))
+        + (nights?row("Nights", nights):"")
+        + row("Guests", paxLine),
+        `<div style="margin-top:12px;border-top:1px dashed #dde4f0;padding-top:10px">
+           <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">GUEST NAMES</div>
+           <table style="width:100%;border-collapse:collapse">${guestList}</table>
+         </div>`);
+    }).join("");
+
+    const landCards=lands.map(l=>{
+      const days=(l.itinerary||"").split(/\n+/).map(x=>x.trim()).filter(Boolean);
+      return shell(l.name||"Tours & Transfers","SERVICE VOUCHER",
+        row("Confirmation No.", l.confirmationNo?`<span style="background:#faf1dc;border:1px solid #e8d6a8;border-radius:6px;padding:3px 10px;font-family:monospace;letter-spacing:1px;color:#8a6d1f">${esc(l.confirmationNo)}</span>`:"<span style='color:#b9c3d6'>To be advised</span>",true)
+        + row("Destination", esc(deal.destination||"—"))
+        + row("Guests", paxLine),
+        days.length?`<div style="margin-top:12px;border-top:1px dashed #dde4f0;padding-top:10px">
+           <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:7px">SERVICES INCLUDED</div>
+           ${days.map(d=>`<div style="font-size:12px;color:#33415e;padding:4px 0 4px 14px;position:relative;line-height:1.5"><span style="position:absolute;left:0;color:#c9961a">•</span>${esc(d)}</div>`).join("")}
+         </div>`:"");
+    }).join("");
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voyage-Ed — Vouchers ${esc(ref)}</title>
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f9;margin:0;padding:0;color:#1a2c52}
+    @media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+    <div style="max-width:820px;margin:0 auto;padding:20px 16px 40px">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:10px;letter-spacing:3px;color:#c9961a;font-weight:800">VOYAGE-ED TRAVELS</div>
+        <div style="font-size:25px;font-weight:800;color:#0d1b3e;margin-top:3px">Travel Vouchers</div>
+        <div style="font-size:12px;color:#5a6b8c;margin-top:3px">Booking Ref <b style="color:#0d1b3e">${esc(ref)}</b> · ${esc(deal.clientName||"")} · ${esc(deal.destination||"")}</div>
+      </div>
+      ${hotelCards||""}
+      ${landCards||""}
+      ${(!hotelCards&&!landCards)?`<div style="text-align:center;color:#8b98b4;font-size:13px;padding:40px 0">Is deal mein koi hotel ya land service nahi mili.</div>`:""}
+      <div style="text-align:center;margin-top:26px;padding-top:16px;border-top:1px solid #dde4f0">
+        <div style="font-size:11.5px;color:#5a6b8c;line-height:1.7">Voyage-Ed Travels · Suite 315, Regus, GMADA Aerocity, Mohali, Punjab 140306<br>
+        enquiry@voyage-ed.com &nbsp;|&nbsp; www.voyage-ed.com &nbsp;|&nbsp; +91 70096 59048</div>
+        <div style="font-size:10.5px;color:#8b98b4;margin-top:8px;font-style:italic">Your Journey, Our Passion</div>
+      </div>
+      <div class="noprint" style="text-align:center;margin-top:22px">
+        <button onclick="window.print()" style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#f0c842;border:none;border-radius:10px;padding:13px 30px;font-size:13px;font-weight:800;cursor:pointer">🖨️ Save as PDF</button>
+      </div>
+    </div></body></html>`;
+  }
+  const openVouchers=()=>{
+    const w=window.open("","_blank");
+    if(!w){ window.veToast&&window.veToast("Popup blocked","error"); return; }
+    w.document.write(buildVouchersHTML()); w.document.close();
+  };
+
   function buildProposalHTML(){
     let cover=propCover();
     // Stay options (3★/4★/5★) — detected up front so the stats row, price
@@ -3281,7 +3369,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     const rangeLabel=(dateFrom||dateTo)?`${dateFrom||"start"} → ${dateTo||"today"}`:"All time";
 
     return (
-      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
         <style>{dashStyles}</style>
         {aiWidgetEl}
         <div className="crm-header" style={{background:"linear-gradient(135deg,#ffffff,#ffffff)",borderBottom:"1px solid #d4e0f5",padding:"20px 32px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
@@ -3593,7 +3681,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     }
     // ── DEAL SCREEN ───────────────────────────────────────────────────────────
   return (
-    <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"'Syne','Segoe UI',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
       <style>{dealStyles}</style>
       {aiWidgetEl}
 
@@ -3859,6 +3947,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
+              {isBookedStage(deal)&&<button onClick={openVouchers} title="Hotel & service vouchers — Voyage-Ed branded PDF" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🎫 Vouchers</button>}
               <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>{const old=stageOf(d); if(old===v) return d; return {...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned",auditLog:[...(d.auditLog||[]),auditEntry(currentUser,"Stage changed",old+" \u2192 "+v)]};});}}
                 title="Deal status — dashboard tabs, funnel aur totals sab isi se chalte hain"
                 style={{background:((STAGE_META[stageOf(deal)]||{}).bg||"#eef3fc"),
@@ -4264,6 +4353,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     </div>
                     <div><span className="lbl">Hotel Category <span style={{opacity:.6}}>(stars)</span></span><select value={hv.starRating||""} onChange={e=>updH(hv.id,"starRating",e.target.value)}><option value="">Not specified</option><option value="3">3-Star ★★★</option><option value="4">4-Star ★★★★</option><option value="5">5-Star ★★★★★</option></select></div>
                     <div><span className="lbl">Room Category</span><select value={hv.roomCategory} onChange={e=>updH(hv.id,"roomCategory",e.target.value)}>{ROOM_CATEGORIES.map(r=><option key={r}>{r}</option>)}</select></div>
+                    <div><span className="lbl">Confirmation No.</span><input className="mono" value={hv.confirmationNo||""} onChange={e=>updH(hv.id,"confirmationNo",e.target.value)} placeholder="voucher ref" /></div>
                     <div><span className="lbl">Check-In</span><input type="date" value={hv.checkIn} onChange={e=>updH(hv.id,"checkIn",e.target.value)} /></div>
                     <div><span className="lbl">Check-Out</span><input type="date" value={hv.checkOut} onChange={e=>updH(hv.id,"checkOut",e.target.value)} /></div>
                     <div><span className="lbl">Nights</span><input readOnly value={nightsBetween(hv.checkIn,hv.checkOut)||"—"} style={{opacity:.7,cursor:"default",textAlign:"center",fontFamily:"monospace",fontWeight:700,color:"#f97316"}} /></div>
@@ -4344,6 +4434,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 
                   {/* Itinerary box */}
                   <div>
+                    <div style={{marginBottom:8,maxWidth:240}}><span className="lbl">Confirmation No.</span><input className="mono" value={lv.confirmationNo||""} onChange={e=>updL(lv.id,"confirmationNo",e.target.value)} placeholder="voucher ref" /></div>
                     <span className="lbl">Itinerary / Notes (paste your full itinerary here)</span>
                     <textarea value={lv.itinerary||""} onChange={e=>updL(lv.id,"itinerary",e.target.value)} placeholder="Day 1: Dubai arrival, airport transfer, check-in...\nDay 2: Desert safari..." rows={5} style={{resize:"vertical",lineHeight:1.6}} />
                   </div>
@@ -4851,7 +4942,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               </div>
               {aiItinerary&&(
                 <div>
-                  <textarea readOnly value={aiItinerary} style={{width:"100%",minHeight:320,background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:8,color:"#1a2c52",padding:"14px",fontSize:13,lineHeight:1.6,fontFamily:"'Segoe UI',sans-serif",whiteSpace:"pre-wrap"}}/>
+                  <textarea readOnly value={aiItinerary} style={{width:"100%",minHeight:320,background:"#ffffff",border:"1px solid #c2d2ee",borderRadius:8,color:"#1a2c52",padding:"14px",fontSize:13,lineHeight:1.6,fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif",whiteSpace:"pre-wrap"}}/>
                   <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
                     <button onClick={()=>{navigator.clipboard.writeText(aiItinerary);window.veToast&&window.veToast("Itinerary copied!");}} className="btn btn-sm">📋 Copy</button>
                     <button onClick={()=>{const msg=encodeURIComponent(aiItinerary);window.open(`https://wa.me/?text=${msg}`,"_blank");}} className="btn btn-sm">💬 Share on WhatsApp</button>
