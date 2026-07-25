@@ -320,12 +320,13 @@ const travellerName = (t) => `${t.salutation?t.salutation+" ":""}${(t.firstName|
 // "Vendor ne kaata" (what the supplier retained) is what the user enters.
 const emptyCancelLine = () => ({
   compKind:"", compId:"",      // which component (flight/hotel/land/visa + vendor id)
-  paxCancelled:"",             // travellers cancelling this component (Option B: per-component)
+  paxCancelled:"",             // travellers cancelling this component (count fallback)
+  travellerIds:[],             // CRM 3.0: exactly WHO cancels (preferred over count)
   vendorRetained:"",           // ₹ the vendor kept out of what we'd paid them
   vendorPenaltyToClient:"",    // ₹ penalty we charged the CLIENT (separate from profit)
   myProfit:"",                 // ₹ profit we kept for ourselves on this component
   clientRefund:"",             // ₹ going back to the client (auto or manual)
-  refundLocked:true,           // when true, clientRefund is auto = clientHeld - penalty - profit... (see compute)
+  refundLocked:true,
 });
 const emptyCancellation = () => ({
   id:uid(),
@@ -333,11 +334,21 @@ const emptyCancellation = () => ({
   reason:"Client Request",
   status:"Pending",
   date:today(),
-  lines:[],                    // array of emptyCancelLine — one per affected component
+  lines:[],
+  // Post-cancellation repricing: sometimes fewer pax ⇒ higher per-head cost.
+  repriceAsk:"",               // "" (not answered) | "no" | "yes"
+  reprices:[],                 // [{compKind,compId,newCost,newSell}] in vendor currency
   refundMode:REFUND_MODES[0],
   approvedBy:REFUND_APPROVERS[0],
   refNo:"",
   note:"",
+});
+// ── AUDIT LOG (per lead) ──────────────────────────────────────────────
+// Every meaningful change is stamped: when, who (login), what, old → new.
+const auditEntry=(user,action,details)=>({
+  id:uid(), ts:new Date().toISOString(),
+  user:(user&&(user.name||user.email))||"admin",
+  action, details:details||"",
 });
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
@@ -539,7 +550,9 @@ const dealComponents = (d) => {
     out.push({ compKind:kind, compId:v.id, vendorName:name||kind,
       label:labeler(v), paidToVendor:sum(v.payments||[],"amount"),
       cost:toINR(v.costPrice,v.currency,v.exchangeRate),
-      sell:toINR(v.sellingPrice,v.currency,v.exchangeRate) });
+      sell:toINR(v.sellingPrice,v.currency,v.exchangeRate),
+      paxRates:v.paxRates||null, paxPricing:!!v.paxPricing,
+      travellerIds:v.travellerIds||[], currency:v.currency, exchangeRate:v.exchangeRate });
   });
   add("flight", d.flightVendors, v=>{
     const s=(v.sectors||[]).filter(x=>x.from||x.to);
@@ -562,15 +575,27 @@ const cancelCompute = (c, d) => {
   const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
   const lines=(c.lines||[]).map(ln=>{
     const comp=compById(d, ln.compKind, ln.compId) || {paidToVendor:0,sell:0,cost:0,vendorName:ln.compId,label:"(removed component)"};
-    const nCancel=Number(ln.paxCancelled)||0;
+    const nCancel=(ln.travellerIds||[]).length || Number(ln.paxCancelled)||0;
     const vendorRetained=Number(ln.vendorRetained)||0;               // real liability to supplier
     const penalty=Number(ln.vendorPenaltyToClient)||0;              // charged to the client
     const profit=Number(ln.myProfit)||0;                            // kept for us
-    // Client's paid share for THIS component's cancelled travellers. Only the
-    // cancelled heads count — never the whole component when just a few cancel.
-    const perHeadSell = paxTotal>0 ? comp.sell/paxTotal : comp.sell;
-    const heads = nCancel>0 ? nCancel : paxTotal;   // full component only if pax not specified
-    const clientHeldForComp = Math.round(perHeadSell * heads);
+    // Client's paid share for THIS component's cancelled travellers.
+    // EXACT when per-person rates exist: sum the selected travellers' own sell
+    // rates (converted to INR). Otherwise fall back to per-head share.
+    let clientHeldForComp=0;
+    const TK={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
+    if((ln.travellerIds||[]).length && comp.paxRates){
+      (d.travellers||[]).filter(t=>ln.travellerIds.includes(t.id)).forEach(t=>{
+        const rate=Number((comp.paxRates||{})[(TK[t.type]||"adult")+"S"])||0;
+        clientHeldForComp+=toINR(rate, comp.currency, comp.exchangeRate);
+      });
+      clientHeldForComp=Math.round(clientHeldForComp);
+    }
+    if(!clientHeldForComp){
+      const perHeadSell = paxTotal>0 ? comp.sell/paxTotal : comp.sell;
+      const heads = nCancel>0 ? nCancel : paxTotal;
+      clientHeldForComp = Math.round(perHeadSell * heads);
+    }
     const clientKept = Math.min(penalty + profit, clientHeldForComp);  // can't keep more than paid share
     let refund = ln.refundLocked ? Math.max(0, clientHeldForComp - clientKept) : (Number(ln.clientRefund)||0);
     // Net profit for the company on this component.
@@ -661,6 +686,7 @@ const initDeal = {
   clientName:"", contactNo:"", email:"",
   adults:"2", children:"0", infants:"0", rooms:"1",
   travellers:[],   // CRM 3.0: populated at booking; empty = pre-booking mode
+  auditLog:[],     // CRM 3.0: who changed what, when — shown in Summary
   modeOfQuery:"Call", travelDates:"", destination:"", quoteValidTill:"",
   remarks:"",
   gstMode:"profit",
@@ -692,7 +718,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers","auditLog"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   // Tiered options — guarantee 3 tiers exist for older deals
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
@@ -1896,12 +1922,63 @@ ${text}
     if(c.id!==cid) return c;
     return {...c, lines:(c.lines||[]).map(l=>(l.compKind===compKind && l.compId===compId)?{...l,[key]:val}:l)};
   })}));
-  // Confirming a cancellation: move out of Pending and (for full scope) flip stage.
+  // Confirming a cancellation: one atomic update that (1) sets the status,
+  // (2) applies any post-cancellation repricing (logged old → new), (3) pulls
+  // the cancelled travellers off each component's roster and flags them, and
+  // (4) writes it all to the audit log with the login that did it.
   const confirmCancellation=(cid,newStatus)=>setDeal(d=>{
-    const cancellations=(d.cancellations||[]).map(c=>c.id===cid?{...c,status:newStatus}:c);
-    const nd={...d,cancellations};
-    const c=cancellations.find(x=>x.id===cid);
-    if(c && c.scope==="full" && newStatus!=="Pending"){ nd.stage="Cancelled"; nd.status="Cancelled"; }
+    const c=(d.cancellations||[]).find(x=>x.id===cid);
+    if(!c) return d;
+    let nd={...d, cancellations:(d.cancellations||[]).map(x=>x.id===cid?{...x,status:newStatus}:x)};
+    const log=[];
+    const stamp=(action,details)=>log.push(auditEntry(currentUser,action,details));
+    const confirming = c.status==="Pending" && newStatus!=="Pending";
+    if(confirming){
+      const R=cancelCompute(c,d);
+      // (2) apply repricing the user entered ("cost badal gayi?" → yes)
+      if(c.repriceAsk==="yes" && (c.reprices||[]).length){
+        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
+        (c.reprices||[]).forEach(rp=>{
+          const arrKey=KIND2ARR[rp.compKind]; if(!arrKey) return;
+          nd[arrKey]=(nd[arrKey]||[]).map(v=>{
+            if(v.id!==rp.compId) return v;
+            const oldC=v.costPrice, oldS=v.sellingPrice;
+            const nv={...v};
+            if(rp.newCost!=="" && rp.newCost!=null) nv.costPrice=String(rp.newCost);
+            if(rp.newSell!=="" && rp.newSell!=null) nv.sellingPrice=String(rp.newSell);
+            if(nv.costPrice!==oldC||nv.sellingPrice!==oldS)
+              stamp("Repriced after cancellation",`${(v.name||v.hotelName||rp.compKind)}: cost ${oldC||0} → ${nv.costPrice||0}, selling ${oldS||0} → ${nv.sellingPrice||0} (${v.currency||"INR"})`);
+            return nv;
+          });
+        });
+      }
+      // (3) remove cancelled travellers from component rosters + flag them
+      const cancelledEverywhere=new Set();
+      (c.lines||[]).forEach(ln=>{
+        if(!(ln.travellerIds||[]).length) return;
+        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
+        const arrKey=KIND2ARR[ln.compKind]; if(!arrKey) return;
+        nd[arrKey]=(nd[arrKey]||[]).map(v=>v.id===ln.compId?{...v,travellerIds:(v.travellerIds||[]).filter(id=>!ln.travellerIds.includes(id))}:v);
+        if(c.scope==="full") ln.travellerIds.forEach(id=>cancelledEverywhere.add(id));
+      });
+      if(c.scope==="full"){
+        // full scope: every listed traveller is off the trip
+        (c.lines||[]).forEach(ln=>(ln.travellerIds||[]).forEach(id=>cancelledEverywhere.add(id)));
+        if(!cancelledEverywhere.size) (d.travellers||[]).forEach(t=>cancelledEverywhere.add(t.id));
+      }
+      if(cancelledEverywhere.size){
+        nd.travellers=(nd.travellers||[]).map(t=>cancelledEverywhere.has(t.id)?{...t,cancelled:true}:t);
+        const names=(d.travellers||[]).filter(t=>cancelledEverywhere.has(t.id)).map(travellerName).join(", ");
+        if(names) stamp("Travellers cancelled",names);
+      }
+      // (4) the cancellation event itself
+      stamp(`Cancellation confirmed (${c.scope==="full"?"full package":"components"})`,
+        `${(c.lines||[]).length} component(s) · refund ₹${R.refund.toLocaleString("en-IN")} · vendor retained ₹${R.vendorRetained.toLocaleString("en-IN")} · cxl profit ₹${R.profit.toLocaleString("en-IN")} · reason: ${c.reason}`);
+      if(c.scope==="full"){ nd.stage="Cancelled"; nd.status="Cancelled"; }
+    } else if(newStatus!==c.status){
+      stamp("Cancellation status changed",`${c.status} → ${newStatus}`);
+    }
+    if(log.length) nd.auditLog=[...(nd.auditLog||[]),...log];
     return nd;
   });
   const printRefundReceipt=(r)=>{
@@ -3782,7 +3859,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
-              <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>({...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned"}));}}
+              <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>{const old=stageOf(d); if(old===v) return d; return {...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned",auditLog:[...(d.auditLog||[]),auditEntry(currentUser,"Stage changed",old+" \u2192 "+v)]};});}}
                 title="Deal status — dashboard tabs, funnel aur totals sab isi se chalte hain"
                 style={{background:((STAGE_META[stageOf(deal)]||{}).bg||"#eef3fc"),
                   border:"1px solid "+((STAGE_META[stageOf(deal)]||{}).color||"#c2d2ee"),
@@ -3934,7 +4011,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               <div className="sec-head" style={{color:"#4169E1"}}>🎯 Lead Tracking</div>
               <div className="grid3" style={{marginBottom:6}}>
                 <div><span className="lbl">Deal Status</span>
-                  <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>({...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned"}));}}>
+                  <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>{const old=stageOf(d); if(old===v) return d; return {...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned",auditLog:[...(d.auditLog||[]),auditEntry(currentUser,"Stage changed",old+" \u2192 "+v)]};});}}>
                     {DEAL_STAGES.map(s=><option key={s} value={s}>{(STAGE_META[s]||{}).icon} {s}</option>)}
                   </select></div>
                 <div><span className="lbl">Priority</span>
@@ -4552,11 +4629,25 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                           <span style={{fontSize:13,fontWeight:800,color:"#0f2350"}}>{L.label}</span>
                           <span style={{fontSize:11,color:"#6b7a99"}}>Paid to vendor: <b className="mono" style={{color:"#0f2350"}}>{money(L.paidToVendor)}</b></span>
                         </div>
+                        {(deal.travellers||[]).length>0&&<div style={{marginBottom:10}}>
+                          <div style={{fontSize:9,color:"#0e7490",letterSpacing:.6,textTransform:"uppercase",marginBottom:5,fontWeight:800}}>Who is cancelling this? {L.comp.paxPricing&&<span style={{color:"#15803d"}}>· exact rates on</span>}</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                            {(deal.travellers||[]).filter(t=>!t.cancelled).map(t=>{
+                              const on=(L.travellerIds||[]).includes(t.id);
+                              const onComp=!(L.comp.travellerIds||[]).length || (L.comp.travellerIds||[]).includes(t.id);
+                              if(!onComp) return null;
+                              return <button key={t.id} onClick={()=>updCancelLine(c.id,L.compKind,L.compId,"travellerIds",on?(L.travellerIds||[]).filter(x=>x!==t.id):[...(L.travellerIds||[]),t.id])}
+                                style={{border:"1px solid "+(on?"#b91c1c":"#e3eaf7"),background:on?"#fdf1f1":"#fff",color:on?"#b91c1c":"#94a3b8",borderRadius:20,padding:"4px 11px",fontSize:10.5,fontWeight:700,cursor:"pointer"}}>
+                                {on?"✗ ":""}{travellerName(t)}
+                              </button>;
+                            })}
+                          </div>
+                        </div>}
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:9,marginBottom:10}}>
-                          <div>
+                          {!(deal.travellers||[]).length&&<div>
                             <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Travellers cancelled</div>
                             <input type="number" value={L.paxCancelled} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
-                          </div>
+                          </div>}
                           <div>
                             <div style={{fontSize:9,color:"#b45309",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Vendor retained ₹</div>
                             <input type="number" value={L.vendorRetained} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorRetained",e.target.value)} placeholder="0" title="What the vendor kept out of what you had paid them (your real liability)" style={{width:"100%",border:"1px solid #f3c6c6",borderRadius:8,padding:"8px",fontSize:12}}/>
@@ -4592,6 +4683,41 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <div className="mono" style={{fontSize:14,fontWeight:800,color:"#fff"}}>{money(dealFinance({...deal,cancellations:(deal.cancellations||[]).map(x=>x.id===c.id?{...c,status:"Refund Approved"}:x)}).revisedProfit)}</div>
                     </div>
                   </div></>}
+
+                  {/* Post-cancellation repricing — fewer pax often means a higher per-head cost */}
+                  {(c.lines||[]).length>0&&pending&&<div style={{border:"1px solid #f0d9a8",background:"#fffdf5",borderRadius:11,padding:"12px 13px",marginBottom:10}}>
+                    <div style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{fontSize:11.5,fontWeight:800,color:"#8a6d1f"}}>Kya baaki logon ki cost/selling price badal gayi hai?</span>
+                      <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
+                        {[["no","No"],["yes","Yes, reprice"]].map(([v,l])=>(
+                          <button key={v} onClick={()=>updCancellation(c.id,"repriceAsk",v)}
+                            style={{border:"1px solid "+(c.repriceAsk===v?"#c9942a":"#e3d6b5"),background:c.repriceAsk===v?"#faf1dc":"#fff",color:c.repriceAsk===v?"#8a6d1f":"#9c8f74",borderRadius:8,padding:"6px 13px",cursor:"pointer",fontSize:11.5,fontWeight:800}}>{l}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{fontSize:10.5,color:"#9c8f74",marginTop:5}}>Kai baar log kam hone par per-head cost badh jaati hai — yahan naye rate daal do, system sab dobara calculate kar lega.</div>
+                    {c.repriceAsk==="yes"&&<div style={{marginTop:10}}>
+                      {dealComponents(deal).map(comp=>{
+                        const rp=(c.reprices||[]).find(r=>r.compKind===comp.compKind&&r.compId===comp.compId)||{};
+                        const setRp=(key,val)=>updCancellation(c.id,"reprices",(()=>{
+                          const list=[...(c.reprices||[])];
+                          const i=list.findIndex(r=>r.compKind===comp.compKind&&r.compId===comp.compId);
+                          if(i>=0) list[i]={...list[i],[key]:val};
+                          else list.push({compKind:comp.compKind,compId:comp.compId,newCost:"",newSell:"",[key]:val});
+                          return list;
+                        })());
+                        const on=(rp.newCost!==""&&rp.newCost!=null)||(rp.newSell!==""&&rp.newSell!=null);
+                        return <div key={comp.compKind+comp.compId} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"7px 0",borderTop:"1px solid #f2e9d4"}}>
+                          <span style={{fontSize:11.5,fontWeight:700,color:on?"#0f2350":"#9c8f74",flex:"1 1 160px"}}>{comp.label}</span>
+                          <span style={{fontSize:10,color:"#9c8f74"}}>now: {money(comp.cost)} / {money(comp.sell)}</span>
+                          <input type="number" value={rp.newCost??""} onChange={e=>setRp("newCost",e.target.value)} placeholder="new cost" className="mono" style={{width:100,border:"1px solid #e3d6b5",borderRadius:7,padding:"6px 8px",fontSize:11.5}}/>
+                          <input type="number" value={rp.newSell??""} onChange={e=>setRp("newSell",e.target.value)} placeholder="new selling" className="mono" style={{width:100,border:"1px solid #e3d6b5",borderRadius:7,padding:"6px 8px",fontSize:11.5}}/>
+                          <span style={{fontSize:10,color:"#9c8f74"}}>{comp.currency||"INR"}</span>
+                        </div>;
+                      })}
+                      <div style={{fontSize:10,color:"#9c8f74",marginTop:6}}>Khaali chhoda = koi badlaav nahi. Confirm karte hi ye rates apply honge aur audit log mein old → new record ho jayega.</div>
+                    </div>}
+                  </div>}
 
                   {/* Actions */}
                   <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
@@ -4667,6 +4793,32 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         {tab==="summary"&&(
           <div style={{display:"flex",flexDirection:"column",gap:18}}>
             <h2 style={{fontSize:18,fontWeight:800}}>📋 Full Deal Summary</h2>
+
+            {/* ══ ACTIVITY / AUDIT LOG ══ */}
+            <div className="card" style={{borderColor:"#334e82"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <span style={{fontSize:14,fontWeight:800,color:"#334e82"}}>🕓 Activity Log <span style={{fontSize:11,fontWeight:700,color:"#94a3b8"}}>({(deal.auditLog||[]).length})</span></span>
+              </div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Har badlaav ka record — kisne kiya, kab kiya, kya badla (purana → naya).</div>
+              {(deal.auditLog||[]).length===0
+                ? <div style={{textAlign:"center",color:"#a9bce0",fontSize:12.5,padding:"14px 0"}}>Abhi koi record nahi. Cancellation, repricing aur stage changes yahan automatically aayenge.</div>
+                : <div style={{maxHeight:340,overflowY:"auto"}}>
+                    {[...(deal.auditLog||[])].reverse().map(a=>{
+                      const dt=new Date(a.ts);
+                      return <div key={a.id} style={{display:"flex",gap:11,padding:"9px 0",borderBottom:"1px solid #f1f5f9"}}>
+                        <div style={{flexShrink:0,width:96}}>
+                          <div style={{fontSize:10.5,fontWeight:700,color:"#0f2350"}}>{dt.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"})}</div>
+                          <div style={{fontSize:9.5,color:"#94a3b8"}}>{dt.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</div>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:700,color:"#334e82"}}>{a.action}</div>
+                          {a.details&&<div style={{fontSize:11,color:"#6b7a99",marginTop:2,wordBreak:"break-word"}}>{a.details}</div>}
+                        </div>
+                        <div style={{flexShrink:0,fontSize:9.5,fontWeight:800,color:"#0e7490",background:"#e0f7fb",borderRadius:20,padding:"3px 9px",alignSelf:"flex-start"}}>{a.user}</div>
+                      </div>;
+                    })}
+                  </div>}
+            </div>
 
             {/* AUTO-SUGGEST: full payment received → mark booked */}
             {(()=>{
