@@ -283,6 +283,39 @@ function PPHelper({onApply}){
 }
 const OCC_CATS=["Adult — Twin Sharing","Adult — Single Occupancy","Adult — Triple Sharing","Child With Bed (2–11 yrs)","Child Without Bed (2–11 yrs)","Infant (0–2 yrs)","Extra Adult / Mattress"];
 const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUND_REASONS[0],approvedBy:REFUND_APPROVERS[0],date:today(),refNo:"",note:""});
+
+// ── CANCELLATION LOG (structured, per lead) ──────────────────────────
+// A cancellation is a formal event, not just a refund line. It records how
+// many travellers cancelled, the gross value cancelled, the penalty the
+// company/suppliers retain, and therefore the refund actually due to the
+// client — with a clear full-vs-partial distinction that drives the deal's
+// stage automatically.
+const CANCEL_TYPES = ["Full Cancellation","Partial Cancellation"];
+const CANCEL_REASONS = ["Client Request","Visa Rejection","Medical / Emergency","Supplier / Operational","Payment Not Received","Force Majeure","Other"];
+const CANCEL_STATUS = ["Pending","Refund Approved","Refund Processed","No Refund Due","Closed"];
+// Standard time-to-departure penalty slab (% of cancelled value retained).
+const CANCEL_SLAB = [
+  {label:"31+ days before travel", pct:10},
+  {label:"30–16 days before travel", pct:50},
+  {label:"15–8 days before travel", pct:75},
+  {label:"7–0 days / no-show", pct:100},
+];
+const emptyCancellation = () => ({
+  id:uid(),
+  type:"Full Cancellation",
+  reason:"Client Request",
+  status:"Pending",
+  date:today(),
+  paxCancelled:"",              // number of travellers cancelling
+  cancelledValue:"",           // gross ₹ being cancelled (auto-suggested, editable)
+  penaltyMode:"slab",          // "slab" | "percent" | "amount"
+  slabPct:"",                  // when penaltyMode === "slab"/"percent"
+  penaltyAmount:"",            // when penaltyMode === "amount" (absolute ₹)
+  refundMode:REFUND_MODES[0],
+  approvedBy:REFUND_APPROVERS[0],
+  refNo:"",
+  note:"",
+});
 const VENDOR_MODES = ["UPI","Bank Transfer","Cash collected by vendor","Cash deposited by us in vendor account","Cheque","Other"];
 const VISA_STATUSES = ["Not Applied","Not Required","In Progress","Approved","Rejected"];
 const VISA_STATUS_COLORS = {"Not Applied":"#6b7a99","Not Required":"#5a6b8c","In Progress":"#f59e0b","Approved":"#10b981","Rejected":"#ef4444"};
@@ -439,6 +472,10 @@ const dealFinance = (d) => {
   const cost=V.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
   const vendorPaid=V.reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
   const refunded=sum(d.refunds||[],"amount");
+  // Cancellations that have reached a refund/closed state also reduce revenue.
+  const cxl=(d.cancellations||[]).filter(c=>["Refund Approved","Refund Processed","No Refund Due","Closed"].includes(c.status));
+  const cxlRefundDue=cxl.reduce((s,c)=>s+cancelCompute(c,d).refundDue,0);
+  const cxlPenalty=cxl.reduce((s,c)=>s+cancelCompute(c,d).penalty,0);
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
@@ -449,9 +486,38 @@ const dealFinance = (d) => {
     clientRec,
     clientDue:Math.max(0,bal),        // money still to COLLECT
     clientAdvance:Math.max(0,-bal),   // client overpaid → refundable
+    cxlRefundDue, cxlPenalty,         // cancellation outcomes
   };
 };
 const today = () => new Date().toISOString().split("T")[0];
+// Compute the money outcome of a cancellation. Uses the raw package sell and
+// client receipts (not net-of-cancellation) to avoid a circular dependency
+// with dealFinance, which folds cancellation results back in.
+const cancelCompute = (c, d) => {
+  const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+  const ts=tierSellINR(d);
+  const sell = ts!=null ? ts : V.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+  const clientRec = sum(d.clientPayments||[],"amount");
+  const pax = (Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
+  const isFull = c.type === "Full Cancellation";
+  // Gross value being cancelled: full = whole package; partial = entered value,
+  // or a per-head share of the package if left blank.
+  let gross = Number(c.cancelledValue)||0;
+  if(!gross){
+    if(isFull) gross = sell;
+    else if(pax>0 && Number(c.paxCancelled)>0) gross = Math.round(sell/pax*Number(c.paxCancelled));
+  }
+  // Penalty retained by company/suppliers.
+  let penalty = 0;
+  if(c.penaltyMode === "amount") penalty = Math.min(gross, Number(c.penaltyAmount)||0);
+  else penalty = Math.round(gross * (Number(c.slabPct)||0) / 100);
+  // Refund due = what the client has actually paid toward the cancelled value,
+  // minus the penalty — never more than paid, never negative.
+  const paidTowardCancel = Math.min(clientRec, gross);
+  const refundDue = Math.max(0, Math.min(paidTowardCancel - penalty, gross - penalty));
+  return { isFull, pax, gross, penalty, refundDue,
+    penaltyPct: gross>0 ? Math.round(penalty/gross*100) : 0 };
+};
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
 
@@ -539,6 +605,7 @@ const initDeal = {
   visaVendors:[emptyVisaVendor()],
   clientPayments:[],
   refunds:[],
+  cancellations:[],
   pricingRows:[], usePricingTotal:false,
   tiers:defaultTiers(), useTiers:false,
   enquiryId:"",        // shared across every destination package of one client enquiry
@@ -553,7 +620,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","attachments","pricingRows"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   // Tiered options — guarantee 3 tiers exist for older deals
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
@@ -566,6 +633,9 @@ const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   // Heal legacy stage/status into the unified list, then auto-complete past trips
   x.stage = stageOf(x);
   if(shouldAutoComplete(x)) x.stage = "Completed";
+  // A confirmed full cancellation drives the deal to Cancelled automatically.
+  const activeFullCxl=(x.cancellations||[]).some(c=>c.type==="Full Cancellation" && c.status!=="Pending");
+  if(activeFullCxl) x.stage = "Cancelled";
   x.status = STAGE_TO_STATUS[x.stage] || x.status || "Not Actioned";
   return x; };
 const saveDeal = (d) => { try { localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); } catch(e){} };
@@ -1589,6 +1659,34 @@ ${text}
   const addRefund=()=>setDeal(d=>({...d,refunds:[...(d.refunds||[]),emptyRefund()]}));
   const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
   const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
+
+  // ── Cancellation handlers ──
+  const addCancellation=()=>setDeal(d=>{
+    const c=emptyCancellation();
+    // Pre-fill a sensible slab % from time-to-travel so the user starts close.
+    const td=travelDateOf(d);
+    if(td){ const days=Math.round((new Date(td)-new Date())/86400000);
+      c.slabPct = days>=31?10:days>=16?50:days>=8?75:100; }
+    return {...d,cancellations:[...(d.cancellations||[]),c]};
+  });
+  const updCancellation=(cid,key,val)=>setDeal(d=>({...d,cancellations:(d.cancellations||[]).map(c=>c.id===cid?{...c,[key]:val}:c)}));
+  const rmCancellation=(cid)=>setDeal(d=>{
+    const next=(d.cancellations||[]).filter(c=>c.id!==cid);
+    // If removing the cancellation that forced this deal to Cancelled, let it
+    // fall back to a sensible open stage.
+    const stillCancelled=next.some(c=>c.type==="Full Cancellation" && c.status!=="Pending");
+    const nd={...d,cancellations:next};
+    if(!stillCancelled && stageOf(d)==="Cancelled") { nd.stage="Booked"; nd.status="Booked"; }
+    return nd;
+  });
+  // Confirming a cancellation: move it out of Pending and (for full) flip stage.
+  const confirmCancellation=(cid,newStatus)=>setDeal(d=>{
+    const cancellations=(d.cancellations||[]).map(c=>c.id===cid?{...c,status:newStatus}:c);
+    const nd={...d,cancellations};
+    const c=cancellations.find(x=>x.id===cid);
+    if(c && c.type==="Full Cancellation" && newStatus!=="Pending"){ nd.stage="Cancelled"; nd.status="Cancelled"; }
+    return nd;
+  });
   const printRefundReceipt=(r)=>{
     const amt=Number(r.amount)||0;
     const w=window.open("","_blank"); if(!w){window.veToast&&window.veToast("Popup blocked","error");return;}
@@ -4107,6 +4205,86 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* ══ CANCELLATION LOG ══ */}
+            <div className="card" style={{borderColor:"#b91c1c"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>⛔ Cancellation Log</span>
+                <button onClick={addCancellation} className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>+ Record Cancellation</button>
+              </div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Full ya partial cancellation record karo — penalty aur client ko refund automatically nikal aata hai. Full cancellation confirm karte hi deal apne-aap <b>Cancelled</b> ho jaata hai.</div>
+
+              {(deal.cancellations||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:12.5,padding:"14px 0"}}>Koi cancellation nahi. Sab kuch on track ✅</div>}
+
+              {(deal.cancellations||[]).map(c=>{
+                const R=cancelCompute(c,deal);
+                const pending=c.status==="Pending";
+                return <div key={c.id} style={{border:"1px solid "+(pending?"#f3c6c6":"#e3eaf7"),background:pending?"#fffafa":"#fbfdff",borderRadius:13,padding:"14px 15px",marginBottom:11}}>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:11}}>
+                    <select value={c.type} onChange={e=>updCancellation(c.id,"type",e.target.value)}
+                      style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:12,fontWeight:800,color:c.type==="Full Cancellation"?"#b91c1c":"#c2410c",background:"#fff"}}>
+                      {CANCEL_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <select value={c.reason} onChange={e=>updCancellation(c.id,"reason",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:12,background:"#fff"}}>
+                      {CANCEL_REASONS.map(r=><option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <input type="date" value={c.date} onChange={e=>updCancellation(c.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:12}}/>
+                    <span style={{marginLeft:"auto",fontSize:10,fontWeight:800,padding:"3px 9px",borderRadius:20,
+                      background:c.status==="Pending"?"#fef3c7":c.status==="No Refund Due"?"#f1f5f9":"#e6f7ee",
+                      color:c.status==="Pending"?"#92400e":c.status==="No Refund Due"?"#64748b":"#15803d"}}>{c.status}</span>
+                    <button onClick={()=>rmCancellation(c.id)} title="Delete" style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:14,fontWeight:700}}>✕</button>
+                  </div>
+
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:9,marginBottom:11}}>
+                    {c.type==="Partial Cancellation"&&<div>
+                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelled</div>
+                      <input type="number" value={c.paxCancelled} onChange={e=>updCancellation(c.id,"paxCancelled",e.target.value)} placeholder={"of "+R.pax} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                    </div>}
+                    <div>
+                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Cancelled Value ₹</div>
+                      <input type="number" value={c.cancelledValue} onChange={e=>updCancellation(c.id,"cancelledValue",e.target.value)} placeholder={"auto "+R.gross} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Penalty</div>
+                      <div style={{display:"flex",gap:4}}>
+                        <select value={c.penaltyMode} onChange={e=>updCancellation(c.id,"penaltyMode",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"8px 4px",fontSize:11}}>
+                          <option value="slab">% slab</option><option value="amount">₹ fixed</option>
+                        </select>
+                        {c.penaltyMode==="amount"
+                          ? <input type="number" value={c.penaltyAmount} onChange={e=>updCancellation(c.id,"penaltyAmount",e.target.value)} placeholder="₹" style={{width:"100%",minWidth:0,border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                          : <input type="number" value={c.slabPct} onChange={e=>updCancellation(c.id,"slabPct",e.target.value)} placeholder="%" style={{width:"100%",minWidth:0,border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {c.penaltyMode==="slab"&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:11}}>
+                    {CANCEL_SLAB.map(s=><button key={s.pct} onClick={()=>updCancellation(c.id,"slabPct",s.pct)}
+                      style={{border:"1px solid "+(Number(c.slabPct)===s.pct?"#b91c1c":"#e3eaf7"),background:Number(c.slabPct)===s.pct?"#fdf1f1":"#fff",color:Number(c.slabPct)===s.pct?"#b91c1c":"#6b7a99",borderRadius:20,padding:"4px 10px",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                      {s.label} · {s.pct}%</button>)}
+                  </div>}
+
+                  {/* Outcome summary */}
+                  <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:11}}>
+                    <div style={{flex:"1 1 90px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Cancelled</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#fff"}}>{fmtINR(R.gross)}</div></div>
+                    <div style={{flex:"1 1 90px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Penalty ({R.penaltyPct}%)</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#f0a04b"}}>{fmtINR(R.penalty)}</div></div>
+                    <div style={{flex:"1 1 90px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Refund to Client</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#4ade80"}}>{fmtINR(R.refundDue)}</div></div>
+                  </div>
+
+                  <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+                    <select value={c.status} onChange={e=>confirmCancellation(c.id,e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:11.5,fontWeight:700}}>
+                      {CANCEL_STATUS.map(s=><option key={s} value={s}>{s}</option>)}
+                    </select>
+                    {pending&&<button onClick={()=>confirmCancellation(c.id, R.refundDue>0?"Refund Approved":"No Refund Due")}
+                      style={{border:"none",borderRadius:8,padding:"8px 13px",cursor:"pointer",fontSize:11.5,fontWeight:800,background:"#b91c1c",color:"#fff"}}>
+                      ✓ Confirm Cancellation
+                    </button>}
+                    {R.refundDue>0 && !pending && <button onClick={()=>{ setDeal(d=>({...d,refunds:[...(d.refunds||[]),{...emptyRefund(),amount:String(R.refundDue),reason:"Travel Plan Cancelled",note:"Auto from cancellation ("+c.type+")",mode:c.refundMode}]})); confirmCancellation(c.id,"Refund Processed"); window.veToast&&window.veToast("Refund entry ban gayi — Refunds section mein dekho","success"); }}
+                      className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>↪ Create Refund Entry</button>}
+                    <input value={c.note} onChange={e=>updCancellation(c.id,"note",e.target.value)} placeholder="Note (optional)" style={{flex:1,minWidth:120,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:11.5}}/>
+                  </div>
+                </div>;
+              })}
             </div>
           </div>
         )}
