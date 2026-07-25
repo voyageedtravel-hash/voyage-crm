@@ -1605,7 +1605,8 @@ ${text}
   const AIX_SYS={
     flight:'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back (e.g. DEL→BKK, then BKK→SIN, then SIN→DEL, or DEL→LON…PAR→DEL) — put every leg in "sectors" in journey order, leave "returnSectors" empty. Detect the origin as the very first departure city and check whether the final leg lands back there to distinguish return vs multi-city. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
     hotel:'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
-    land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.'
+    land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
+    passport:'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ (the two machine-readable lines at the passport bottom) when available — it is the most reliable source.'
   };
   async function runAIExtract(){
     if(!aiX) return;
@@ -1652,6 +1653,28 @@ ${text}
         const nvs=hs.map(h=>({...emptyHotelVendor(),name:h.vendorName||"AI Extracted",city:h.city||"",hotelName:h.hotelName||"",starRating:h.starRating||"",roomCategory:h.roomCategory||"Deluxe Room",checkIn:h.checkIn||"",checkOut:h.checkOut||"",costPrice:h.costPrice!=null?String(h.costPrice):""}));
         setDeal(d=>({...d,hotelVendors:[...(d.hotelVendors||[]),...nvs]}));
         window.veToast("✅ "+nvs.length+" hotel(s) bhar diye — check/edit kar lo","success");
+      }else if(aiX==="passport"){
+        const ts=(j.travellers||[]);
+        if(!ts.length) throw new Error("no travellers");
+        setDeal(d=>{
+          let travellers=[...(d.travellers||[])];
+          ts.forEach(p=>{
+            const fn=(p.firstName||"").trim(), ln=(p.lastName||"LNU").trim()||"LNU";
+            const pno=(p.passportNo||"").trim();
+            // Merge: match by ID number first, then by exact name; else create new.
+            let idx=travellers.findIndex(t=>pno && (t.passportNo||"").trim().toUpperCase()===pno.toUpperCase());
+            if(idx<0) idx=travellers.findIndex(t=>(t.firstName||"").trim().toLowerCase()===fn.toLowerCase() && (t.lastName||"").trim().toLowerCase()===ln.toLowerCase());
+            const patch={firstName:fn,lastName:ln,
+              salutation:SALUTATIONS.includes(p.salutation)?p.salutation:"Mr",
+              dob:p.dob||"", idType:["Passport","Aadhaar","Other"].includes(p.idType)?p.idType:"Passport",
+              passportNo:pno, passportIssue:p.passportIssue||"", passportExpiry:p.passportExpiry||"",
+              nationality:p.nationality||"Indian"};
+            if(idx>=0) travellers[idx]={...travellers[idx],...patch};
+            else if(travellers.length<99) travellers.push({...emptyTraveller(travellers.length===0),...patch});
+          });
+          return {...d,travellers};
+        });
+        window.veToast("✅ "+ts.length+" traveller(s) ID se bhar diye — check kar lo","success");
       }else{
         if(!(j.itinerary||"").trim()) throw new Error("no itinerary");
         const nv={...emptyLandVendor(),name:j.vendorName||"AI Extracted",itinerary:j.itinerary,costPrice:j.costPrice!=null?String(j.costPrice):""};
@@ -1729,6 +1752,78 @@ ${text}
     window.veToast && window.veToast("Deal duplicate ho gayi — same package, payments/refunds fresh. Client name update kar lo ✏️","success");
   };
   // ── Traveller handlers (CRM 3.0) ──
+  // Per-pax pricing: traveller type → rate key
+  const TYPE_KEY={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
+  const paxTotalsOf=(v,travellers)=>{
+    const ids=v.travellerIds||[]; const r=v.paxRates||{};
+    let cost=0,sell=0;
+    (travellers||[]).filter(t=>ids.includes(t.id)).forEach(t=>{
+      const k=TYPE_KEY[t.type]||"adult";
+      cost+=Number(r[k+"C"])||0; sell+=Number(r[k+"S"])||0;
+    });
+    return {cost,sell};
+  };
+  // Mutate a vendor and, if per-pax pricing is on, rewrite its cost/sell totals
+  // from the assigned travellers × rates (in the vendor's own currency — the
+  // existing toINR conversion then applies whatever currency is selected).
+  const setVendorPax=(kindKey,vid,mut)=>setDeal(d=>{
+    const arr=(d[kindKey]||[]).map(v=>{
+      if(v.id!==vid) return v;
+      let nv=mut({...v});
+      if(nv.paxPricing){
+        const {cost,sell}=paxTotalsOf(nv,d.travellers||[]);
+        nv.costPrice=cost?String(cost):""; nv.sellingPrice=sell?String(sell):"";
+      }
+      return nv;
+    });
+    return {...d,[kindKey]:arr};
+  });
+  const toggleVT=(kindKey,vid,tid)=>setVendorPax(kindKey,vid,v=>({...v,travellerIds:(v.travellerIds||[]).includes(tid)?(v.travellerIds||[]).filter(x=>x!==tid):[...(v.travellerIds||[]),tid]}));
+  const selectAllVT=(kindKey,vid)=>setVendorPax(kindKey,vid,v=>({...v,travellerIds:(deal.travellers||[]).map(t=>t.id)}));
+  const updPaxRate=(kindKey,vid,rk,val)=>setVendorPax(kindKey,vid,v=>({...v,paxRates:{...(v.paxRates||{}),[rk]:val}}));
+  const togglePaxPricing=(kindKey,vid)=>setVendorPax(kindKey,vid,v=>({...v,paxPricing:!v.paxPricing}));
+  // Compact block rendered inside every vendor card: assign travellers +
+  // optional per-person pricing that auto-fills the vendor's totals.
+  const PaxBlock=(kindKey,v)=>{
+    const T=deal.travellers||[];
+    if(!T.length) return null;
+    const ids=v.travellerIds||[];
+    const typesOn=[...new Set(T.filter(t=>ids.includes(t.id)).map(t=>TYPE_KEY[t.type]||"adult"))];
+    const RATE_DEFS=[["adult","Adult"],["cwb","Child w/ bed"],["cwob","Child w/o bed"],["inf","Infant"]];
+    return <div style={{marginTop:10,border:"1px dashed #c9d6ef",borderRadius:10,padding:"10px 12px",background:"#fbfdff"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+        <span style={{fontSize:9.5,fontWeight:800,letterSpacing:.6,textTransform:"uppercase",color:"#334e82"}}>🧑‍🤝‍🧑 Travellers on this ({ids.length}/{T.length})</span>
+        <button onClick={()=>selectAllVT(kindKey,v.id)} style={{border:"none",background:"#eef1f7",color:"#334e82",borderRadius:6,padding:"2px 8px",fontSize:9.5,fontWeight:700,cursor:"pointer"}}>select all</button>
+        <label style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,fontSize:10.5,fontWeight:700,color:"#0e7490",cursor:"pointer"}}>
+          <input type="checkbox" checked={!!v.paxPricing} onChange={()=>togglePaxPricing(kindKey,v.id)}/> Per-person pricing
+        </label>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+        {T.map(t=>{
+          const on=ids.includes(t.id);
+          return <button key={t.id} onClick={()=>toggleVT(kindKey,v.id,t.id)}
+            style={{border:"1px solid "+(on?"#0891b2":"#e3eaf7"),background:on?"#e0f7fb":"#fff",color:on?"#0e7490":"#94a3b8",borderRadius:20,padding:"4px 11px",fontSize:10.5,fontWeight:700,cursor:"pointer"}}>
+            {on?"✓ ":""}{travellerName(t)}{t.type!=="Adult"?" · "+(t.type==="Infant"?"INF":t.type.includes("without")?"CNB":"CWB"):""}
+          </button>;
+        })}
+      </div>
+      {v.paxPricing&&<div style={{marginTop:10}}>
+        <div style={{fontSize:9.5,color:"#6b7a99",marginBottom:6}}>Rates in <b>{v.currency||"INR"}</b> — totals apne-aap Cost/Selling mein bhar jaate hain (currency conversion bhi auto).</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
+          {RATE_DEFS.filter(([k])=>typesOn.includes(k)||Number((v.paxRates||{})[k+"C"])||Number((v.paxRates||{})[k+"S"])).map(([k,label])=>(
+            <div key={k} style={{border:"1px solid #e3eaf7",borderRadius:8,padding:"7px 9px",background:"#fff"}}>
+              <div style={{fontSize:9,fontWeight:800,color:"#334e82",letterSpacing:.4,textTransform:"uppercase",marginBottom:4}}>{label}</div>
+              <div style={{display:"flex",gap:6}}>
+                <input type="number" value={(v.paxRates||{})[k+"C"]||""} onChange={e=>updPaxRate(kindKey,v.id,k+"C",e.target.value)} placeholder="Cost" className="mono" style={{width:"100%",minWidth:0,border:"1px solid #d4e0f5",borderRadius:6,padding:"5px 6px",fontSize:11}}/>
+                <input type="number" value={(v.paxRates||{})[k+"S"]||""} onChange={e=>updPaxRate(kindKey,v.id,k+"S",e.target.value)} placeholder="Sell" className="mono" style={{width:"100%",minWidth:0,border:"1px solid #d4e0f5",borderRadius:6,padding:"5px 6px",fontSize:11}}/>
+              </div>
+            </div>
+          ))}
+          {typesOn.length===0&&<div style={{fontSize:10.5,color:"#94a3b8"}}>Pehle upar travellers tick karo — unke type ke hisaab se rate fields aayenge.</div>}
+        </div>
+      </div>}
+    </div>;
+  };
   const addTraveller=()=>setDeal(d=>{
     if((d.travellers||[]).length>=99){ window.veToast&&window.veToast("Max 99 travellers","warning"); return d; }
     const lead=(d.travellers||[]).length===0;
@@ -3430,8 +3525,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       {aiX&&(
         <div onClick={()=>!aiXBusy&&setAiX(null)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"22px",boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
-            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":"Land / Itinerary"}</div>
-            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</div>
+            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":aiX==="passport"?"Passport / ID Details":"Land / Itinerary"}</div>
+            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>{aiX==="passport"?"Passport ya Aadhaar ki photo(s) paste/upload karo — AI naam, DOB, passport number, issue/expiry sab bhar dega. Surname na ho toh LNU daal dega.":<>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</>}</div>
             <div tabIndex={0}
               onPaste={e=>{
                 const items=Array.from(e.clipboardData.items||[]);
@@ -3937,6 +4032,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <button onClick={()=>rmFV(fv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
+                  {PaxBlock("flightVendors",fv)}
 
                   {/* Flight type selector */}
                   <div style={{display:"flex",gap:8,marginBottom:14}}>
@@ -4061,6 +4157,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <button onClick={()=>rmHV(hv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
+                  {PaxBlock("hotelVendors",hv)}
 
                   {/* Row 2: Hotel details */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.5fr 1.5fr 1fr 1fr 0.6fr",gap:10}}>
@@ -4166,6 +4263,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <button onClick={()=>rmLV(lv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
+                  {PaxBlock("landVendors",lv)}
 
                   {/* Itinerary box */}
                   <div>
@@ -4225,6 +4323,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <button onClick={()=>rmVisaV(vv.id)} className="btn btn-danger">✕</button>
                     </div>
                   </div>
+                  {PaxBlock("visaVendors",vv)}
                   {isExp&&(
                     <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
                       {vv.payments.map((pmt,pi)=>(
@@ -4253,7 +4352,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div className="card" style={{borderColor:"#0891b2"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:6}}>
                 <div className="sec-head" style={{color:"#0891b2",margin:0}}>🧑‍🤝‍🧑 Travellers <span style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>({(deal.travellers||[]).length})</span></div>
-                <div style={{display:"flex",gap:8}}>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={()=>setAiX("passport")} className="btn btn-sm" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Passport / ID Upload</button>
                   {(deal.travellers||[]).length===0 && <button onClick={seedTravellers} className="btn btn-sm" style={{background:"#e0f7fb",color:"#0e7490",border:"1px solid #a5e5ef"}}>✨ Auto-fill from {(Number(deal.adults)||0)+(Number(deal.children)||0)+(Number(deal.infants)||0)} pax</button>}
                   <button onClick={addTraveller} className="btn btn-ind">+ Add Traveller</button>
                 </div>
@@ -4279,7 +4379,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <select value={t.salutation} onChange={e=>updTraveller(t.id,"salutation",e.target.value)} style={inp3}>{SALUTATIONS.map(s=><option key={s}>{s}</option>)}</select></div>
                     <div><div style={lbl3}>First Name *</div>
                       <input value={t.firstName} onChange={e=>updTraveller(t.id,"firstName",e.target.value)} placeholder="required" style={{...inp3,borderColor:(t.firstName||"").trim()?"#d4e0f5":"#f3c6c6"}}/></div>
-                    <div><div style={lbl3}>Last Name / Surname *</div>
+                    <div><div style={lbl3}>Last Name / Surname * {!( t.lastName||"").trim()&&<button onClick={()=>updTraveller(t.id,"lastName","LNU")} title="Passport pe surname nahi hai — LNU (Last Name Unknown) daal do" style={{border:"none",background:"#eef1f7",color:"#334e82",borderRadius:6,padding:"0 6px",fontSize:9,fontWeight:800,cursor:"pointer",marginLeft:4}}>LNU?</button>}</div>
                       <input value={t.lastName} onChange={e=>updTraveller(t.id,"lastName",e.target.value)} placeholder="required" style={{...inp3,borderColor:(t.lastName||"").trim()?"#d4e0f5":"#f3c6c6"}}/></div>
                     <div><div style={lbl3}>Type</div>
                       <select value={t.type} onChange={e=>updTraveller(t.id,"type",e.target.value)} style={inp3}>{TRAVELLER_TYPES.map(s=><option key={s}>{s}</option>)}</select></div>
