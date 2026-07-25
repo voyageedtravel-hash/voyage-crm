@@ -290,25 +290,32 @@ const emptyRefund = () => ({id:uid(),amount:"",mode:REFUND_MODES[0],reason:REFUN
 // company/suppliers retain, and therefore the refund actually due to the
 // client — with a clear full-vs-partial distinction that drives the deal's
 // stage automatically.
-const CANCEL_TYPES = ["Full Cancellation","Partial Cancellation"];
 const CANCEL_REASONS = ["Client Request","Visa Rejection","Medical / Emergency","Supplier / Operational","Payment Not Received","Force Majeure","Other"];
 const CANCEL_STATUS = ["Pending","Refund Approved","Refund Processed","No Refund Due","Closed"];
+// ── CANCELLATION MODEL (component-level, per lead) ────────────────────
+// A cancellation can hit the whole package or specific components, and
+// different components can lose a different number of travellers. Each
+// affected component is a line whose profit is derived WITHOUT assuming how
+// the client's payment was split:
+//     My Profit (this component) = Client se rakha (penalty + profit)  −  Vendor ne kaata
+// "Vendor ko diya" is pulled live from that component's own vendor payments;
+// "Vendor ne kaata" (what the supplier retained) is what the user enters.
+const emptyCancelLine = () => ({
+  compKind:"", compId:"",      // which component (flight/hotel/land/visa + vendor id)
+  paxCancelled:"",             // travellers cancelling this component (Option B: per-component)
+  vendorRetained:"",           // ₹ the vendor kept out of what we'd paid them
+  vendorPenaltyToClient:"",    // ₹ penalty we charged the CLIENT (separate from profit)
+  myProfit:"",                 // ₹ profit we kept for ourselves on this component
+  clientRefund:"",             // ₹ going back to the client (auto or manual)
+  refundLocked:true,           // when true, clientRefund is auto = clientHeld - penalty - profit... (see compute)
+});
 const emptyCancellation = () => ({
   id:uid(),
-  type:"Full Cancellation",
+  scope:"full",                // "full" | "components"
   reason:"Client Request",
   status:"Pending",
   date:today(),
-  paxCancelled:"",              // travellers cancelling
-  amountMode:"total",           // "total" | "perPerson" — how the 3 fields are entered
-  // Open 3-way calculator. Fill any TWO, the third is derived:
-  //   Client Paid (cancelled portion)  =  Vendor Penalty  +  My Profit  +  Client Refund
-  // Vendor Penalty + My Profit = what the company keeps; the rest is refund.
-  lockedOut:"refund",           // which field is auto-calculated: "penalty" | "profit" | "refund"
-  vendorPenalty:"",             // total ₹ (or per-person, per amountMode)
-  myProfit:"",
-  clientRefund:"",
-  cancelledPaid:"",             // client-paid amount for cancelled pax (auto from deposit, editable)
+  lines:[],                    // array of emptyCancelLine — one per affected component
   refundMode:REFUND_MODES[0],
   approvedBy:REFUND_APPROVERS[0],
   refNo:"",
@@ -470,14 +477,19 @@ const dealFinance = (d) => {
   const cost=V.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
   const vendorPaid=V.reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
   const refunded=sum(d.refunds||[],"amount");
-  // Cancellations that have reached a refund/closed state also reduce revenue.
+  // Cancellations that have reached a confirmed state adjust the booking.
   const cxl=(d.cancellations||[]).filter(c=>["Refund Approved","Refund Processed","No Refund Due","Closed"].includes(c.status));
-  const cxlRefundDue=cxl.reduce((s,c)=>s+cancelCompute(c,d).refund,0);
-  const cxlPenalty=cxl.reduce((s,c)=>s+cancelCompute(c,d).penalty,0);
-  const cxlProfit=cxl.reduce((s,c)=>s+cancelCompute(c,d).profit,0);
+  const cxlR=cxl.map(c=>cancelCompute(c,d));
+  const cxlRefundDue=cxlR.reduce((s,r)=>s+r.refund,0);
+  const cxlPenalty=cxlR.reduce((s,r)=>s+r.penalty,0);
+  const cxlProfit=cxlR.reduce((s,r)=>s+r.profit,0);                       // profit kept on cancelled parts
+  const cxlOrigProfit=cxlR.reduce((s,r)=>s+r.cancelledCompOrigProfit,0);  // original profit of cancelled comps
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
+  // Revised booking profit: remove the cancelled components' original profit,
+  // add back what we actually kept on the cancellation.
+  const revisedProfit = gpm - cxlOrigProfit + cxlProfit;
   const bal=netSell-clientRec;
   return {
     sell, netSell, cost, refunded, gpm,
@@ -485,68 +497,68 @@ const dealFinance = (d) => {
     clientRec,
     clientDue:Math.max(0,bal),        // money still to COLLECT
     clientAdvance:Math.max(0,-bal),   // client overpaid → refundable
-    cxlRefundDue, cxlPenalty, cxlProfit,   // cancellation outcomes
+    cxlRefundDue, cxlPenalty, cxlProfit, cxlOrigProfit,   // cancellation outcomes
+    revisedProfit, hasCxl:cxl.length>0,
   };
 };
 const today = () => new Date().toISOString().split("T")[0];
-// Open 3-way cancellation calculator. The client-paid amount for the cancelled
-// travellers splits three ways:
-//     Client Paid  =  Vendor Penalty  +  My Profit  +  Client Refund
-// The user fills any TWO of {penalty, profit, refund}; the third is derived.
-// "Retained" (what the company keeps) = penalty + profit. Amounts can be
-// entered per-person or as a total. No dependence on package cost, so parking
-// the whole selling price in one component never distorts anything.
+// Enumerate a deal's real components as pickable cancellation targets, each
+// with a human label and the amount already paid to that vendor (from CRM).
+const dealComponents = (d) => {
+  const out=[];
+  const add=(kind,arr,labeler)=>(arr||[]).forEach(v=>{
+    const name=(v.name||"").trim();
+    out.push({ compKind:kind, compId:v.id, vendorName:name||kind,
+      label:labeler(v), paidToVendor:sum(v.payments||[],"amount"),
+      cost:toINR(v.costPrice,v.currency,v.exchangeRate),
+      sell:toINR(v.sellingPrice,v.currency,v.exchangeRate) });
+  });
+  add("flight", d.flightVendors, v=>{
+    const s=(v.sectors||[]).filter(x=>x.from||x.to);
+    const route=s.length?`${s[0].from||"?"}–${s[s.length-1].to||"?"}`:"";
+    return `Flight — ${(v.name||"Airline").trim()}${route?" ("+route+")":""}`;
+  });
+  add("hotel", d.hotelVendors, v=>`Hotel — ${(v.hotelName||v.name||"Stay").trim()}${v.city?" ("+v.city+")":""}`);
+  add("land", d.landVendors, v=>`Land — ${(v.name||"Transfers").trim()}`);
+  add("visa", d.visaVendors, v=>`Visa — ${(v.name||"Visa").trim()}`);
+  return out.filter(c=>c.vendorName||c.cost||c.sell);   // drop fully-empty placeholder rows
+};
+const compById = (d, kind, id) => dealComponents(d).find(c=>c.compKind===kind && c.compId===id);
+
+// Compute one cancellation's outcome across all its component lines.
+//   Per component:  My Profit = (penalty to client + my profit)  −  vendor retained
+//   Refund (auto)   = client's paid share for this component − penalty − profit
+// Nothing is inferred from a % split of the client's total payment.
 const cancelCompute = (c, d) => {
-  const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
-  const ts=tierSellINR(d);
-  const sell = ts!=null ? ts : V.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
-  const clientRec = sum(d.clientPayments||[],"amount");
-  const paxTotal = (Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
-  const isFull = c.type === "Full Cancellation";
-  const nCancel = isFull ? (paxTotal||1) : (Number(c.paxCancelled)||0);
-  const per = c.amountMode==="perPerson";
-  const div = per ? (nCancel||1) : 1;   // divisor to turn totals into per-person for display
-
-  // Client-paid amount attributable to the cancelled travellers.
-  // Auto = client's received money × (cancelled pax / total pax); editable.
-  let paidTotal = Number(c.cancelledPaid)||0;
-  if(!paidTotal){
-    if(isFull) paidTotal = clientRec;
-    else if(paxTotal>0 && nCancel>0) paidTotal = Math.round(clientRec/paxTotal*nCancel);
-  }
-
-  // Read the three fields, converting per-person entries to totals.
-  const toTotal = (v)=> (Number(v)||0) * (per ? nCancel : 1);
-  let penalty = toTotal(c.vendorPenalty);
-  let profit  = toTotal(c.myProfit);
-  let refund  = toTotal(c.clientRefund);
-
-  // Derive whichever field the user left as the "locked out" (auto) one.
-  const has = (v)=> v!=="" && v!==null && v!==undefined;
-  const lk = c.lockedOut||"refund";
-  if(lk==="refund")  refund  = paidTotal - penalty - profit;
-  else if(lk==="penalty") penalty = paidTotal - profit - refund;
-  else if(lk==="profit")  profit  = paidTotal - penalty - refund;
-  // If the chosen auto field was actually typed into, respect the two that ARE
-  // filled and still derive the empty one (keeps it forgiving).
-  if(lk!=="refund" && !has(c.vendorPenalty) && has(c.myProfit) && has(c.clientRefund)) penalty = paidTotal - profit - refund;
-  if(lk!=="profit"  && !has(c.myProfit) && has(c.vendorPenalty) && has(c.clientRefund)) profit  = paidTotal - penalty - refund;
-  if(lk!=="refund"  && !has(c.clientRefund) && has(c.vendorPenalty) && has(c.myProfit)) refund  = paidTotal - penalty - profit;
-
-  penalty=Math.round(penalty); profit=Math.round(profit); refund=Math.round(refund);
-  const retained = penalty + profit;          // what the company keeps in total
-  const overflow = (penalty+profit+refund) - paidTotal;   // ≠0 ⇒ inputs don't reconcile
-
-  return { isFull, paxTotal, nCancel, per, div,
-    paidTotal, penalty, profit, refund, retained, overflow,
-    isLoss: profit<0,
-    // per-person views
-    paidPP:  nCancel>0?Math.round(paidTotal/nCancel):paidTotal,
-    penaltyPP:nCancel>0?Math.round(penalty/nCancel):penalty,
-    profitPP: nCancel>0?Math.round(profit/nCancel):profit,
-    refundPP: nCancel>0?Math.round(refund/nCancel):refund,
-    dealProfit: sell, // unused placeholder kept for compatibility
-  };
+  const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
+  const lines=(c.lines||[]).map(ln=>{
+    const comp=compById(d, ln.compKind, ln.compId) || {paidToVendor:0,sell:0,cost:0,vendorName:ln.compId,label:"(removed component)"};
+    const nCancel=Number(ln.paxCancelled)||0;
+    const vendorRetained=Number(ln.vendorRetained)||0;               // real liability
+    const penalty=Number(ln.vendorPenaltyToClient)||0;              // charged to client
+    const profit=Number(ln.myProfit)||0;                            // kept for us
+    // Client's paid share for THIS component's cancelled pax — used only to
+    // suggest a refund, never to compute profit. Per-head share of what the
+    // client would owe for this component (its selling price), capped by pax.
+    const perHeadSell = paxTotal>0 ? comp.sell/paxTotal : comp.sell;
+    const clientHeldForComp = Math.round(perHeadSell * (nCancel||paxTotal||1));
+    const clientKept = penalty + profit;                            // what we DON'T return
+    let refund = ln.refundLocked ? Math.max(0, clientHeldForComp - clientKept) : (Number(ln.clientRefund)||0);
+    // Net profit for the company on this component.
+    const netProfit = (penalty + profit) - vendorRetained;
+    return { ...ln, comp, nCancel, vendorRetained, penalty, profit, refund,
+      paidToVendor:comp.paidToVendor, clientHeldForComp, netProfit,
+      isLoss:netProfit<0, label:comp.label };
+  });
+  const totRefund=lines.reduce((s,l)=>s+l.refund,0);
+  const totVendorRetained=lines.reduce((s,l)=>s+l.vendorRetained,0);
+  const totPenalty=lines.reduce((s,l)=>s+l.penalty,0);
+  const totProfit=lines.reduce((s,l)=>s+l.netProfit,0);
+  // Original profit of the components being cancelled (to revise booking profit).
+  const cancelledCompOrigProfit=lines.reduce((s,l)=>s+((l.comp.sell||0)-(l.comp.cost||0)),0);
+  return { paxTotal, lines,
+    refund:totRefund, penalty:totPenalty, vendorRetained:totVendorRetained,
+    profit:totProfit, isLoss:totProfit<0, cancelledCompOrigProfit };
 };
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -664,7 +676,7 @@ const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   x.stage = stageOf(x);
   if(shouldAutoComplete(x)) x.stage = "Completed";
   // A confirmed full cancellation drives the deal to Cancelled automatically.
-  const activeFullCxl=(x.cancellations||[]).some(c=>c.type==="Full Cancellation" && c.status!=="Pending");
+  const activeFullCxl=(x.cancellations||[]).some(c=>c.scope==="full" && c.status!=="Pending");
   if(activeFullCxl) x.stage = "Cancelled";
   x.status = STAGE_TO_STATUS[x.stage] || x.status || "Not Actioned";
   return x; };
@@ -1690,24 +1702,50 @@ ${text}
   const updRefund=(rid,key,val)=>setDeal(d=>({...d,refunds:(d.refunds||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
   const rmRefund=(rid)=>setDeal(d=>({...d,refunds:(d.refunds||[]).filter(r=>r.id!==rid)}));
 
-  // ── Cancellation handlers ──
+  // ── Cancellation handlers (component-level) ──
   const addCancellation=()=>setDeal(d=>({...d,cancellations:[...(d.cancellations||[]),emptyCancellation()]}));
-  const updCancellation=(cid,key,val)=>setDeal(d=>({...d,cancellations:(d.cancellations||[]).map(c=>c.id===cid?{...c,[key]:val}:c)}));
+  const updCancellation=(cid,key,val)=>setDeal(d=>{
+    let cancellations=(d.cancellations||[]).map(c=>c.id===cid?{...c,[key]:val}:c);
+    // When scope flips to "full", auto-load every component as a cancel line.
+    if(key==="scope" && val==="full"){
+      cancellations=cancellations.map(c=>{
+        if(c.id!==cid) return c;
+        const comps=dealComponents(d);
+        const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
+        return {...c, lines: comps.map(comp=>({...emptyCancelLine(), compKind:comp.compKind, compId:comp.compId, paxCancelled:String(paxTotal||"")}))};
+      });
+    }
+    if(key==="scope" && val==="components"){
+      cancellations=cancellations.map(c=>c.id===cid?{...c, lines:[]}:c);
+    }
+    return {...d,cancellations};
+  });
   const rmCancellation=(cid)=>setDeal(d=>{
     const next=(d.cancellations||[]).filter(c=>c.id!==cid);
-    // If removing the cancellation that forced this deal to Cancelled, let it
-    // fall back to a sensible open stage.
-    const stillCancelled=next.some(c=>c.type==="Full Cancellation" && c.status!=="Pending");
+    const stillCancelled=next.some(c=>c.scope==="full" && c.status!=="Pending");
     const nd={...d,cancellations:next};
     if(!stillCancelled && stageOf(d)==="Cancelled") { nd.stage="Booked"; nd.status="Booked"; }
     return nd;
   });
-  // Confirming a cancellation: move it out of Pending and (for full) flip stage.
+  // Toggle a component in/out of a "components"-scope cancellation.
+  const toggleCancelComp=(cid,comp)=>setDeal(d=>({...d,cancellations:(d.cancellations||[]).map(c=>{
+    if(c.id!==cid) return c;
+    const exists=(c.lines||[]).some(l=>l.compKind===comp.compKind && l.compId===comp.compId);
+    const lines=exists
+      ? c.lines.filter(l=>!(l.compKind===comp.compKind && l.compId===comp.compId))
+      : [...(c.lines||[]), {...emptyCancelLine(), compKind:comp.compKind, compId:comp.compId}];
+    return {...c, lines};
+  })}));
+  const updCancelLine=(cid,compKind,compId,key,val)=>setDeal(d=>({...d,cancellations:(d.cancellations||[]).map(c=>{
+    if(c.id!==cid) return c;
+    return {...c, lines:(c.lines||[]).map(l=>(l.compKind===compKind && l.compId===compId)?{...l,[key]:val}:l)};
+  })}));
+  // Confirming a cancellation: move out of Pending and (for full scope) flip stage.
   const confirmCancellation=(cid,newStatus)=>setDeal(d=>{
     const cancellations=(d.cancellations||[]).map(c=>c.id===cid?{...c,status:newStatus}:c);
     const nd={...d,cancellations};
     const c=cancellations.find(x=>x.id===cid);
-    if(c && c.type==="Full Cancellation" && newStatus!=="Pending"){ nd.stage="Cancelled"; nd.status="Cancelled"; }
+    if(c && c.scope==="full" && newStatus!=="Pending"){ nd.stage="Cancelled"; nd.status="Cancelled"; }
     return nd;
   });
   const printRefundReceipt=(r)=>{
@@ -4236,22 +4274,19 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>⛔ Cancellation Log</span>
                 <button onClick={addCancellation} className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>+ Record Cancellation</button>
               </div>
-              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Full ya partial cancellation record karo — penalty aur client ko refund automatically nikal aata hai. Full cancellation confirm karte hi deal apne-aap <b>Cancelled</b> ho jaata hai.</div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Poora package ya sirf kuch components cancel karo. Har component pe: kitne log, vendor ne kitna kaata, client se penalty, aur apna profit — refund aur booking ka naya profit auto nikal aata hai.</div>
 
               {(deal.cancellations||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:12.5,padding:"14px 0"}}>Koi cancellation nahi. Sab kuch on track ✅</div>}
 
               {(deal.cancellations||[]).map(c=>{
                 const R=cancelCompute(c,deal);
                 const pending=c.status==="Pending";
-                const per=c.amountMode==="perPerson";
-                const setLock=(f)=>updCancellation(c.id,"lockedOut",f);
-                const money=(x)=>"₹"+Math.round(x).toLocaleString("en-IN");
-                return <div key={c.id} style={{border:"1px solid "+(pending?"#f3c6c6":"#e3eaf7"),background:pending?"#fffafa":"#fbfdff",borderRadius:13,padding:"14px 15px",marginBottom:11}}>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:11}}>
-                    <select value={c.type} onChange={e=>updCancellation(c.id,"type",e.target.value)}
-                      style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:12,fontWeight:800,color:c.type==="Full Cancellation"?"#b91c1c":"#c2410c",background:"#fff"}}>
-                      {CANCEL_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                    </select>
+                const comps=dealComponents(deal);
+                const money=(x)=>"₹"+Math.round(x||0).toLocaleString("en-IN");
+                const inLine=(comp)=>(c.lines||[]).some(l=>l.compKind===comp.compKind && l.compId===comp.compId);
+                return <div key={c.id} style={{border:"1px solid "+(pending?"#f3c6c6":"#e3eaf7"),background:pending?"#fffafa":"#fbfdff",borderRadius:13,padding:"14px 15px",marginBottom:12}}>
+                  {/* Header */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
                     <select value={c.reason} onChange={e=>updCancellation(c.id,"reason",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:12,background:"#fff"}}>
                       {CANCEL_REASONS.map(r=><option key={r} value={r}>{r}</option>)}
                     </select>
@@ -4262,91 +4297,98 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <button onClick={()=>rmCancellation(c.id)} title="Delete" style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:14,fontWeight:700}}>✕</button>
                   </div>
 
-                  {/* Pax + client-paid base */}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:9,marginBottom:11}}>
-                    {c.type==="Partial Cancellation"
-                      ? <div>
-                          <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelled</div>
-                          <input type="number" value={c.paxCancelled} onChange={e=>updCancellation(c.id,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
-                        </div>
-                      : <div>
-                          <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Pax Cancelling</div>
-                          <div style={{padding:"8px",fontSize:12,color:"#0f2350",fontWeight:700,background:"#f4f7fc",borderRadius:8,border:"1px solid #e3eaf7"}}>{R.nCancel} (all)</div>
-                        </div>}
-                    <div>
-                      <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.8,textTransform:"uppercase",marginBottom:3}}>Client Paid (cancelled pax)</div>
-                      <input type="number" value={c.cancelledPaid} onChange={e=>updCancellation(c.id,"cancelledPaid",e.target.value)} placeholder={"auto "+R.paidTotal} title="In cancelled travellers ne jitna deposit diya. Auto = total deposit ka per-head share." style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
-                      <div style={{fontSize:9.5,color:"#94a3b8",marginTop:2}}>{R.nCancel>0?money(R.paidPP)+"/person":""}</div>
-                    </div>
+                  {/* STEP 1 — scope */}
+                  <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>1 · Kya cancel hua?</div>
+                  <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+                    {[["full","🚫 Poora Package"],["components","🧩 Kuch Components"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>updCancellation(c.id,"scope",v)}
+                        style={{border:"1px solid "+(c.scope===v?"#b91c1c":"#d4e0f5"),background:c.scope===v?"#fdf1f1":"#fff",
+                          color:c.scope===v?"#b91c1c":"#6b7a99",borderRadius:9,padding:"9px 15px",cursor:"pointer",fontSize:12.5,fontWeight:800}}>{l}</button>
+                    ))}
                   </div>
 
-                  {/* Open 3-way calculator */}
-                  <div style={{background:"#f8fafd",border:"1px solid #e3eaf7",borderRadius:11,padding:"12px 13px",marginBottom:11}}>
-                    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
-                      <span style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase"}}>Cancellation Calculator</span>
-                      <span style={{fontSize:10,color:"#94a3b8"}}>— koi bhi 2 bharo, teesra auto</span>
-                      <div style={{marginLeft:"auto",display:"flex",border:"1px solid #d4e0f5",borderRadius:7,overflow:"hidden"}}>
-                        {[["total","Total ₹"],["perPerson","Per Person ₹"]].map(([v,l])=>(
-                          <button key={v} onClick={()=>updCancellation(c.id,"amountMode",v)}
-                            style={{border:"none",padding:"5px 10px",fontSize:11,fontWeight:800,cursor:"pointer",
-                              background:c.amountMode===v?"#0d1b3e":"#fff",color:c.amountMode===v?"#fff":"#6b7a99"}}>{l}</button>
-                        ))}
-                      </div>
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:9}}>
-                      {[
-                        {name:"penalty", label:"Vendor Penalty", raw:c.vendorPenalty, comp:R.penalty, key:"vendorPenalty", hint:"Jo vendor/airline ne cancellation charge liya"},
-                        {name:"profit",  label:"Mera Profit",    raw:c.myProfit,     comp:R.profit,  key:"myProfit",     hint:"Is cancellation pe aap kitna rakhna chahte ho"},
-                        {name:"refund",  label:"Client Refund",   raw:c.clientRefund, comp:R.refund,  key:"clientRefund", hint:"Client ko wapas jaayega"},
-                      ].map(f=>{
-                        const isAuto=c.lockedOut===f.name;
-                        const shown=isAuto ? (per?(R.nCancel>0?Math.round(f.comp/R.nCancel):f.comp):f.comp) : f.raw;
-                        return <div key={f.name} title={f.hint}
-                          style={{border:"1px solid "+(isAuto?"#0891b2":"#d4e0f5"),borderRadius:9,padding:"9px 10px",
-                            background:isAuto?"#ecfeff":"#fff",position:"relative"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                            <span style={{fontSize:9.5,color:isAuto?"#0e7490":"#6b7a99",fontWeight:800,letterSpacing:.4,textTransform:"uppercase"}}>{f.label}</span>
-                            {isAuto
-                              ? <span style={{fontSize:8,fontWeight:800,color:"#0891b2",background:"#cffafe",borderRadius:10,padding:"1px 6px"}}>AUTO</span>
-                              : <button onClick={()=>setLock(f.name)} title="Isko auto-calculate banao" style={{border:"none",background:"transparent",color:"#c2d2ee",cursor:"pointer",fontSize:11,fontWeight:800}}>= auto</button>}
-                          </div>
-                          {isAuto
-                            ? <div className="mono" style={{fontSize:17,fontWeight:800,color:f.name==="profit"&&R.profit<0?"#dc2626":"#0f2350"}}>{money(shown)}</div>
-                            : <input type="number" value={f.raw} onChange={e=>updCancellation(c.id,f.key,e.target.value)}
-                                placeholder={per?"₹/person":"₹ total"} className="mono"
-                                style={{width:"100%",border:"none",outline:"none",fontSize:17,fontWeight:800,color:"#0f2350",background:"transparent",padding:0}}/>}
-                          {!isAuto && R.nCancel>0 && f.raw!=="" && <div style={{fontSize:9,color:"#94a3b8",marginTop:2}}>{per?money((Number(f.raw)||0)*R.nCancel)+" total":money(Math.round((Number(f.raw)||0)/R.nCancel))+"/person"}</div>}
-                        </div>;
+                  {/* STEP 2 — component picker (only for partial) */}
+                  {c.scope==="components"&&<div style={{marginBottom:14}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>2 · Kaunse components cancel huye?</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                      {comps.map(comp=>{
+                        const on=inLine(comp);
+                        return <button key={comp.compKind+comp.compId} onClick={()=>toggleCancelComp(c.id,comp)}
+                          style={{border:"1px solid "+(on?"#0891b2":"#d4e0f5"),background:on?"#e0f7fb":"#fff",borderRadius:9,padding:"8px 12px",cursor:"pointer",textAlign:"left"}}>
+                          <div style={{fontSize:11.5,fontWeight:800,color:on?"#0e7490":"#334e82"}}>{on?"✓ ":""}{comp.label}</div>
+                          <div style={{fontSize:9.5,color:"#94a3b8"}}>Vendor ko diya: {money(comp.paidToVendor)}</div>
+                        </button>;
                       })}
+                      {comps.length===0&&<div style={{fontSize:12,color:"#94a3b8"}}>Is deal mein koi component nahi mila.</div>}
                     </div>
-                    {Math.abs(R.overflow)>1 && <div style={{fontSize:10.5,color:"#b45309",marginTop:8}}>⚠️ Penalty + Profit + Refund (₹{(R.penalty+R.profit+R.refund).toLocaleString("en-IN")}) client-paid (₹{R.paidTotal.toLocaleString("en-IN")}) se {R.overflow>0?"zyada":"kam"} hai — ek field ko "= auto" pe daal do ya amount check karo.</div>}
-                  </div>
+                  </div>}
 
-                  {/* Outcome */}
-                  <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
-                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Client Paid</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#fff"}}>{money(R.paidTotal)}</div></div>
-                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
-                    <div style={{flex:"1 1 78px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Vendor Penalty</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#f0a04b"}}>{money(R.penalty)}</div></div>
-                    <div style={{flex:"1 1 78px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
-                      <div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>{R.isLoss?"My Loss":"My Profit"}</div>
+                  {/* STEP 3 — per-component calculator lines */}
+                  {(c.lines||[]).length>0&&<div style={{marginBottom:8}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>{c.scope==="full"?"2":"3"} · Har component ka hisaab</div>
+                    {R.lines.map(L=>(
+                      <div key={L.compKind+L.compId} style={{border:"1px solid #e3eaf7",borderRadius:11,padding:"12px 13px",marginBottom:10,background:"#fff"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
+                          <span style={{fontSize:13,fontWeight:800,color:"#0f2350"}}>{L.label}</span>
+                          <span style={{fontSize:11,color:"#6b7a99"}}>Vendor ko diya: <b className="mono" style={{color:"#0f2350"}}>{money(L.paidToVendor)}</b></span>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:9,marginBottom:10}}>
+                          <div>
+                            <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Kitne log</div>
+                            <input type="number" value={L.paxCancelled} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,color:"#b45309",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Vendor ne kaata ₹</div>
+                            <input type="number" value={L.vendorRetained} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorRetained",e.target.value)} placeholder="0" title="Jo diya hua paisa vendor ne rakh liya (aapki asli liability)" style={{width:"100%",border:"1px solid #f3c6c6",borderRadius:8,padding:"8px",fontSize:12}}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Client se penalty ₹</div>
+                            <input type="number" value={L.vendorPenaltyToClient} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorPenaltyToClient",e.target.value)} placeholder="0" title="Jo cancellation charge aapne client se liya" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:9,color:"#15803d",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Mera profit ₹</div>
+                            <input type="number" value={L.profit} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"myProfit",e.target.value)} placeholder="0" title="Is cancellation pe apna extra profit (penalty se alag)" style={{width:"100%",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px",fontSize:12}}/>
+                          </div>
+                        </div>
+                        {/* line outcome */}
+                        <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11.5,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"8px 11px"}}>
+                          <span>Client ko refund: <b className="mono" style={{color:"#2563eb"}}>{money(L.refund)}</b></span>
+                          <span style={{marginLeft:"auto"}}>Net {L.isLoss?"loss":"profit"}: <b className="mono" style={{color:L.isLoss?"#dc2626":"#15803d"}}>{L.isLoss?"− ":""}{money(Math.abs(L.netProfit))}</b> <span style={{color:"#94a3b8"}}>(rakha {money(L.penalty+L.profit)} − vendor {money(L.vendorRetained)})</span></span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
+
+                  {/* SUMMARY */}
+                  {(c.lines||[]).length>0&&<><div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
+                    <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Total Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
+                    <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Vendor ne kaata</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#f0a04b"}}>{money(R.vendorRetained)}</div></div>
+                    <div style={{flex:"1 1 80px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
+                      <div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Cxl {R.isLoss?"Loss":"Profit"}</div>
                       <div className="mono" style={{fontSize:14,fontWeight:800,color:R.isLoss?"#f87171":"#4ade80"}}>{R.isLoss?"− ":""}{money(Math.abs(R.profit))}</div>
                     </div>
-                  </div>
+                    <div style={{flex:"1 1 90px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
+                      <div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Booking Naya Profit</div>
+                      <div className="mono" style={{fontSize:14,fontWeight:800,color:"#fff"}}>{money(dealFinance({...deal,cancellations:(deal.cancellations||[]).map(x=>x.id===c.id?{...c,status:"Refund Approved"}:x)}).revisedProfit)}</div>
+                    </div>
+                  </div></>}
 
+                  {/* Actions */}
                   <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
                     <select value={c.status} onChange={e=>confirmCancellation(c.id,e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:11.5,fontWeight:700}}>
                       {CANCEL_STATUS.map(s=><option key={s} value={s}>{s}</option>)}
                     </select>
-                    {pending&&<button onClick={()=>confirmCancellation(c.id, R.refund>0?"Refund Approved":"No Refund Due")}
+                    {pending&&(c.lines||[]).length>0&&<button onClick={()=>confirmCancellation(c.id, R.refund>0?"Refund Approved":"No Refund Due")}
                       style={{border:"none",borderRadius:8,padding:"8px 13px",cursor:"pointer",fontSize:11.5,fontWeight:800,background:"#b91c1c",color:"#fff"}}>
-                      ✓ Confirm Cancellation
+                      ✓ Confirm {c.scope==="full"?"Full ":""}Cancellation
                     </button>}
-                    {R.refund>0 && !pending && <button onClick={()=>{ setDeal(d=>({...d,refunds:[...(d.refunds||[]),{...emptyRefund(),amount:String(R.refund),reason:"Travel Plan Cancelled",note:"Auto from cancellation ("+c.type+")",mode:c.refundMode}]})); confirmCancellation(c.id,"Refund Processed"); window.veToast&&window.veToast("Refund entry ban gayi — Refunds section mein dekho","success"); }}
+                    {R.refund>0 && !pending && <button onClick={()=>{ setDeal(d=>({...d,refunds:[...(d.refunds||[]),{...emptyRefund(),amount:String(R.refund),reason:"Travel Plan Cancelled",note:"Auto from cancellation",mode:c.refundMode}]})); confirmCancellation(c.id,"Refund Processed"); window.veToast&&window.veToast("Refund entry ban gayi — Refunds section mein dekho","success"); }}
                       className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>↪ Create Refund Entry</button>}
                     <input value={c.note} onChange={e=>updCancellation(c.id,"note",e.target.value)} placeholder="Note (optional)" style={{flex:1,minWidth:120,border:"1px solid #d4e0f5",borderRadius:8,padding:"7px 9px",fontSize:11.5}}/>
                   </div>
                 </div>;
               })}
+
             </div>
           </div>
         )}
