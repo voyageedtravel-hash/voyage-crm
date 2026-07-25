@@ -487,9 +487,18 @@ const dealFinance = (d) => {
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
+  // Original profit of cancelled components split into their sell/cost parts,
+  // so we can show "after cancellation" selling and cost, not just profit.
+  const cxlCompSell=cxlR.reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.comp.sell||0),0),0);
+  const cxlCompCost=cxlR.reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.comp.cost||0),0),0);
   // Revised booking profit: remove the cancelled components' original profit,
   // add back what we actually kept on the cancellation.
   const revisedProfit = gpm - cxlOrigProfit + cxlProfit;
+  // After-cancellation actuals:
+  //   selling  = surviving components' selling + what we kept from client on cancelled parts
+  //   cost     = surviving components' cost + what the vendor actually retained on cancelled parts
+  const afterSell = (netSell - cxlCompSell) + (cxlPenalty + cxlProfit);
+  const afterCost = (cost - cxlCompCost) + cxlR.reduce((s,r)=>s+r.vendorRetained,0);
   const bal=netSell-clientRec;
   return {
     sell, netSell, cost, refunded, gpm,
@@ -499,6 +508,7 @@ const dealFinance = (d) => {
     clientAdvance:Math.max(0,-bal),   // client overpaid → refundable
     cxlRefundDue, cxlPenalty, cxlProfit, cxlOrigProfit,   // cancellation outcomes
     revisedProfit, hasCxl:cxl.length>0,
+    afterSell, afterCost,             // after-cancellation actuals
   };
 };
 const today = () => new Date().toISOString().split("T")[0];
@@ -2065,7 +2075,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       const mon = dt ? new Date(dt).toLocaleDateString("en-GB",{month:"short",year:"numeric"}) : "Undated";
       if(!byMonth[key]) byMonth[key]={key,mon,deals:0,sell:0,cost:0,profit:0};
       const F=dealFinance(d);
-      byMonth[key].deals++; byMonth[key].sell+=F.netSell; byMonth[key].cost+=F.cost; byMonth[key].profit+=F.gpm;
+      byMonth[key].deals++; byMonth[key].sell+=(F.hasCxl?F.afterSell:F.netSell); byMonth[key].cost+=F.cost; byMonth[key].profit+=(F.hasCxl?F.revisedProfit:F.gpm);
     });
     const months = Object.values(byMonth).sort((a,b)=>a.key.localeCompare(b.key));
 
@@ -3027,11 +3037,13 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       const gpm=sell-cost;
       const gst=deals.reduce((s,d)=>s+dealGst(d),0);  // per-deal GST, not flat 18%
       const net=gpm-gst;
+      const anyCxl=F.some(f=>f.hasCxl);
       return {count:deals.length,sell,cost,gpm,gst,net,
         vendorPaid:add("vendorPaid"), vendorDue:add("vendorDue"),
         clientRec:add("clientRec"),
         clientDue:add("clientDue"),        // sum of positive dues — real money to collect
-        clientAdvance:add("clientAdvance") // overpayments, shown separately
+        clientAdvance:add("clientAdvance"),// overpayments, shown separately
+        afterSell:add("afterSell"), revisedProfit:add("revisedProfit"), anyCxl,
       };
     };
 
@@ -3229,6 +3241,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               {l:"Sale Price",v:fmtINR(B.sell),c:"#1a2c52"},
               {l:"Cost Price",v:fmtINR(B.cost),c:"#33446b"},
               {l:"Gross Profit",v:fmtINR(B.gpm),c:B.gpm>=0?"#10b981":"#ef4444"},
+              ...(B.anyCxl?[{l:"Profit After Cancellation",v:fmtINR(B.revisedProfit),c:B.revisedProfit>=0?"#0891b2":"#ef4444"}]:[]),
               {l:"Net (after GST)",v:fmtINR(B.net),c:B.net>=0?"#f97316":"#ef4444"},
               {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#4169E1"},
               {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981"},
@@ -3330,8 +3343,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <span title="Booking date">💰 {_shortD(_bd)}</span>
                     </div>
                   </div>
-                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>SELLING</div><div style={{fontFamily:"monospace",fontWeight:700}}>{fmtINR(dSell)}</div></div>
-                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div></div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>SELLING</div><div style={{fontFamily:"monospace",fontWeight:700}}>{fmtINR(dSell)}</div>{_F.hasCxl&&<div style={{fontSize:9,fontFamily:"monospace",color:"#0891b2"}} title="After cancellation">→ {fmtINR(_F.afterSell)}</div>}</div>
+                  <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>GPM</div><div style={{fontFamily:"monospace",fontWeight:700,color:dGpm>=0?"#10b981":"#ef4444"}}>{fmtINR(dGpm)}</div>{_F.hasCxl&&<div style={{fontSize:9,fontFamily:"monospace",color:_F.revisedProfit>=0?"#0891b2":"#ef4444"}} title="After cancellation">→ {fmtINR(_F.revisedProfit)}</div>}</div>
                   <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>RECEIVED</div><div style={{fontFamily:"monospace",fontWeight:700,color:"#10b981"}}>{fmtINR(dRec)}</div></div>
                   <div><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div><div style={{fontFamily:"monospace",fontWeight:700,color:(dSell-dRec)>0?"#f97316":"#10b981"}}>{fmtINR(dSell-dRec)}</div></div>
                     <div style={{textAlign:"right"}}>
