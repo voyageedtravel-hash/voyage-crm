@@ -545,17 +545,17 @@ const dealFinance = (d) => {
   const cxlPenalty=cxlR.reduce((s,r)=>s+r.penalty,0);
   const cxlProfit=cxlR.reduce((s,r)=>s+r.profit,0);                       // profit kept on cancelled parts
   const cxlOrigProfit=cxlR.reduce((s,r)=>s+r.cancelledCompOrigProfit,0);  // original profit of cancelled comps
-  const cxlCostReduction=cxlR.reduce((s,r)=>s+r.costReduction,0);   // cost that drops off
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
-  // A cancellation's effect on the booking, with both sides adjusted:
-  //   selling drops by the refund paid back to the client
-  //   cost drops by the cancelled travellers' cost, minus whatever the vendor
-  //   still retained (that retained amount stays a real cost)
-  const afterSell = netSell - cxlRefundDue;
-  const afterCost = cost - cxlCostReduction;
-  const revisedProfit = afterSell - afterCost;
+  // Once a cancellation is CONFIRMED, the vendor cost/selling have already been
+  // reduced in place, so `sell`/`cost` above are the post-cancellation figures.
+  // The only thing not yet inside them is the cash refunded to the client,
+  // which `refunded` already subtracts from netSell. So after-figures are just
+  // the current actuals — no second deduction (that was double-counting).
+  const afterSell = netSell;
+  const afterCost = cost;
+  const revisedProfit = gpm;
   const bal=netSell-clientRec;
   return {
     sell, netSell, cost, refunded, gpm,
@@ -2135,14 +2135,51 @@ ${text}
           });
         });
       }
-      // (3) remove cancelled travellers from component rosters + flag them
+      // (3) remove cancelled travellers from component rosters + flag them,
+      //     AND reduce that component's cost/selling by the cancelled share so
+      //     the vendor tabs and every total reflect the smaller booking.
       const cancelledEverywhere=new Set();
+      const TKX={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
+      const paxTotalX=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
       (c.lines||[]).forEach(ln=>{
-        if(!(ln.travellerIds||[]).length) return;
+        if(!(ln.travellerIds||[]).length && !Number(ln.paxCancelled)) return;
         const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
         const arrKey=KIND2ARR[ln.compKind]; if(!arrKey) return;
-        nd[arrKey]=(nd[arrKey]||[]).map(v=>v.id===ln.compId?{...v,travellerIds:(v.travellerIds||[]).filter(id=>!ln.travellerIds.includes(id))}:v);
-        if(c.scope==="full") ln.travellerIds.forEach(id=>cancelledEverywhere.add(id));
+        const nCancel=(ln.travellerIds||[]).length || Number(ln.paxCancelled)||0;
+        const vendorLoss=Number(ln.vendorRetained)||0;
+        const refundLine=Number(ln.clientRefund)||0;
+        nd[arrKey]=(nd[arrKey]||[]).map(v=>{
+          if(v.id!==ln.compId) return v;
+          const nv={...v, travellerIds:(v.travellerIds||[]).filter(id=>!(ln.travellerIds||[]).includes(id))};
+          // Cost drop: exact from per-person cost rates when present, else a
+          // per-head share × cancelled. Vendor-retained stays as real cost.
+          let cancelledCost=0, cancelledSell=0;
+          if((ln.travellerIds||[]).length && v.paxRates){
+            (d.travellers||[]).filter(t=>ln.travellerIds.includes(t.id)).forEach(t=>{
+              const k=TKX[t.type]||"adult";
+              cancelledCost+=toINR(Number((v.paxRates||{})[k+"C"])||0, v.currency, v.exchangeRate);
+              cancelledSell+=toINR(Number((v.paxRates||{})[k+"S"])||0, v.currency, v.exchangeRate);
+            });
+          }else if(nCancel>0 && paxTotalX>0){
+            cancelledCost=(toINR(v.costPrice,v.currency,v.exchangeRate))/paxTotalX*nCancel;
+            cancelledSell=(toINR(v.sellingPrice,v.currency,v.exchangeRate))/paxTotalX*nCancel;
+          }
+          // Convert the INR reductions back into the vendor's own currency.
+          const rate=(v.currency&&v.currency!=="INR")?(Number(v.exchangeRate)||1):1;
+          const costCut=Math.max(0, cancelledCost - vendorLoss)/rate;
+          const sellCut=cancelledSell/rate;
+          const oldCost=Number(v.costPrice)||0, oldSell=Number(v.sellingPrice)||0;
+          nv.costPrice = String(Math.max(0, Math.round((oldCost - costCut)*100)/100));
+          nv.sellingPrice = String(Math.max(0, Math.round((oldSell - sellCut)*100)/100));
+          if(nv.paxPricing){
+            // keep per-room/per-person totals consistent by dropping cancelled ids
+            nv.travellerIds=(nv.travellerIds||[]);
+          }
+          stamp("Component reduced by cancellation",
+            `${(v.name||v.hotelName||ln.compKind)}: ${nCancel} pax off · cost ${oldCost} → ${nv.costPrice}, selling ${oldSell} → ${nv.sellingPrice} (${v.currency||"INR"})${refundLine?` · refund ₹${refundLine.toLocaleString("en-IN")}`:""}`);
+          return nv;
+        });
+        if(c.scope==="full") (ln.travellerIds||[]).forEach(id=>cancelledEverywhere.add(id));
       });
       if(c.scope==="full"){
         // full scope: every listed traveller is off the trip
