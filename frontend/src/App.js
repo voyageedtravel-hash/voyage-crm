@@ -323,6 +323,24 @@ const emptyTraveller = (lead=false) => ({
   passportIssue:"", passportExpiry:"", nationality:"Indian",
 });
 const travellerName = (t) => `${t.salutation?t.salutation+" ":""}${(t.firstName||"").trim()} ${(t.lastName||"").trim()}`.trim() || "(unnamed)";
+// Age is what airlines and hotels bill on, and it's measured on the DATE OF
+// TRAVEL, not today — a child who turns 6 before departure is charged as one.
+const ageOn = (dob, onDate) => {
+  if(!dob) return null;
+  const b=new Date(dob), r=onDate?new Date(onDate):new Date();
+  if(isNaN(b)||isNaN(r)) return null;
+  let a=r.getFullYear()-b.getFullYear();
+  const m=r.getMonth()-b.getMonth();
+  if(m<0||(m===0&&r.getDate()<b.getDate())) a--;
+  return a<0?null:a;
+};
+// House rule: under 2 infant · up to 5 child without bed · 6–11 child with bed
+// · 12 and over adult. Always a suggestion — the user can override any row.
+const typeForAge = (age) => age==null ? null
+  : age<2 ? "Infant"
+  : age<=5 ? "Child (without bed)"
+  : age<12 ? "Child (with bed)"
+  : "Adult";
 
 // ── CANCELLATION MODEL (component-level, per lead) ────────────────────
 // A cancellation can hit the whole package or specific components, and
@@ -1757,12 +1775,14 @@ ${text}
             // Merge: match by ID number first, then by exact name; else create new.
             let idx=travellers.findIndex(t=>pno && (t.passportNo||"").trim().toUpperCase()===pno.toUpperCase());
             if(idx<0) idx=travellers.findIndex(t=>(t.firstName||"").trim().toLowerCase()===fn.toLowerCase() && (t.lastName||"").trim().toLowerCase()===ln.toLowerCase());
+            const sug=typeForAge(ageOn(p.dob, travelDateOf(d)));
             const patch={firstName:fn,lastName:ln,
               salutation:SALUTATIONS.includes(p.salutation)?p.salutation:"Mr",
               dob:p.dob||"", idType:["Passport","Aadhaar","Other"].includes(p.idType)?p.idType:"Passport",
+              ...(sug?{type:sug}:{}),
               passportNo:pno, passportIssue:p.passportIssue||"", passportExpiry:p.passportExpiry||"",
               nationality:p.nationality||"Indian"};
-            if(idx>=0) travellers[idx]={...travellers[idx],...patch};
+            if(idx>=0){ const keepType=travellers[idx].typeManual?{type:travellers[idx].type}:{}; travellers[idx]={...travellers[idx],...patch,...keepType}; }
             else if(travellers.length<99) travellers.push({...emptyTraveller(travellers.length===0),...patch});
           });
           return {...d,travellers};
@@ -1999,6 +2019,14 @@ ${text}
     if(t.id!==tid) return t;
     const nt={...t,[key]:val};
     if(key==="salutation" && SALUT_GENDER[val]) nt.gender=SALUT_GENDER[val];
+    // Entering a DOB suggests the traveller type from age at the travel date —
+    // but never overrides a type the user picked themselves.
+    if(key==="dob"){
+      const sug=typeForAge(ageOn(val, travelDateOf(d)));
+      if(sug && !t.typeManual) nt.type=sug;
+    }
+    // Choosing a type by hand locks it against further auto-suggestion.
+    if(key==="type") nt.typeManual=true;
     return nt;
   })}));
   const rmTraveller=(tid)=>setDeal(d=>{
@@ -4806,6 +4834,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 
               {(deal.travellers||[]).map((t,i)=>{
                 const nameMissing=!(t.firstName||"").trim() || !(t.lastName||"").trim();
+                const age=ageOn(t.dob, travelDateOf(deal));
+                const sugType=typeForAge(age);
                 const expSoon = t.passportExpiry && (new Date(t.passportExpiry)-new Date())/(1000*60*60*24) < 180;
                 return <div key={t.id} style={{border:"1px solid "+(t.isLead?"#c9942a":nameMissing?"#f3c6c6":"#e3eaf7"),borderRadius:12,padding:"13px 15px",marginBottom:10,background:t.isLead?"#fffdf6":"#fff"}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
@@ -4825,7 +4855,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <input value={t.lastName} onChange={e=>updTraveller(t.id,"lastName",e.target.value)} placeholder="required" style={{...inp3,borderColor:(t.lastName||"").trim()?"#d4e0f5":"#f3c6c6"}}/></div>
                     <div><div style={lbl3}>Type</div>
                       <select value={t.type} onChange={e=>updTraveller(t.id,"type",e.target.value)} style={inp3}>{TRAVELLER_TYPES.map(s=><option key={s}>{s}</option>)}</select></div>
-                    <div><div style={lbl3}>Date of Birth</div>
+                    <div><div style={lbl3}>Date of Birth {age!=null&&<span style={{color:"#0e7490",fontWeight:800}}>· {age}y</span>}</div>
                       <input type="date" value={t.dob} onChange={e=>updTraveller(t.id,"dob",e.target.value)} style={inp3}/></div>
                     <div><div style={lbl3}>ID Type</div>
                       <select value={t.idType} onChange={e=>updTraveller(t.id,"idType",e.target.value)} style={inp3}><option>Passport</option><option>Aadhaar</option><option>Other</option></select></div>
@@ -4836,6 +4866,11 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div><div style={lbl3}>Passport Expiry</div>
                       <input type="date" value={t.passportExpiry} onChange={e=>updTraveller(t.id,"passportExpiry",e.target.value)} style={{...inp3,borderColor:expSoon?"#f0a04b":"#d4e0f5"}}/></div></>}
                   </div>
+                  {sugType&&sugType!==t.type&&<div style={{fontSize:10.5,color:"#0e7490",marginTop:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>💡 Age {age}y ke hisaab se ye <b>{sugType}</b> hona chahiye.</span>
+                    <button onClick={()=>updTraveller(t.id,"type",sugType)} style={{border:"1px solid #a5e5ef",background:"#e0f7fb",color:"#0e7490",borderRadius:6,padding:"2px 9px",fontSize:9.5,fontWeight:800,cursor:"pointer"}}>Use {sugType}</button>
+                    <span style={{color:"#94a3b8"}}>ya jaise hai waise rehne do</span>
+                  </div>}
                   {expSoon&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Passport 6 mahine ke andar expire ho raha hai — travel se pehle check karo.</div>}
                 </div>;
               })}
