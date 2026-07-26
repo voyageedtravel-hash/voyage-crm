@@ -689,6 +689,7 @@ const initDeal = {
   adults:"2", children:"0", infants:"0", rooms:"1",
   travellers:[],   // CRM 3.0: populated at booking; empty = pre-booking mode
   auditLog:[],     // CRM 3.0: who changed what, when — shown in Summary
+  eTickets:[],     // CRM 3.0: AI-read tickets, re-issued under Voyage-Ed branding
   modeOfQuery:"Call", travelDates:"", destination:"", quoteValidTill:"",
   remarks:"",
   gstMode:"profit",
@@ -720,7 +721,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers","auditLog"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers","auditLog","eTickets"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   // Tiered options — guarantee 3 tiers exist for older deals
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
@@ -1634,6 +1635,7 @@ ${text}
     flight:'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back (e.g. DEL→BKK, then BKK→SIN, then SIN→DEL, or DEL→LON…PAR→DEL) — put every leg in "sectors" in journey order, leave "returnSectors" empty. Detect the origin as the very first departure city and check whether the final leg lands back there to distinguish return vs multi-city. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
     hotel:'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
     land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
+    ticket:'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed (they must match the passport). (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
     passport:'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ (the two machine-readable lines at the passport bottom) when available — it is the most reliable source.'
   };
   async function runAIExtract(){
@@ -1681,6 +1683,12 @@ ${text}
         const nvs=hs.map(h=>({...emptyHotelVendor(),name:h.vendorName||"AI Extracted",city:h.city||"",hotelName:h.hotelName||"",starRating:h.starRating||"",roomCategory:h.roomCategory||"Deluxe Room",checkIn:h.checkIn||"",checkOut:h.checkOut||"",costPrice:h.costPrice!=null?String(h.costPrice):""}));
         setDeal(d=>({...d,hotelVendors:[...(d.hotelVendors||[]),...nvs]}));
         window.veToast("✅ "+nvs.length+" hotel(s) bhar diye — check/edit kar lo","success");
+      }else if(aiX==="ticket"){
+        if(!j.pnr && !(j.segments||[]).length) throw new Error("no ticket data");
+        const t={id:uid(), pnr:(j.pnr||"").toUpperCase(), airlineCode:j.airlineCode||"", airlineName:j.airlineName||"",
+          issuedDate:j.issuedDate||"", passengers:(j.passengers||[]), segments:(j.segments||[])};
+        setDeal(d=>({...d,eTickets:[...(d.eTickets||[]),t]}));
+        window.veToast("✅ Ticket read — PNR "+(t.pnr||"?")+", "+(t.segments||[]).length+" segment(s)","success");
       }else if(aiX==="passport"){
         const ts=(j.travellers||[]);
         if(!ts.length) throw new Error("no travellers");
@@ -2530,6 +2538,122 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   }
   function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
   function fmtD(d){ if(!d) return ""; try{return new Date(d).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});}catch(e){return d;} }
+  // ── E-TICKETS — re-issued under Voyage-Ed branding (data-based, no barcode) ──
+  function buildETicketsHTML(){
+    const esc=(x)=>String(x==null?"":x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+    const fmtD=(d)=>{ if(!d) return "—"; const x=new Date(d); return isNaN(x)?esc(d):x.toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short",year:"numeric"}); };
+    const hhmm=(t)=>{ const v=String(t||"").replace(/\D/g,""); return v.length===4?v.slice(0,2)+":"+v.slice(2):(t||"—"); };
+    const tickets=(deal.eTickets||[]);
+    const ref=deal.dealNumber||("VE"+String(Date.now()).slice(-6));
+
+    const cards=tickets.map(t=>{
+      const segs=(t.segments||[]);
+      const pax=(t.passengers||[]);
+      const segRows=segs.map(sg=>`
+        <div style="border:1px solid #e3eaf7;border-radius:12px;padding:13px 15px;margin-bottom:10px;background:#fff">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div style="font-size:13px;font-weight:800;color:#0d1b3e">${esc(sg.airlineCode||t.airlineCode||"")} ${esc(sg.flightNo||"")} <span style="font-weight:600;color:#5a6b8c">${esc(sg.airlineName||t.airlineName||"")}</span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${sg.cabin?`<span style="background:#eef3fc;color:#334e82;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">${esc(sg.cabin)}</span>`:""}
+              ${sg.status?`<span style="background:#f0faf4;color:#15803d;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">${esc(sg.status)}</span>`:""}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:96px">
+              <div style="font-size:23px;font-weight:800;color:#0d1b3e;line-height:1">${esc(sg.from||"—")}</div>
+              <div style="font-size:10.5px;color:#5a6b8c">${esc(sg.fromName||"")}</div>
+              <div style="font-size:15px;font-weight:800;color:#c9961a;margin-top:4px">${hhmm(sg.depTime)}</div>
+              <div style="font-size:10px;color:#8b98b4">${fmtD(sg.date)}</div>
+            </div>
+            <div style="flex:0 0 60px;text-align:center;color:#c9961a;font-size:15px">✈</div>
+            <div style="flex:1;min-width:96px;text-align:right">
+              <div style="font-size:23px;font-weight:800;color:#0d1b3e;line-height:1">${esc(sg.to||"—")}</div>
+              <div style="font-size:10.5px;color:#5a6b8c">${esc(sg.toName||"")}</div>
+              <div style="font-size:15px;font-weight:800;color:#c9961a;margin-top:4px">${hhmm(sg.arrTime)}</div>
+              <div style="font-size:10px;color:#8b98b4">${sg.terminal?"Terminal "+esc(sg.terminal):""}</div>
+            </div>
+          </div>
+          ${sg.baggage?`<div style="margin-top:9px;padding-top:8px;border-top:1px dashed #e3eaf7;font-size:11px;color:#5a6b8c">🧳 Baggage: <b style="color:#0d1b3e">${esc(sg.baggage)}</b></div>`:""}
+        </div>`).join("");
+
+      const paxRows=pax.map((p,i)=>`
+        <tr>
+          <td style="padding:7px 9px;border-bottom:1px solid #eef1f7;font-size:11px;color:#8b98b4;width:24px">${i+1}</td>
+          <td style="padding:7px 9px;border-bottom:1px solid #eef1f7;font-size:12.5px;font-weight:700;color:#0d1b3e">${esc(p.name||"")}</td>
+          <td style="padding:7px 9px;border-bottom:1px solid #eef1f7;font-size:11px;color:#5a6b8c">${esc(p.type||"Adult")}</td>
+          <td style="padding:7px 9px;border-bottom:1px solid #eef1f7;font-size:11px;font-family:monospace;color:#334e82">${esc(p.ticketNo||"—")}</td>
+          <td style="padding:7px 9px;border-bottom:1px solid #eef1f7;font-size:11px;color:#5a6b8c;text-align:right">${esc(p.seat||"")}</td>
+        </tr>`).join("");
+
+      return `
+      <div style="background:#f8fafd;border-radius:16px;overflow:hidden;box-shadow:0 2px 14px rgba(13,27,62,.09);margin-bottom:24px;page-break-inside:avoid">
+        <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:16px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div>
+            <div style="font-size:9.5px;letter-spacing:2.5px;color:#f0c842;font-weight:800">ELECTRONIC TICKET · ITINERARY RECEIPT</div>
+            <div style="font-size:18px;color:#fff;font-weight:800;margin-top:2px">${esc(t.airlineName||t.airlineCode||"Air Ticket")}</div>
+          </div>
+          <div style="background:#fff;border-radius:9px;padding:5px 11px"><img src="${VE_LOGO}" style="height:30px;display:block"/></div>
+        </div>
+        <div style="background:#faf1dc;border-bottom:1px solid #ecdcb4;padding:13px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:9.5px;letter-spacing:2px;color:#8a6d1f;font-weight:800">BOOKING REFERENCE / PNR</div>
+            <div style="font-size:29px;font-weight:800;color:#0d1b3e;font-family:monospace;letter-spacing:4px;line-height:1.15">${esc(t.pnr||"—")}</div>
+          </div>
+          <div style="text-align:right;font-size:10.5px;color:#8a6d1f;line-height:1.6">
+            Use this PNR for web check-in<br>and at the airline counter
+          </div>
+        </div>
+        <div style="padding:16px 22px">
+          ${segRows||`<div style="font-size:12px;color:#8b98b4">No flight segments read.</div>`}
+          ${pax.length?`<div style="margin-top:14px">
+            <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">PASSENGERS &amp; TICKET NUMBERS</div>
+            <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden">
+              <tr><th style="text-align:left;padding:7px 9px;background:#0d1b3e;color:#f0c842;font-size:9px;letter-spacing:1px">#</th>
+              <th style="text-align:left;padding:7px 9px;background:#0d1b3e;color:#f0c842;font-size:9px;letter-spacing:1px">PASSENGER NAME</th>
+              <th style="text-align:left;padding:7px 9px;background:#0d1b3e;color:#f0c842;font-size:9px;letter-spacing:1px">TYPE</th>
+              <th style="text-align:left;padding:7px 9px;background:#0d1b3e;color:#f0c842;font-size:9px;letter-spacing:1px">E-TICKET NO.</th>
+              <th style="text-align:right;padding:7px 9px;background:#0d1b3e;color:#f0c842;font-size:9px;letter-spacing:1px">SEAT</th></tr>
+              ${paxRows}
+            </table></div>`:""}
+        </div>
+      </div>`;
+    }).join("");
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voyage-Ed — E-Tickets ${esc(ref)}</title>
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f9;margin:0;padding:0;color:#1a2c52}
+    @media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+    <div style="max-width:820px;margin:0 auto;padding:20px 16px 40px">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:10px;letter-spacing:3px;color:#c9961a;font-weight:800">VOYAGE-ED TRAVELS</div>
+        <div style="font-size:25px;font-weight:800;color:#0d1b3e;margin-top:3px">E-Ticket Itinerary</div>
+        <div style="font-size:12px;color:#5a6b8c;margin-top:3px">Booking Ref <b style="color:#0d1b3e">${esc(ref)}</b> · ${esc(deal.clientName||"")}</div>
+      </div>
+      ${cards||`<div style="text-align:center;color:#8b98b4;font-size:13px;padding:40px 0">Koi ticket nahi. Flights tab se "AI Read Ticket" use karo.</div>`}
+      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:12px;padding:14px 18px;margin-top:6px">
+        <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:7px">IMPORTANT</div>
+        <div style="font-size:11px;color:#5a6b8c;line-height:1.8">
+          • Carry a valid photo ID; for international travel a passport valid at least 6 months beyond travel.<br>
+          • Report at the airport 3 hours before international and 2 hours before domestic departures.<br>
+          • Web check-in opens 48 hours prior — use the PNR above on the airline's website.<br>
+          • Names must exactly match your passport. Notify us immediately of any discrepancy.
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid #dde4f0">
+        <div style="font-size:11.5px;color:#5a6b8c;line-height:1.7">Voyage-Ed Travels · Suite 315, Regus, GMADA Aerocity, Mohali, Punjab 140306<br>
+        enquiry@voyage-ed.com &nbsp;|&nbsp; www.voyage-ed.com &nbsp;|&nbsp; +91 70096 59048</div>
+        <div style="font-size:10.5px;color:#8b98b4;margin-top:8px;font-style:italic">Your Journey, Our Passion</div>
+      </div>
+      <div class="noprint" style="text-align:center;margin-top:22px">
+        <button onclick="window.print()" style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#f0c842;border:none;border-radius:10px;padding:13px 30px;font-size:13px;font-weight:800;cursor:pointer">🖨️ Save as PDF</button>
+      </div>
+    </div></body></html>`;
+  }
+  const openETickets=()=>{
+    const w=window.open("","_blank");
+    if(!w){ window.veToast&&window.veToast("Popup blocked","error"); return; }
+    w.document.write(buildETicketsHTML()); w.document.close();
+  };
+
   // ── VOUCHERS (hotel / land) — same navy-gold identity as the itinerary ──
   function buildVouchersHTML(){
     const esc=(x)=>String(x==null?"":x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -3690,8 +3814,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       {aiX&&(
         <div onClick={()=>!aiXBusy&&setAiX(null)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"22px",boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
-            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":aiX==="passport"?"Passport / ID Details":"Land / Itinerary"}</div>
-            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>{aiX==="passport"?"Passport ya Aadhaar ki photo(s) paste/upload karo — AI naam, DOB, passport number, issue/expiry sab bhar dega. Surname na ho toh LNU daal dega.":<>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</>}</div>
+            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":aiX==="passport"?"Passport / ID Details":aiX==="ticket"?"E-Ticket (PNR, passengers, segments)":"Land / Itinerary"}</div>
+            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>{aiX==="ticket"?"Akbar / MakeMyTrip ka e-ticket paste ya upload karo — AI PNR, passenger names, ticket numbers aur saare segments padh lega, phir Voyage-Ed branded ticket ban jayega.":aiX==="passport"?"Passport ya Aadhaar ki photo(s) paste/upload karo — AI naam, DOB, passport number, issue/expiry sab bhar dega. Surname na ho toh LNU daal dega.":<>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</>}</div>
             <div tabIndex={0}
               onPaste={e=>{
                 const items=Array.from(e.clipboardData.items||[]);
@@ -3948,6 +4072,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
               {isBookedStage(deal)&&<button onClick={openVouchers} title="Hotel & service vouchers — Voyage-Ed branded PDF" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🎫 Vouchers</button>}
+              {isBookedStage(deal)&&(deal.eTickets||[]).length>0&&<button onClick={openETickets} title="Voyage-Ed branded e-tickets" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🛫 E-Tickets ({(deal.eTickets||[]).length})</button>}
               <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>{const old=stageOf(d); if(old===v) return d; return {...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned",auditLog:[...(d.auditLog||[]),auditEntry(currentUser,"Stage changed",old+" \u2192 "+v)]};});}}
                 title="Deal status — dashboard tabs, funnel aur totals sab isi se chalte hain"
                 style={{background:((STAGE_META[stageOf(deal)]||{}).bg||"#eef3fc"),
@@ -4162,6 +4287,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               <h2 style={{fontSize:18,fontWeight:800}}>✈️ Flight Vendors</h2>
               {deal.flightVendors.length<10&&<button className="btn btn-ind" onClick={addFV}>+ Add Flight Vendor</button>}
               <button onClick={()=>setAiX("flight")} className="btn" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Extract (pic/email)</button>
+              <button onClick={()=>setAiX("ticket")} title="Akbar / MakeMyTrip e-ticket upload karo — Voyage-Ed branded ticket ban jayega" className="btn" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",color:"#f0c842",border:"none"}}>🛫 AI Read Ticket</button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
               {[{l:"Total Cost",v:fmtINR(flight.cost),c:"#5a6b8c"},{l:"Total Selling",v:fmtINR(flight.sell),c:"#1a2c52"},{l:"Profit",v:fmtINR(flight.sell-flight.cost),c:(flight.sell-flight.cost)>=0?"#10b981":"#ef4444"},{l:"Balance to Pay",v:fmtINR(flight.cost-flight.paid),c:(flight.cost-flight.paid)>0?"#ef4444":"#10b981"}].map((s,i)=>(
