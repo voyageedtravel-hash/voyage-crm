@@ -629,12 +629,22 @@ const cancelCompute = (c, d) => {
   const totVendorLoss=lines.reduce((s,l)=>s+l.vendorLoss,0);
   const totProfit=lines.reduce((s,l)=>s+l.netProfit,0);
 
-  // Cost drops by the vendor loss (that's the only cost that actually remains
-  // on cancelled parts — anything the vendor didn't keep is money back to us).
+  // Cost drops for the cancelled travellers: exact from per-person cost rates
+  // when the component has them and travellers are picked, otherwise a per-head
+  // share × how many cancelled. Whatever the vendor still kept stays as cost.
+  const TKC={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
   const totCostReduction=lines.reduce((s,l)=>{
-    const per=paxTotal>0?(l.comp.cost||0)/paxTotal:(l.comp.cost||0);
-    const cancelledCost=l.nCancel>0?Math.round(per*l.nCancel):0;
-    return s+Math.max(0,cancelledCost-l.vendorLoss);
+    let cancelledCost=0;
+    if((l.travellerIds||[]).length && l.comp.paxRates){
+      (d.travellers||[]).filter(t=>l.travellerIds.includes(t.id)).forEach(t=>{
+        const rate=Number((l.comp.paxRates||{})[(TKC[t.type]||"adult")+"C"])||0;
+        cancelledCost+=toINR(rate, l.comp.currency, l.comp.exchangeRate);
+      });
+      cancelledCost=Math.round(cancelledCost);
+    }else if(l.nCancel>0 && paxTotal>0){
+      cancelledCost=Math.round((l.comp.cost||0)/paxTotal*l.nCancel);
+    }
+    return s+Math.max(0, cancelledCost - l.vendorLoss);
   },0);
 
   const cancelledCompOrigProfit=lines.reduce((s,l)=>s+((l.comp.sell||0)-(l.comp.cost||0)),0);
