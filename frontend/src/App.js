@@ -1086,6 +1086,11 @@ export default function TravelCRM() {
   const [propCompareId,setPropCompareId]=useState("");
   const [aiX,setAiX]=useState(null); // "flight"|"hotel"|"land"
   const [aiXText,setAiXText]=useState("");
+  // AI Cancellation assistant — conversational guide; maths stays in code.
+  const [cxlChat,setCxlChat]=useState([]);        // [{role,content}]
+  const [cxlInput,setCxlInput]=useState("");
+  const [cxlBusy,setCxlBusy]=useState(false);
+  const [cxlDraft,setCxlDraft]=useState(null);    // AI-proposed cancellation before user confirms
   const [aiXImgs,setAiXImgs]=useState([]);
   const [aiXBusy,setAiXBusy]=useState(false);
   const [imgHealth,setImgHealth]=useState(null); // null | "checking" | {ok:n, dead:[urls]}
@@ -2109,6 +2114,94 @@ ${text}
   // (2) applies any post-cancellation repricing (logged old → new), (3) pulls
   // the cancelled travellers off each component's roster and flags them, and
   // (4) writes it all to the audit log with the login that did it.
+  // ── AI CANCELLATION ASSISTANT ──────────────────────────────────────────
+  // The AI only understands the request and asks the next question. It NEVER
+  // does the money maths — when it has enough info it returns a structured
+  // draft (which travellers, which components, and the four figures per
+  // component) and the deterministic calculator (cancelCompute) does the rest.
+  const cxlContext = () => {
+    const comps=dealComponents(deal).map(c=>({
+      key:c.compKind+":"+c.compId, kind:c.compKind, name:c.vendorName, label:c.label,
+      costINR:Math.round(c.cost), sellINR:Math.round(c.sell), paidToVendorINR:Math.round(c.paidToVendor),
+      travellersOn:(c.travellerIds&&c.travellerIds.length)?c.travellerIds:"all",
+    }));
+    const trav=(deal.travellers||[]).filter(t=>!t.cancelled).map(t=>({id:t.id,name:travellerName(t),type:t.type}));
+    return {
+      clientPaidINR:Math.round(sum(deal.clientPayments||[],"amount")),
+      paxTotal:(Number(deal.adults)||0)+(Number(deal.children)||0)+(Number(deal.infants)||0),
+      travellers:trav, components:comps,
+    };
+  };
+  const CXL_SYS = `You are a cancellation assistant for an Indian travel agency CRM. You GUIDE the agent through a cancellation by understanding what they say and asking ONE clear next question at a time. You do NOT do any money calculation yourself — the CRM has a deterministic calculator for that. Your job is to gather, in plain Hinglish, exactly what's needed and then emit a structured plan.
+
+You are given the deal context as JSON: travellers (id, name, type), components (key, kind, name, costINR, sellINR, paidToVendorINR), how much the client has paid, and total pax.
+
+For each cancellation you must find out:
+1. WHO is cancelling — specific travellers (match names to ids) OR a count, OR "everyone".
+2. WHICH components they're cancelling — specific ones, or "whole package" (all).
+3. For each affected component, FOUR figures in INR (ask, don't compute):
+   - vendorLoss: money stuck with the vendor (0 if you never paid them)
+   - penalty: cancellation charge you're taking from the client
+   - myProfit: any extra you're keeping (usually 0)
+   - clientRefund: what you're giving back to the client for this component
+   The agent may give you a single total instead of per-component — if so, ask how to split it, or put it all on one component if they say so.
+
+Ask questions ONE at a time, conversationally, in Hinglish. Confirm the traveller names and components you understood. When (and only when) you have everything, respond with a JSON object and NOTHING else, in this exact shape:
+{"ready":true,"scope":"full"|"components","summary":"one-line plain summary","lines":[{"componentKey":"kind:id","travellerIds":["..."],"paxCancelled":number,"vendorLoss":number,"penalty":number,"myProfit":number,"clientRefund":number}]}
+
+While still gathering info, respond with:
+{"ready":false,"reply":"your next question or confirmation in Hinglish"}
+
+Never invent figures. Never output prose outside these JSON shapes. Never compute totals — just record what the agent tells you.`;
+
+  const cxlSend = async (userMsg) => {
+    const text=(userMsg||cxlInput).trim();
+    if(!text) return;
+    const history=[...cxlChat,{role:"user",content:text}];
+    setCxlChat(history); setCxlInput(""); setCxlBusy(true);
+    try{
+      const ctx=cxlContext();
+      const msgs=[
+        {role:"user",content:"DEAL CONTEXT:\n"+JSON.stringify(ctx)},
+        ...history.map(m=>({role:m.role,content:m.content})),
+      ];
+      const res=await fetch(`${API_BASE}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1500,system:CXL_SYS,messages:msgs})});
+      const data=await res.json();
+      if(!res.ok||data.error) throw new Error((data.error&&(data.error.message||data.error))||"AI error");
+      const raw=((data.content||[]).map(c=>c.text||"").join("")||"").replace(/```json|```/g,"").trim();
+      let j; try{ j=JSON.parse(raw); }catch{ j={ready:false,reply:raw||"Samajh nahi aaya, dobara boliye."}; }
+      if(j.ready){
+        // Build a draft cancellation the deterministic calculator can price.
+        const lines=(j.lines||[]).map(l=>{
+          const [kind,id]=(l.componentKey||":").split(":");
+          return {...emptyCancelLine(), compKind:kind, compId:id,
+            travellerIds:Array.isArray(l.travellerIds)?l.travellerIds:[],
+            paxCancelled:l.paxCancelled?String(l.paxCancelled):"",
+            vendorRetained:l.vendorLoss!=null?String(l.vendorLoss):"",
+            vendorPenaltyToClient:l.penalty!=null?String(l.penalty):"",
+            myProfit:l.myProfit!=null?String(l.myProfit):"",
+            clientRefund:l.clientRefund!=null?String(l.clientRefund):""};
+        });
+        const draft={...emptyCancellation(), scope:j.scope||"components", lines, note:j.summary||""};
+        setCxlDraft(draft);
+        setCxlChat(h=>[...h,{role:"assistant",content:"✅ Samajh gaya: "+(j.summary||"cancellation ready")+"\n\nNeeche calculation dekho — sahi lage toh confirm karo."}]);
+      }else{
+        setCxlChat(h=>[...h,{role:"assistant",content:j.reply||"..."}]);
+      }
+    }catch(e){
+      setCxlChat(h=>[...h,{role:"assistant",content:"⚠️ "+((e&&e.message)||"kuch gadbad")+" — dobara try karo ya niche manually bhar do."}]);
+    }
+    setCxlBusy(false);
+  };
+  // Commit the AI-built draft into the deal as a real (pending) cancellation.
+  const cxlAcceptDraft = () => {
+    if(!cxlDraft) return;
+    setDeal(d=>({...d,cancellations:[...(d.cancellations||[]),cxlDraft]}));
+    setCxlDraft(null); setCxlChat([]);
+    window.veToast&&window.veToast("Cancellation add ho gayi — ab confirm karo","success");
+  };
+
   const confirmCancellation=(cid,newStatus)=>setDeal(d=>{
     const c=(d.cancellations||[]).find(x=>x.id===cid);
     if(!c) return d;
@@ -2418,6 +2511,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"land",label:"🚌 Land"},
     {id:"visa",label:"🛂 Visa"},
     {id:"payments",label:"💰 Payments"},
+    ...(isBookedStage(deal)?[{id:"cancel",label:"🚫 Cancellation"}]:[]),
     {id:"attachments",label:"📎 Attachments"},
     {id:"summary",label:"📋 Summary"},
   ];
@@ -5016,15 +5110,73 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 )}
               </div>
             </div>
+          </div>
+        )}
 
-            {/* ══ CANCELLATION LOG ══ */}
+        {/* ══ CANCELLATION TAB (dedicated, AI-guided) ══ */}
+        {tab==="cancel"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {/* AI assistant */}
+            <div className="card" style={{borderColor:"#6d28d9",background:"linear-gradient(180deg,#faf8ff,#fff)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <span style={{fontSize:15,fontWeight:800,color:"#5b21b6"}}>🤖 AI Cancellation Assistant</span>
+                <span style={{fontSize:10,fontWeight:700,color:"#8b5cf6",background:"#ede9fe",borderRadius:20,padding:"2px 9px"}}>guides you · maths by code</span>
+              </div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Bas seedha likho — jaise <i>"Arjit aur Karishma ne poora package cancel kiya"</i> ya <i>"3 log ki sirf flight cancel hui"</i>. AI sawaal poochhega aur numbers ka pakka hisaab neeche ban jaayega.</div>
+
+              {cxlChat.length>0&&<div style={{maxHeight:280,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
+                {cxlChat.map((m,i)=>(
+                  <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
+                    background:m.role==="user"?"#ede9fe":"#f4f7fc",color:"#1a2c52",borderRadius:12,
+                    padding:"9px 13px",fontSize:12.5,whiteSpace:"pre-wrap",lineHeight:1.5,
+                    border:"1px solid "+(m.role==="user"?"#ddd6fe":"#e3eaf7")}}>{m.content}</div>
+                ))}
+                {cxlBusy&&<div style={{alignSelf:"flex-start",fontSize:12,color:"#8b5cf6",padding:"6px 12px"}}>AI soch raha hai…</div>}
+              </div>}
+
+              <div style={{display:"flex",gap:8}}>
+                <input value={cxlInput} onChange={e=>setCxlInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!cxlBusy){cxlSend();}}}
+                  placeholder={cxlChat.length?"Jawab likho…":"Kya cancel hua? seedha likho…"}
+                  style={{flex:1,border:"1px solid #d4c9f5",borderRadius:10,padding:"11px 13px",fontSize:12.5,outline:"none"}}/>
+                <button disabled={cxlBusy||!cxlInput.trim()} onClick={()=>cxlSend()}
+                  style={{background:cxlBusy?"#c4b5fd":"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none",borderRadius:10,padding:"0 18px",fontSize:13,fontWeight:800,cursor:cxlBusy?"wait":"pointer"}}>Send</button>
+                {(cxlChat.length>0||cxlDraft)&&<button onClick={()=>{setCxlChat([]);setCxlDraft(null);setCxlInput("");}} title="Reset" style={{background:"#f1f5f9",color:"#64748b",border:"none",borderRadius:10,padding:"0 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>↺</button>}
+              </div>
+
+              {/* AI draft preview — priced by the deterministic calculator */}
+              {cxlDraft&&(()=>{
+                const R=cancelCompute(cxlDraft,deal);
+                const money=(x)=>"₹"+Math.round(x||0).toLocaleString("en-IN");
+                return <div style={{marginTop:14,border:"1px solid #c4b5fd",borderRadius:12,padding:"14px",background:"#fff"}}>
+                  <div style={{fontSize:12,fontWeight:800,color:"#5b21b6",marginBottom:10}}>📋 AI ne ye banaya — numbers code se calculate hue:</div>
+                  {R.lines.map((L,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6,fontSize:12,padding:"6px 0",borderBottom:"1px solid #f1f5f9"}}>
+                      <span style={{fontWeight:700,color:"#0f2350"}}>{L.label}</span>
+                      <span style={{color:"#64748b"}}>refund <b style={{color:"#2563eb"}}>{money(L.refund)}</b> · penalty {money(L.penalty)} · vendor loss {money(L.vendorLoss)} · profit <b style={{color:L.isLoss?"#dc2626":"#15803d"}}>{money(L.netProfit)}</b></span>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:12,background:"#0d1b3e",borderRadius:10,padding:"11px 14px"}}>
+                    <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",textTransform:"uppercase"}}>Total Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
+                    <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",textTransform:"uppercase"}}>Cxl Profit</div><div className="mono" style={{fontSize:14,fontWeight:800,color:R.isLoss?"#f87171":"#4ade80"}}>{money(R.profit)}</div></div>
+                    <div style={{flex:"1 1 90px"}}><div style={{fontSize:9,color:"#8fa0c8",textTransform:"uppercase"}}>Client ne diya</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#fff"}}>{money(R.clientPaidTotal)}</div></div>
+                  </div>
+                  {R.refund>R.clientPaidTotal&&<div style={{fontSize:10.5,color:"#b45309",marginTop:8}}>⚠️ Refund client ke diye se zyada hai — AI ko batao ya niche adjust karo.</div>}
+                  <div style={{display:"flex",gap:8,marginTop:12}}>
+                    <button onClick={cxlAcceptDraft} style={{flex:1,background:"#15803d",color:"#fff",border:"none",borderRadius:9,padding:"11px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>✓ Ye sahi hai — add karo</button>
+                    <button onClick={()=>setCxlDraft(null)} style={{background:"#f1f5f9",color:"#64748b",border:"none",borderRadius:9,padding:"11px 16px",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Nahi, dobara</button>
+                  </div>
+                </div>;
+              })()}
+            </div>
+
+            {/* Manual cancellation cards (existing, always available) */}
             <div className="card" style={{borderColor:"#b91c1c"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>⛔ Cancellation Log</span>
+                <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>⛔ Cancellation Log <span style={{fontSize:11,fontWeight:600,color:"#94a3b8"}}>(manual)</span></span>
                 <button onClick={addCancellation} className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>+ Record Cancellation</button>
               </div>
-              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Cancel the whole package or only specific components. For each component: how many travellers, what the vendor retained, penalty charged to the client, and your own profit — the refund and revised booking profit are calculated automatically.</div>
-
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>AI use na karna ho toh yahan khud bhar sakte ho. Har component: kaun cancel hua, vendor loss, penalty, profit, refund.</div>
               {(deal.cancellations||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:12.5,padding:"14px 0"}}>No cancellations. Everything is on track ✅</div>}
 
               {(deal.cancellations||[]).map(c=>{
@@ -5200,7 +5352,6 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   </div>
                 </div>;
               })}
-
             </div>
           </div>
         )}
