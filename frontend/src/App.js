@@ -545,21 +545,17 @@ const dealFinance = (d) => {
   const cxlPenalty=cxlR.reduce((s,r)=>s+r.penalty,0);
   const cxlProfit=cxlR.reduce((s,r)=>s+r.profit,0);                       // profit kept on cancelled parts
   const cxlOrigProfit=cxlR.reduce((s,r)=>s+r.cancelledCompOrigProfit,0);  // original profit of cancelled comps
+  const cxlCostReduction=cxlR.reduce((s,r)=>s+r.costReduction,0);   // cost that drops off
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
-  // A cancellation doesn't wipe out a whole component when only some travellers
-  // leave — the component keeps serving everyone else. Its effect on the
-  // booking is simply the refund paid out. So:
-  //   Revised booking profit = original profit − refund paid to the client
-  // (The penalty/own-profit we keep is already inside the original selling, so
-  // it isn't added again; only the cash going back out reduces the profit.)
-  const revisedProfit = gpm - cxlRefundDue;
-  // After-cancellation actuals: selling drops by the refund; cost is unchanged
-  // (what we owe suppliers doesn't fall just because a traveller cancelled —
-  // any vendor retention is captured separately in the cancellation record).
+  // A cancellation's effect on the booking, with both sides adjusted:
+  //   selling drops by the refund paid back to the client
+  //   cost drops by the cancelled travellers' cost, minus whatever the vendor
+  //   still retained (that retained amount stays a real cost)
   const afterSell = netSell - cxlRefundDue;
-  const afterCost = cost;
+  const afterCost = cost - cxlCostReduction;
+  const revisedProfit = afterSell - afterCost;
   const bal=netSell-clientRec;
   return {
     sell, netSell, cost, refunded, gpm,
@@ -618,14 +614,32 @@ const cancelCompute = (c, d) => {
     // Per-component net profit is still: what we keep from the client minus
     // what the vendor kept from us. Independent of how much the client has paid.
     const netProfit = (penalty + profit) - vendorRetained;
+    // Cost attributable to the cancelled travellers on this component. EXACT
+    // when per-person rates exist; else a per-head share of the component cost.
+    const TK={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
+    let cancelledCost=0;
+    if((ln.travellerIds||[]).length && comp.paxRates){
+      (d.travellers||[]).filter(t=>ln.travellerIds.includes(t.id)).forEach(t=>{
+        const rate=Number((comp.paxRates||{})[(TK[t.type]||"adult")+"C"])||0;
+        cancelledCost+=toINR(rate, comp.currency, comp.exchangeRate);
+      });
+      cancelledCost=Math.round(cancelledCost);
+    }else if(nCancel>0 && paxTotal>0){
+      cancelledCost=Math.round((comp.cost||0)/paxTotal*nCancel);
+    }
+    // After cancellation this component's cost = original − cancelled share +
+    // whatever the vendor actually retained on those cancelled travellers.
+    const costReduction = Math.max(0, cancelledCost - vendorRetained);
     return { ...ln, comp, nCancel, vendorRetained, penalty, profit,
-      paidToVendor:comp.paidToVendor, netProfit, isLoss:netProfit<0, label:comp.label };
+      paidToVendor:comp.paidToVendor, netProfit, isLoss:netProfit<0, label:comp.label,
+      cancelledCost, costReduction };
   });
 
   const totPenalty=lines.reduce((s,l)=>s+l.penalty,0);
   const totProfitKept=lines.reduce((s,l)=>s+l.profit,0);
   const totVendorRetained=lines.reduce((s,l)=>s+l.vendorRetained,0);
   const totProfit=lines.reduce((s,l)=>s+l.netProfit,0);
+  const totCostReduction=lines.reduce((s,l)=>s+l.costReduction,0);  // cost that drops off
 
   // ── THE CORE FIX ──────────────────────────────────────────────────────
   // Refund = money the client actually gave us − everything we keep from them
@@ -641,6 +655,7 @@ const cancelCompute = (c, d) => {
   return { paxTotal, lines, clientPaidTotal,
     refund, penalty:totPenalty, vendorRetained:totVendorRetained,
     profit:totProfit, isLoss:totProfit<0, cancelledCompOrigProfit,
+    costReduction:totCostReduction,
     // exposed so the UI can show the refund working transparently
     totalKept };
 };
@@ -5076,6 +5091,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>− Penalty + profit jo aapne rakha</span><b className="mono" style={{color:"#b45309"}}>− {money(R.totalKept)}</b></div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"7px 0 0",marginTop:5,borderTop:"1px solid #d4e0f5",color:"#0f2350",fontWeight:800}}><span>Client refund</span><b className="mono" style={{color:"#2563eb"}}>{money(R.refund)}</b></div>
                     {R.totalKept>R.clientPaidTotal&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Aap client ke diye hue (₹{R.clientPaidTotal.toLocaleString("en-IN")}) se zyada rakh rahe ho — refund 0 hai, aur ₹{(R.totalKept-R.clientPaidTotal).toLocaleString("en-IN")} client se abhi aur lena baaki hai.</div>}
+                    {R.costReduction>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"7px 0 0",marginTop:7,borderTop:"1px dashed #d4e0f5",color:"#15803d"}}><span>✓ Cost bhi kam hui (cancelled logon ki, vendor retained chhod ke)</span><b className="mono">− {money(R.costReduction)}</b></div>}
                   </div>
                   <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
                     <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Total Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
