@@ -548,18 +548,18 @@ const dealFinance = (d) => {
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
   const gpm=netSell-cost;
-  // Original profit of cancelled components split into their sell/cost parts,
-  // so we can show "after cancellation" selling and cost, not just profit.
-  const cxlCompSell=cxlR.reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.comp.sell||0),0),0);
-  const cxlCompCost=cxlR.reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.comp.cost||0),0),0);
-  // Revised booking profit: remove the cancelled components' original profit,
-  // add back what we actually kept on the cancellation.
-  const revisedProfit = gpm - cxlOrigProfit + cxlProfit;
-  // After-cancellation actuals:
-  //   selling  = surviving components' selling + what we kept from client on cancelled parts
-  //   cost     = surviving components' cost + what the vendor actually retained on cancelled parts
-  const afterSell = (netSell - cxlCompSell) + (cxlPenalty + cxlProfit);
-  const afterCost = (cost - cxlCompCost) + cxlR.reduce((s,r)=>s+r.vendorRetained,0);
+  // A cancellation doesn't wipe out a whole component when only some travellers
+  // leave — the component keeps serving everyone else. Its effect on the
+  // booking is simply the refund paid out. So:
+  //   Revised booking profit = original profit − refund paid to the client
+  // (The penalty/own-profit we keep is already inside the original selling, so
+  // it isn't added again; only the cash going back out reduces the profit.)
+  const revisedProfit = gpm - cxlRefundDue;
+  // After-cancellation actuals: selling drops by the refund; cost is unchanged
+  // (what we owe suppliers doesn't fall just because a traveller cancelled —
+  // any vendor retention is captured separately in the cancellation record).
+  const afterSell = netSell - cxlRefundDue;
+  const afterCost = cost;
   const bal=netSell-clientRec;
   return {
     sell, netSell, cost, refunded, gpm,
@@ -605,46 +605,44 @@ const compById = (d, kind, id) => dealComponents(d).find(c=>c.compKind===kind &&
 // base is the per-traveller share actually attributable to the cancelled pax.
 const cancelCompute = (c, d) => {
   const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
+  // What the client has actually paid into this booking so far. THIS is the
+  // ceiling for any refund — you can never refund money you haven't received.
+  const clientPaidTotal=sum(d.clientPayments||[],"amount");
+
   const lines=(c.lines||[]).map(ln=>{
     const comp=compById(d, ln.compKind, ln.compId) || {paidToVendor:0,sell:0,cost:0,vendorName:ln.compId,label:"(removed component)"};
     const nCancel=(ln.travellerIds||[]).length || Number(ln.paxCancelled)||0;
     const vendorRetained=Number(ln.vendorRetained)||0;               // real liability to supplier
-    const penalty=Number(ln.vendorPenaltyToClient)||0;              // charged to the client
-    const profit=Number(ln.myProfit)||0;                            // kept for us
-    // Client's paid share for THIS component's cancelled travellers.
-    // EXACT when per-person rates exist: sum the selected travellers' own sell
-    // rates (converted to INR). Otherwise fall back to per-head share.
-    let clientHeldForComp=0;
-    const TK={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
-    if((ln.travellerIds||[]).length && comp.paxRates){
-      (d.travellers||[]).filter(t=>ln.travellerIds.includes(t.id)).forEach(t=>{
-        const rate=Number((comp.paxRates||{})[(TK[t.type]||"adult")+"S"])||0;
-        clientHeldForComp+=toINR(rate, comp.currency, comp.exchangeRate);
-      });
-      clientHeldForComp=Math.round(clientHeldForComp);
-    }
-    if(!clientHeldForComp){
-      const perHeadSell = paxTotal>0 ? comp.sell/paxTotal : comp.sell;
-      const heads = nCancel>0 ? nCancel : paxTotal;
-      clientHeldForComp = Math.round(perHeadSell * heads);
-    }
-    const clientKept = Math.min(penalty + profit, clientHeldForComp);  // can't keep more than paid share
-    let refund = ln.refundLocked ? Math.max(0, clientHeldForComp - clientKept) : (Number(ln.clientRefund)||0);
-    // Net profit for the company on this component.
+    const penalty=Number(ln.vendorPenaltyToClient)||0;              // cancellation charge to client
+    const profit=Number(ln.myProfit)||0;                            // own profit kept, if any
+    // Per-component net profit is still: what we keep from the client minus
+    // what the vendor kept from us. Independent of how much the client has paid.
     const netProfit = (penalty + profit) - vendorRetained;
-    return { ...ln, comp, nCancel, vendorRetained, penalty, profit, refund,
-      paidToVendor:comp.paidToVendor, clientHeldForComp, netProfit,
-      isLoss:netProfit<0, label:comp.label };
+    return { ...ln, comp, nCancel, vendorRetained, penalty, profit,
+      paidToVendor:comp.paidToVendor, netProfit, isLoss:netProfit<0, label:comp.label };
   });
-  const totRefund=lines.reduce((s,l)=>s+l.refund,0);
-  const totVendorRetained=lines.reduce((s,l)=>s+l.vendorRetained,0);
+
   const totPenalty=lines.reduce((s,l)=>s+l.penalty,0);
+  const totProfitKept=lines.reduce((s,l)=>s+l.profit,0);
+  const totVendorRetained=lines.reduce((s,l)=>s+l.vendorRetained,0);
   const totProfit=lines.reduce((s,l)=>s+l.netProfit,0);
-  // Original profit of the components being cancelled (to revise booking profit).
+
+  // ── THE CORE FIX ──────────────────────────────────────────────────────
+  // Refund = money the client actually gave us − everything we keep from them
+  // (cancellation penalties + any profit we're holding back). Clamped to never
+  // exceed what they paid and never go negative. Selling price is NOT used:
+  // you cannot refund a fare the client never fully paid for.
+  const totalKept = totPenalty + totProfitKept;
+  const refund = Math.max(0, Math.min(clientPaidTotal, clientPaidTotal - totalKept));
+
+  // Original profit of the cancelled components (to revise booking profit).
   const cancelledCompOrigProfit=lines.reduce((s,l)=>s+((l.comp.sell||0)-(l.comp.cost||0)),0);
-  return { paxTotal, lines,
-    refund:totRefund, penalty:totPenalty, vendorRetained:totVendorRetained,
-    profit:totProfit, isLoss:totProfit<0, cancelledCompOrigProfit };
+
+  return { paxTotal, lines, clientPaidTotal,
+    refund, penalty:totPenalty, vendorRetained:totVendorRetained,
+    profit:totProfit, isLoss:totProfit<0, cancelledCompOrigProfit,
+    // exposed so the UI can show the refund working transparently
+    totalKept };
 };
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -5024,54 +5022,62 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   {(c.lines||[]).length>0&&<div style={{marginBottom:8}}>
                     <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>{c.scope==="full"?"2":"3"} · Har component ka hisaab</div>
                     {R.lines.map(L=>(
-                      <div key={L.compKind+L.compId} style={{border:"1px solid #e3eaf7",borderRadius:11,padding:"12px 13px",marginBottom:10,background:"#fff"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
-                          <span style={{fontSize:13,fontWeight:800,color:"#0f2350"}}>{L.label}</span>
+                      <div key={L.compKind+L.compId} style={{border:"1px solid #e3eaf7",borderRadius:11,padding:"14px 15px",marginBottom:11,background:"#fff"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12,paddingBottom:10,borderBottom:"1px solid #eef2f8"}}>
+                          <span style={{fontSize:14,fontWeight:800,color:"#0f2350"}}>{L.label}</span>
                           <span style={{fontSize:11,color:"#6b7a99"}}>Paid to vendor: <b className="mono" style={{color:"#0f2350"}}>{money(L.paidToVendor)}</b></span>
                         </div>
-                        {(deal.travellers||[]).length>0&&<div style={{marginBottom:10}}>
-                          <div style={{fontSize:9,color:"#0e7490",letterSpacing:.6,textTransform:"uppercase",marginBottom:5,fontWeight:800}}>Who is cancelling this? {L.comp.paxPricing&&<span style={{color:"#15803d"}}>· exact rates on</span>}</div>
+                        {(deal.travellers||[]).length>0&&<div style={{marginBottom:14}}>
+                          <div style={{fontSize:9.5,color:"#0e7490",letterSpacing:.6,textTransform:"uppercase",marginBottom:6,fontWeight:800}}>Who is cancelling this?{L.comp.paxPricing&&<span style={{color:"#15803d"}}> · exact rates on</span>}</div>
                           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                             {(deal.travellers||[]).filter(t=>!t.cancelled).map(t=>{
                               const on=(L.travellerIds||[]).includes(t.id);
                               const onComp=!(L.comp.travellerIds||[]).length || (L.comp.travellerIds||[]).includes(t.id);
                               if(!onComp) return null;
                               return <button key={t.id} onClick={()=>updCancelLine(c.id,L.compKind,L.compId,"travellerIds",on?(L.travellerIds||[]).filter(x=>x!==t.id):[...(L.travellerIds||[]),t.id])}
-                                style={{border:"1px solid "+(on?"#b91c1c":"#e3eaf7"),background:on?"#fdf1f1":"#fff",color:on?"#b91c1c":"#94a3b8",borderRadius:20,padding:"4px 11px",fontSize:10.5,fontWeight:700,cursor:"pointer"}}>
+                                style={{border:"1px solid "+(on?"#b91c1c":"#e3eaf7"),background:on?"#fdf1f1":"#fff",color:on?"#b91c1c":"#94a3b8",borderRadius:20,padding:"5px 12px",fontSize:10.5,fontWeight:700,cursor:"pointer"}}>
                                 {on?"✗ ":""}{travellerName(t)}
                               </button>;
                             })}
                           </div>
                         </div>}
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:9,marginBottom:10}}>
+                        {/* Vertical, stacked money inputs */}
+                        <div style={{display:"flex",flexDirection:"column",gap:11}}>
                           {!(deal.travellers||[]).length&&<div>
-                            <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Travellers cancelled</div>
-                            <input type="number" value={L.paxCancelled} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                            <div style={{fontSize:10,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>Travellers cancelled</div>
+                            <input type="number" value={L.paxCancelled} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"paxCancelled",e.target.value)} placeholder={"of "+R.paxTotal} style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"10px",fontSize:13}}/>
                           </div>}
                           <div>
-                            <div style={{fontSize:9,color:"#b45309",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Vendor retained ₹</div>
-                            <input type="number" value={L.vendorRetained} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorRetained",e.target.value)} placeholder="0" title="What the vendor kept out of what you had paid them (your real liability)" style={{width:"100%",border:"1px solid #f3c6c6",borderRadius:8,padding:"8px",fontSize:12}}/>
+                            <div style={{fontSize:10,color:"#b45309",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>Vendor retained ₹ <span style={{color:"#c9b18a",fontWeight:600,textTransform:"none",letterSpacing:0}}>— vendor ne aapse jitna kaata (0 agar payment hi nahi ki)</span></div>
+                            <input type="number" value={L.vendorRetained} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorRetained",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #f3c6c6",borderRadius:8,padding:"10px",fontSize:13}}/>
                           </div>
                           <div>
-                            <div style={{fontSize:9,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>Penalty charged to client ₹</div>
-                            <input type="number" value={L.vendorPenaltyToClient} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorPenaltyToClient",e.target.value)} placeholder="0" title="The cancellation charge you levied on the client" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12}}/>
+                            <div style={{fontSize:10,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>Penalty charged to client ₹ <span style={{color:"#a9b6cf",fontWeight:600,textTransform:"none",letterSpacing:0}}>— cancellation charge jo client se liya</span></div>
+                            <input type="number" value={L.vendorPenaltyToClient} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"vendorPenaltyToClient",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"10px",fontSize:13}}/>
                           </div>
                           <div>
-                            <div style={{fontSize:9,color:"#15803d",letterSpacing:.6,textTransform:"uppercase",marginBottom:3}}>My profit ₹</div>
-                            <input type="number" value={L.profit} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"myProfit",e.target.value)} placeholder="0" title="Your own extra profit on this cancellation (separate from the penalty)" style={{width:"100%",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px",fontSize:12}}/>
+                            <div style={{fontSize:10,color:"#15803d",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>My profit ₹ <span style={{color:"#9fc8ab",fontWeight:600,textTransform:"none",letterSpacing:0}}>— apna extra profit (penalty se alag), optional</span></div>
+                            <input type="number" value={L.profit} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"myProfit",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px",fontSize:13}}/>
                           </div>
                         </div>
                         {/* line outcome */}
-                        <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11.5,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"8px 11px"}}>
-                          <span>Client refund: <b className="mono" style={{color:"#2563eb"}}>{money(L.refund)}</b></span>
-                          <span style={{marginLeft:"auto"}}>Net {L.isLoss?"loss":"profit"}: <b className="mono" style={{color:L.isLoss?"#dc2626":"#15803d"}}>{L.isLoss?"− ":""}{money(Math.abs(L.netProfit))}</b> <span style={{color:"#94a3b8"}}>(kept {money(L.penalty+L.profit)} − vendor {money(L.vendorRetained)})</span></span>
+                        <div style={{marginTop:11,fontSize:12,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"9px 12px",textAlign:"right"}}>
+                          Is component pe net {L.isLoss?"loss":"profit"}: <b className="mono" style={{color:L.isLoss?"#dc2626":"#15803d"}}>{L.isLoss?"− ":""}{money(Math.abs(L.netProfit))}</b> <span style={{color:"#94a3b8"}}>(kept {money(L.penalty+L.profit)} − vendor {money(L.vendorRetained)})</span>
                         </div>
                       </div>
                     ))}
                   </div>}
 
-                  {/* SUMMARY */}
-                  {(c.lines||[]).length>0&&<><div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
+                  {/* SUMMARY — refund is booking-level, shown transparently */}
+                  {(c.lines||[]).length>0&&<>
+                  <div style={{background:"#eff4fb",border:"1px solid #d4e0f5",borderRadius:11,padding:"12px 15px",marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.6,textTransform:"uppercase",marginBottom:8}}>Refund calculation</div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>Client ne total diya</span><b className="mono" style={{color:"#0f2350"}}>{money(R.clientPaidTotal)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>− Penalty + profit jo aapne rakha</span><b className="mono" style={{color:"#b45309"}}>− {money(R.totalKept)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"7px 0 0",marginTop:5,borderTop:"1px solid #d4e0f5",color:"#0f2350",fontWeight:800}}><span>Client refund</span><b className="mono" style={{color:"#2563eb"}}>{money(R.refund)}</b></div>
+                    {R.totalKept>R.clientPaidTotal&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Aap client ke diye hue (₹{R.clientPaidTotal.toLocaleString("en-IN")}) se zyada rakh rahe ho — refund 0 hai, aur ₹{(R.totalKept-R.clientPaidTotal).toLocaleString("en-IN")} client se abhi aur lena baaki hai.</div>}
+                  </div>
+                  <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
                     <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Total Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
                     <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Vendor retained</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#f0a04b"}}>{money(R.vendorRetained)}</div></div>
                     <div style={{flex:"1 1 80px",borderLeft:"1px solid #24345e",paddingLeft:10}}>
