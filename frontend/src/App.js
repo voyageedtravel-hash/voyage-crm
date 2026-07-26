@@ -652,8 +652,12 @@ const emptyHotelVendor = () => ({
   country:"", city:"", hotelName:"", photoUrl:"", starRating:"", roomCategory:"Deluxe Room",
   checkIn:"", checkOut:"", nights:0,
   confirmationNo:"",          // supplier booking reference — printed on vouchers
+  roomPricing:false,          // when true, roomsList drives cost/selling
+  roomsList:[],               // CRM 3.0: per-room allocation — who sleeps where
   costPrice:"", sellingPrice:"", payments:[],
 });
+// A physical room in a hotel booking: its own type, occupants and rates.
+const emptyRoom = () => ({ id:uid(), roomType:"Deluxe Room", travellerIds:[], extraBed:false, cost:"", sell:"" });
 // ── Tiered options (3★ / 4★ / 5★) — each tier has its own hotels + total price ──
 const emptyTierHotel = () => ({ id:uid(), hotelName:"", city:"", photoUrl:"", roomCategory:"" });
 const emptyTier = (star, label) => ({
@@ -1787,6 +1791,77 @@ ${text}
     setDeal(copy); saveDeal(copy);
     window.veToast && window.veToast("Deal duplicate ho gayi — same package, payments/refunds fresh. Client name update kar lo ✏️","success");
   };
+  // ── Per-room allocation (CRM 3.0) — who sleeps where, priced per room ──
+  const setHotelRooms=(hid,mut)=>setDeal(d=>({...d,hotelVendors:(d.hotelVendors||[]).map(v=>{
+    if(v.id!==hid) return v;
+    const nv=mut({...v});
+    if(nv.roomPricing){
+      const c=(nv.roomsList||[]).reduce((s,r)=>s+(Number(r.cost)||0),0);
+      const sl=(nv.roomsList||[]).reduce((s,r)=>s+(Number(r.sell)||0),0);
+      nv.costPrice=c?String(c):""; nv.sellingPrice=sl?String(sl):"";
+      // keep the component's traveller roster in sync with room occupants
+      nv.travellerIds=[...new Set((nv.roomsList||[]).flatMap(r=>r.travellerIds||[]))];
+    }
+    return nv;
+  })}));
+  const addRoom=(hid)=>setHotelRooms(hid,v=>({...v,roomsList:[...(v.roomsList||[]),{...emptyRoom(),roomType:v.roomCategory||"Deluxe Room"}]}));
+  const rmRoom=(hid,rid)=>setHotelRooms(hid,v=>({...v,roomsList:(v.roomsList||[]).filter(r=>r.id!==rid)}));
+  const updRoom=(hid,rid,key,val)=>setHotelRooms(hid,v=>({...v,roomsList:(v.roomsList||[]).map(r=>r.id===rid?{...r,[key]:val}:r)}));
+  const toggleRoomTraveller=(hid,rid,tid)=>setHotelRooms(hid,v=>({...v,roomsList:(v.roomsList||[]).map(r=>{
+    if(r.id!==rid) return {...r, travellerIds:(r.travellerIds||[]).filter(x=>x!==tid)};  // a traveller sleeps in one room only
+    const on=(r.travellerIds||[]).includes(tid);
+    return {...r, travellerIds:on?(r.travellerIds||[]).filter(x=>x!==tid):[...(r.travellerIds||[]),tid]};
+  })}));
+  const RoomBlock=(hv)=>{
+    const T=(deal.travellers||[]).filter(t=>!t.cancelled);
+    if(!T.length) return null;
+    const rooms=hv.roomsList||[];
+    const assigned=new Set(rooms.flatMap(r=>r.travellerIds||[]));
+    const unassigned=T.filter(t=>!assigned.has(t.id));
+    return <div style={{marginTop:10,border:"1px dashed #c9d6ef",borderRadius:10,padding:"10px 12px",background:"#fbfdff"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+        <span style={{fontSize:9.5,fontWeight:800,letterSpacing:.6,textTransform:"uppercase",color:"#334e82"}}>🛏️ Room Allocation ({rooms.length} room{rooms.length===1?"":"s"})</span>
+        <button onClick={()=>addRoom(hv.id)} style={{border:"none",background:"#eef1f7",color:"#334e82",borderRadius:6,padding:"2px 9px",fontSize:9.5,fontWeight:700,cursor:"pointer"}}>+ Add Room</button>
+        <label style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:5,fontSize:10.5,fontWeight:700,color:"#0e7490",cursor:"pointer"}}>
+          <input type="checkbox" checked={!!hv.roomPricing} onChange={()=>setHotelRooms(hv.id,v=>({...v,roomPricing:!v.roomPricing}))}/> Per-room pricing
+        </label>
+      </div>
+      {rooms.length===0&&<div style={{fontSize:11,color:"#94a3b8",padding:"4px 0"}}>Koi room nahi. "+ Add Room" se rooms banao, phir travellers assign karo.</div>}
+      {rooms.map((r,i)=>(
+        <div key={r.id} style={{border:"1px solid #e3eaf7",borderRadius:9,padding:"9px 11px",marginBottom:7,background:"#fff"}}>
+          <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",marginBottom:7}}>
+            <span style={{fontSize:10,fontWeight:800,color:"#c9942a",background:"#faf1dc",borderRadius:20,padding:"2px 9px"}}>ROOM {i+1}</span>
+            <select value={r.roomType} onChange={e=>updRoom(hv.id,r.id,"roomType",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"4px 7px",fontSize:11}}>
+              {ROOM_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+            </select>
+            <label style={{display:"flex",alignItems:"center",gap:4,fontSize:10.5,color:"#5a6b8c",cursor:"pointer"}}>
+              <input type="checkbox" checked={!!r.extraBed} onChange={e=>updRoom(hv.id,r.id,"extraBed",e.target.checked)}/> Extra bed
+            </label>
+            <span style={{fontSize:10,color:"#94a3b8"}}>{(r.travellerIds||[]).length} guest{(r.travellerIds||[]).length===1?"":"s"}</span>
+            {hv.roomPricing&&<span style={{display:"flex",gap:5,marginLeft:"auto"}}>
+              <input type="number" value={r.cost} onChange={e=>updRoom(hv.id,r.id,"cost",e.target.value)} placeholder="Cost" className="mono" style={{width:82,border:"1px solid #d4e0f5",borderRadius:6,padding:"4px 6px",fontSize:11}}/>
+              <input type="number" value={r.sell} onChange={e=>updRoom(hv.id,r.id,"sell",e.target.value)} placeholder="Sell" className="mono" style={{width:82,border:"1px solid #d4e0f5",borderRadius:6,padding:"4px 6px",fontSize:11}}/>
+            </span>}
+            <button onClick={()=>rmRoom(hv.id,r.id)} style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:13,fontWeight:700,marginLeft:hv.roomPricing?0:"auto"}}>✕</button>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+            {T.map(t=>{
+              const here=(r.travellerIds||[]).includes(t.id);
+              const elsewhere=!here&&assigned.has(t.id);
+              return <button key={t.id} onClick={()=>toggleRoomTraveller(hv.id,r.id,t.id)}
+                title={elsewhere?"Doosre room mein hai — click karke yahan le aao":""}
+                style={{border:"1px solid "+(here?"#0891b2":"#e8edf6"),background:here?"#e0f7fb":"#fff",
+                  color:here?"#0e7490":elsewhere?"#c3cddf":"#94a3b8",borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700,cursor:"pointer",opacity:elsewhere?.55:1}}>
+                {here?"✓ ":""}{travellerName(t)}
+              </button>;
+            })}
+          </div>
+        </div>
+      ))}
+      {rooms.length>0&&unassigned.length>0&&<div style={{fontSize:10.5,color:"#b45309",marginTop:4}}>⚠️ {unassigned.length} traveller abhi kisi room mein nahi: {unassigned.map(travellerName).join(", ")}</div>}
+    </div>;
+  };
+
   // ── Traveller handlers (CRM 3.0) ──
   // Per-pax pricing: traveller type → rate key
   const TYPE_KEY={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
@@ -2686,18 +2761,32 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
     const hotelCards=hotels.map(h=>{
       const nights=Number(h.nights)||0;
+      const rl=(h.roomsList||[]).filter(r=>(r.travellerIds||[]).length);
+      const roomBlock = rl.length
+        ? `<div style="margin-top:12px;border-top:1px dashed #dde4f0;padding-top:10px">
+             <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:7px">ROOM ALLOCATION</div>
+             ${rl.map((r,i)=>`<div style="border:1px solid #eef1f7;border-radius:9px;padding:8px 11px;margin-bottom:6px">
+               <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:4px">
+                 <span style="font-size:11px;font-weight:800;color:#c9961a">ROOM ${i+1}</span>
+                 <span style="font-size:11px;color:#5a6b8c">${esc(r.roomType||"")}${r.extraBed?" · Extra bed":""}</span>
+               </div>
+               <div style="font-size:12.5px;color:#0d1b3e;font-weight:700">${(deal.travellers||[]).filter(t=>(r.travellerIds||[]).includes(t.id)).map(t=>esc(travellerName(t))).join(" &nbsp;·&nbsp; ")||"—"}</div>
+             </div>`).join("")}
+           </div>`
+        : `<div style="margin-top:12px;border-top:1px dashed #dde4f0;padding-top:10px">
+             <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">GUEST NAMES</div>
+             <table style="width:100%;border-collapse:collapse">${guestList}</table>
+           </div>`;
       return shell(h.hotelName||"Hotel Stay","HOTEL VOUCHER",
         row("Confirmation No.", h.confirmationNo?`<span style="background:#faf1dc;border:1px solid #e8d6a8;border-radius:6px;padding:3px 10px;font-family:monospace;letter-spacing:1px;color:#8a6d1f">${esc(h.confirmationNo)}</span>`:"<span style='color:#b9c3d6'>To be advised</span>",true)
         + row("City", esc(h.city||"—"))
         + row("Room Category", esc(h.roomCategory||"—"))
+        + (rl.length?row("Rooms", rl.length):"")
         + row("Check-in", fmtD(h.checkIn))
         + row("Check-out", fmtD(h.checkOut))
         + (nights?row("Nights", nights):"")
         + row("Guests", paxLine),
-        `<div style="margin-top:12px;border-top:1px dashed #dde4f0;padding-top:10px">
-           <div style="font-size:9.5px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">GUEST NAMES</div>
-           <table style="width:100%;border-collapse:collapse">${guestList}</table>
-         </div>`);
+        roomBlock);
     }).join("");
 
     const landCards=lands.map(l=>{
@@ -4450,6 +4539,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     </div>
                   </div>
                   {PaxBlock("hotelVendors",hv)}
+                  {RoomBlock(hv)}
 
                   {/* Row 2: Hotel details */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1.5fr 1.5fr 1fr 1fr 0.6fr",gap:10}}>
