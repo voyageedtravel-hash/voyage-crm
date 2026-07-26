@@ -1061,6 +1061,7 @@ export default function TravelCRM() {
   const [dirty,setDirty]=useState(false);
   const _dealLoadedRef=useRef(false);
   const _autosaveTimer=useRef(null);
+  const _lastAutoSigRef=useRef("");   // content signature — ignores save metadata
   const [apiLoading,setApiLoading]=useState(false);
   // User management
   const [users,setUsers]=useState([]);
@@ -1597,6 +1598,14 @@ ${text}
   // ── Dirty tracking + debounced autosave ──
   useEffect(()=>{
     if(!_dealLoadedRef.current){_dealLoadedRef.current=true;return;}
+    // Only real CONTENT changes should arm the autosave. A completed save writes
+    // fresh metadata (_savedAt/_id/_localId) back into the deal, and treating that
+    // as a change re-armed this timer forever — an endless save→setDeal→save loop
+    // that flickered the Unsaved/Saved badge and re-rendered the list every 2.5s.
+    const {_savedAt,_id,_localId,...content}=deal||{};
+    let sig; try{ sig=JSON.stringify(content); }catch{ sig=String(Date.now()); }
+    if(sig===_lastAutoSigRef.current) return;
+    _lastAutoSigRef.current=sig;
     setDirty(true);
     if(_autosaveTimer.current) clearTimeout(_autosaveTimer.current);
     _autosaveTimer.current=setTimeout(()=>{ if(deal&&deal.clientName) saveToAllDeals(true); },2500);
