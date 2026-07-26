@@ -601,63 +601,49 @@ const compById = (d, kind, id) => dealComponents(d).find(c=>c.compKind===kind &&
 // base is the per-traveller share actually attributable to the cancelled pax.
 const cancelCompute = (c, d) => {
   const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
-  // What the client has actually paid into this booking so far. THIS is the
-  // ceiling for any refund — you can never refund money you haven't received.
+  // What the client has actually paid in — a cross-check only, never used to
+  // guess any component's numbers.
   const clientPaidTotal=sum(d.clientPayments||[],"amount");
 
+  // Every figure below is entered by the user per component. Nothing is
+  // inferred from selling price or per-head shares — that guessing was the
+  // whole source of the wrong numbers. The system only records and totals.
   const lines=(c.lines||[]).map(ln=>{
     const comp=compById(d, ln.compKind, ln.compId) || {paidToVendor:0,sell:0,cost:0,vendorName:ln.compId,label:"(removed component)"};
     const nCancel=(ln.travellerIds||[]).length || Number(ln.paxCancelled)||0;
-    const vendorRetained=Number(ln.vendorRetained)||0;               // real liability to supplier
-    const penalty=Number(ln.vendorPenaltyToClient)||0;              // cancellation charge to client
-    const profit=Number(ln.myProfit)||0;                            // own profit kept, if any
-    // Per-component net profit is still: what we keep from the client minus
-    // what the vendor kept from us. Independent of how much the client has paid.
-    const netProfit = (penalty + profit) - vendorRetained;
-    // Cost attributable to the cancelled travellers on this component. EXACT
-    // when per-person rates exist; else a per-head share of the component cost.
-    const TK={"Adult":"adult","Child (with bed)":"cwb","Child (without bed)":"cwob","Infant":"inf"};
-    let cancelledCost=0;
-    if((ln.travellerIds||[]).length && comp.paxRates){
-      (d.travellers||[]).filter(t=>ln.travellerIds.includes(t.id)).forEach(t=>{
-        const rate=Number((comp.paxRates||{})[(TK[t.type]||"adult")+"C"])||0;
-        cancelledCost+=toINR(rate, comp.currency, comp.exchangeRate);
-      });
-      cancelledCost=Math.round(cancelledCost);
-    }else if(nCancel>0 && paxTotal>0){
-      cancelledCost=Math.round((comp.cost||0)/paxTotal*nCancel);
-    }
-    // After cancellation this component's cost = original − cancelled share +
-    // whatever the vendor actually retained on those cancelled travellers.
-    const costReduction = Math.max(0, cancelledCost - vendorRetained);
-    return { ...ln, comp, nCancel, vendorRetained, penalty, profit,
-      paidToVendor:comp.paidToVendor, netProfit, isLoss:netProfit<0, label:comp.label,
-      cancelledCost, costReduction };
+    const vendorLoss=Number(ln.vendorRetained)||0;        // vendor ka jo doob gaya (real cost/loss)
+    const penalty=Number(ln.vendorPenaltyToClient)||0;    // client se cancellation charge
+    const profit=Number(ln.myProfit)||0;                  // apna extra profit
+    const refund=Number(ln.clientRefund)||0;              // client ko is component ka refund (user enters)
+    // Net profit on this component = what we keep from the client − what we lost
+    // to the vendor. "What we keep" is penalty + profit (refund is what we give
+    // back, so it isn't kept).
+    const netProfit=(penalty+profit)-vendorLoss;
+    return { ...ln, comp, nCancel, vendorLoss, vendorRetained:vendorLoss, penalty, profit, refund,
+      paidToVendor:comp.paidToVendor, netProfit, isLoss:netProfit<0, label:comp.label };
   });
 
+  const totRefund=lines.reduce((s,l)=>s+l.refund,0);
   const totPenalty=lines.reduce((s,l)=>s+l.penalty,0);
   const totProfitKept=lines.reduce((s,l)=>s+l.profit,0);
-  const totVendorRetained=lines.reduce((s,l)=>s+l.vendorRetained,0);
+  const totVendorLoss=lines.reduce((s,l)=>s+l.vendorLoss,0);
   const totProfit=lines.reduce((s,l)=>s+l.netProfit,0);
-  const totCostReduction=lines.reduce((s,l)=>s+l.costReduction,0);  // cost that drops off
 
-  // ── THE CORE FIX ──────────────────────────────────────────────────────
-  // Refund = money the client actually gave us − everything we keep from them
-  // (cancellation penalties + any profit we're holding back). Clamped to never
-  // exceed what they paid and never go negative. Selling price is NOT used:
-  // you cannot refund a fare the client never fully paid for.
-  const totalKept = totPenalty + totProfitKept;
-  const refund = Math.max(0, Math.min(clientPaidTotal, clientPaidTotal - totalKept));
+  // Cost drops by the vendor loss (that's the only cost that actually remains
+  // on cancelled parts — anything the vendor didn't keep is money back to us).
+  const totCostReduction=lines.reduce((s,l)=>{
+    const per=paxTotal>0?(l.comp.cost||0)/paxTotal:(l.comp.cost||0);
+    const cancelledCost=l.nCancel>0?Math.round(per*l.nCancel):0;
+    return s+Math.max(0,cancelledCost-l.vendorLoss);
+  },0);
 
-  // Original profit of the cancelled components (to revise booking profit).
   const cancelledCompOrigProfit=lines.reduce((s,l)=>s+((l.comp.sell||0)-(l.comp.cost||0)),0);
 
   return { paxTotal, lines, clientPaidTotal,
-    refund, penalty:totPenalty, vendorRetained:totVendorRetained,
+    refund:totRefund, penalty:totPenalty, vendorRetained:totVendorLoss, vendorLoss:totVendorLoss,
     profit:totProfit, isLoss:totProfit<0, cancelledCompOrigProfit,
     costReduction:totCostReduction,
-    // exposed so the UI can show the refund working transparently
-    totalKept };
+    totalKept:totPenalty+totProfitKept };
 };
 const nightsBetween = (checkIn, checkOut) => {
   if (!checkIn || !checkOut) return 0;
@@ -5074,10 +5060,15 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                             <div style={{fontSize:10,color:"#15803d",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>My profit ₹ <span style={{color:"#9fc8ab",fontWeight:600,textTransform:"none",letterSpacing:0}}>— apna extra profit (penalty se alag), optional</span></div>
                             <input type="number" value={L.profit} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"myProfit",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px",fontSize:13}}/>
                           </div>
+                          <div>
+                            <div style={{fontSize:10,color:"#2563eb",letterSpacing:.6,textTransform:"uppercase",marginBottom:4,fontWeight:700}}>Client refund ₹ <span style={{color:"#9fb4e0",fontWeight:600,textTransform:"none",letterSpacing:0}}>— is component ka client ko kitna wapas</span></div>
+                            <input type="number" value={L.refund} onChange={e=>updCancelLine(c.id,L.compKind,L.compId,"clientRefund",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px",fontSize:13}}/>
+                          </div>
                         </div>
                         {/* line outcome */}
-                        <div style={{marginTop:11,fontSize:12,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"9px 12px",textAlign:"right"}}>
-                          Is component pe net {L.isLoss?"loss":"profit"}: <b className="mono" style={{color:L.isLoss?"#dc2626":"#15803d"}}>{L.isLoss?"− ":""}{money(Math.abs(L.netProfit))}</b> <span style={{color:"#94a3b8"}}>(kept {money(L.penalty+L.profit)} − vendor {money(L.vendorRetained)})</span>
+                        <div style={{marginTop:11,fontSize:12,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"9px 12px",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                          <span>Client refund: <b className="mono" style={{color:"#2563eb"}}>{money(L.refund)}</b></span>
+                          <span>Net {L.isLoss?"loss":"profit"}: <b className="mono" style={{color:L.isLoss?"#dc2626":"#15803d"}}>{L.isLoss?"− ":""}{money(Math.abs(L.netProfit))}</b> <span style={{color:"#94a3b8"}}>(kept {money(L.penalty+L.profit)} − vendor loss {money(L.vendorLoss)})</span></span>
                         </div>
                       </div>
                     ))}
@@ -5086,12 +5077,12 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   {/* SUMMARY — refund is booking-level, shown transparently */}
                   {(c.lines||[]).length>0&&<>
                   <div style={{background:"#eff4fb",border:"1px solid #d4e0f5",borderRadius:11,padding:"12px 15px",marginBottom:10}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.6,textTransform:"uppercase",marginBottom:8}}>Refund calculation</div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>Client ne total diya</span><b className="mono" style={{color:"#0f2350"}}>{money(R.clientPaidTotal)}</b></div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>− Penalty + profit jo aapne rakha</span><b className="mono" style={{color:"#b45309"}}>− {money(R.totalKept)}</b></div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"7px 0 0",marginTop:5,borderTop:"1px solid #d4e0f5",color:"#0f2350",fontWeight:800}}><span>Client refund</span><b className="mono" style={{color:"#2563eb"}}>{money(R.refund)}</b></div>
-                    {R.totalKept>R.clientPaidTotal&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Aap client ke diye hue (₹{R.clientPaidTotal.toLocaleString("en-IN")}) se zyada rakh rahe ho — refund 0 hai, aur ₹{(R.totalKept-R.clientPaidTotal).toLocaleString("en-IN")} client se abhi aur lena baaki hai.</div>}
-                    {R.costReduction>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"7px 0 0",marginTop:7,borderTop:"1px dashed #d4e0f5",color:"#15803d"}}><span>✓ Cost bhi kam hui (cancelled logon ki, vendor retained chhod ke)</span><b className="mono">− {money(R.costReduction)}</b></div>}
+                    <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.6,textTransform:"uppercase",marginBottom:8}}>Cross-check</div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>Client ne is booking mein total diya</span><b className="mono" style={{color:"#0f2350"}}>{money(R.clientPaidTotal)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>Aap total refund kar rahe ho</span><b className="mono" style={{color:"#2563eb"}}>{money(R.refund)}</b></div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>Aapne rakha (penalty + profit)</span><b className="mono" style={{color:"#0f2350"}}>{money(R.totalKept)}</b></div>
+                    {R.refund>R.clientPaidTotal&&<div style={{fontSize:10.5,color:"#b45309",marginTop:6}}>⚠️ Aap refund (₹{R.refund.toLocaleString("en-IN")}) client ke diye hue (₹{R.clientPaidTotal.toLocaleString("en-IN")}) se zyada kar rahe ho — number check karo.</div>}
+                    {R.costReduction>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"7px 0 0",marginTop:7,borderTop:"1px dashed #d4e0f5",color:"#15803d"}}><span>✓ Cost bhi kam hui (cancelled logon ki, vendor loss chhod ke)</span><b className="mono">− {money(R.costReduction)}</b></div>}
                   </div>
                   <div style={{display:"flex",gap:9,flexWrap:"wrap",background:"#0d1b3e",borderRadius:11,padding:"12px 14px",marginBottom:8}}>
                     <div style={{flex:"1 1 80px"}}><div style={{fontSize:9,color:"#8fa0c8",letterSpacing:.5,textTransform:"uppercase"}}>Total Refund</div><div className="mono" style={{fontSize:14,fontWeight:800,color:"#60a5fa"}}>{money(R.refund)}</div></div>
