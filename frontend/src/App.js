@@ -2070,8 +2070,14 @@ ${text}
       cancellations=cancellations.map(c=>{
         if(c.id!==cid) return c;
         const comps=dealComponents(d);
+        const allIds=(d.travellers||[]).filter(t=>!t.cancelled).map(t=>t.id);
         const paxTotal=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
-        return {...c, lines: comps.map(comp=>({...emptyCancelLine(), compKind:comp.compKind, compId:comp.compId, paxCancelled:String(paxTotal||"")}))};
+        return {...c, lines: comps.map(comp=>({...emptyCancelLine(), compKind:comp.compKind, compId:comp.compId,
+          // Pre-tick every traveller on each component so the user SEES who's
+          // cancelling and can untick anyone still travelling. Falls back to a
+          // count only when the deal has no traveller records.
+          travellerIds: allIds.length ? [...(comp.travellerIds&&comp.travellerIds.length?comp.travellerIds:allIds)] : [],
+          paxCancelled: allIds.length ? "" : String(paxTotal||"") }))};
       });
     }
     if(key==="scope" && val==="components"){
