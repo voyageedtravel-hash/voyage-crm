@@ -531,7 +531,7 @@ const shouldAutoComplete = (d) => {
 // Fixes the mismatch where dashboard, booked-rollup and deal list each
 // computed "client pending" differently (aggregate vs per-deal netting).
 const dealFinance = (d) => {
-  const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+  const V=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.trainVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
   const vendorSell=V.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
   const ts=tierSellINR(d);
   const sell = ts!=null ? ts : vendorSell;
@@ -588,6 +588,11 @@ const dealComponents = (d) => {
     return `Flight — ${(v.name||"Airline").trim()}${route?" ("+route+")":""}`;
   });
   add("hotel", d.hotelVendors, v=>`Hotel — ${(v.hotelName||v.name||"Stay").trim()}${v.city?" ("+v.city+")":""}`);
+  add("train", d.trainVendors, v=>{
+    const s=(v.segments||[]).filter(x=>x.from||x.to);
+    const route=s.length?`${s[0].from||"?"}–${s[s.length-1].to||"?"}`:"";
+    return `Train — ${(v.name||"Train").trim()}${route?" ("+route+")":""}`;
+  });
   add("land", d.landVendors, v=>`Land — ${(v.name||"Transfers").trim()}`);
   add("visa", d.visaVendors, v=>`Visa — ${(v.name||"Visa").trim()}`);
   return out.filter(c=>c.vendorName||c.cost||c.sell);   // drop fully-empty placeholder rows
@@ -729,6 +734,25 @@ const emptyFlightVendor = () => ({
   returnSectors:[emptySector()],
 });
 
+// ── TRAINS (domestic + international — Rajdhani, Eurostar, Shinkansen, etc.) ──
+// Trains behave like flights but with train-specific fields (train number/name,
+// PNR, class of travel, coach/berth) and country-independent stations.
+const TRAIN_CLASSES = ["1A","2A","3A","SL","CC","EC","2S","Sleeper","First Class","Business","Standard","Other"];
+const emptyTrainSegment = () => ({
+  id:uid(), trainNo:"", trainName:"",
+  from:"", fromStation:"", to:"", toStation:"",
+  date:"", depTime:"", arrTime:"",
+  classOfTravel:"", coach:"", pnr:"",
+});
+const emptyTrainVendor = () => ({
+  id:uid(), name:"", currency:"INR", exchangeRate:"",
+  costPrice:"", sellingPrice:"", payments:[],
+  tripType:"one-way",             // "one-way" | "return" | "multi-city"
+  isInternational:false,
+  segments:[emptyTrainSegment()],
+  returnSegments:[emptyTrainSegment()],
+});
+
 const initDeal = {
   clientName:"", contactNo:"", email:"",
   adults:"2", children:"0", infants:"0", rooms:"1",
@@ -747,6 +771,7 @@ const initDeal = {
   dealNumber:"",
   hotelVendors:[emptyHotelVendor()],
   flightVendors:[emptyFlightVendor()],
+  trainVendors:[],
   landVendors:[emptyLandVendor()],
   visaVendors:[emptyVisaVendor()],
   clientPayments:[],
@@ -766,7 +791,7 @@ const DEALS_KEY = "travelcrm_all_deals";
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
 const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
-  ["hotelVendors","flightVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers","auditLog","eTickets"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
+  ["hotelVendors","flightVendors","trainVendors","landVendors","visaVendors","clientPayments","refunds","cancellations","attachments","pricingRows","travellers","auditLog","eTickets"].forEach(k=>{ if(!Array.isArray(x[k])) x[k]=Array.isArray(initDeal[k])?[]:x[k]===undefined?[]:x[k]; if(x[k]==null) x[k]=[]; });
   // Tiered options — guarantee 3 tiers exist for older deals
   if(!Array.isArray(x.tiers) || x.tiers.length===0) x.tiers = defaultTiers();
   x.tiers = x.tiers.map(t=>({...emptyTier(t.star,t.label),...t, hotels: Array.isArray(t.hotels)&&t.hotels.length?t.hotels:[emptyTierHotel()]}));
@@ -1820,6 +1845,16 @@ ${text}
   const addFV=()=>setDeal(d=>({...d,flightVendors:[...d.flightVendors,emptyFlightVendor()]}));
   const rmFV=(id)=>setDeal(d=>({...d,flightVendors:d.flightVendors.filter(v=>v.id!==id)}));
 
+  // ── Train handlers (parallel to flights) ──
+  const updT=(id,key,val)=>setDeal(d=>({...d,trainVendors:(d.trainVendors||[]).map(v=>v.id===id?withCurrencyRate(v,key,val):v)}));
+  const addTV=()=>setDeal(d=>({...d,trainVendors:[...(d.trainVendors||[]),emptyTrainVendor()]}));
+  const rmTV=(id)=>setDeal(d=>({...d,trainVendors:(d.trainVendors||[]).filter(v=>v.id!==id)}));
+  const updTSeg=(vid,idx,seg,segData)=>setDeal(d=>({...d,trainVendors:(d.trainVendors||[]).map(v=>{
+    if(v.id!==vid) return v; const arr=[...(v[seg]||[])]; arr[idx]={...arr[idx],...segData}; return {...v,[seg]:arr};
+  })}));
+  const addTSeg=(vid,seg)=>setDeal(d=>({...d,trainVendors:(d.trainVendors||[]).map(v=>v.id===vid?{...v,[seg]:[...(v[seg]||[]),emptyTrainSegment()]}:v)}));
+  const rmTSeg=(vid,idx,seg)=>setDeal(d=>({...d,trainVendors:(d.trainVendors||[]).map(v=>v.id===vid?{...v,[seg]:(v[seg]||[]).filter((_,i)=>i!==idx)}:v)}));
+
   const updL=(id,key,val)=>setDeal(d=>({...d,landVendors:d.landVendors.map(v=>v.id===id?withCurrencyRate(v,key,val):v)}));
   const addLV=()=>setDeal(d=>({...d,landVendors:[...d.landVendors,emptyLandVendor()]}));
   const rmLV=(id)=>setDeal(d=>({...d,landVendors:d.landVendors.filter(v=>v.id!==id)}));
@@ -2195,7 +2230,7 @@ Never output anything except one of these two JSON shapes.`;
     setDeal(d=>{
       let nd={...d, cancellations:[...(d.cancellations||[]), cxl]};
       // Write the AI-computed new CP/SP straight into the components.
-      const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
+      const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",train:"trainVendors",land:"landVendors",visa:"visaVendors"};
       (p.lines||[]).forEach(l=>{
         const [kind,id]=(l.componentKey||":").split(":");
         const arrKey=KIND2ARR[kind]; if(!arrKey) return;
@@ -2231,7 +2266,7 @@ Never output anything except one of these two JSON shapes.`;
       const R=cancelCompute(c,d);
       // (2) apply repricing the user entered ("cost badal gayi?" → yes)
       if(c.repriceAsk==="yes" && (c.reprices||[]).length){
-        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
+        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",train:"trainVendors",land:"landVendors",visa:"visaVendors"};
         (c.reprices||[]).forEach(rp=>{
           const arrKey=KIND2ARR[rp.compKind]; if(!arrKey) return;
           nd[arrKey]=(nd[arrKey]||[]).map(v=>{
@@ -2254,7 +2289,7 @@ Never output anything except one of these two JSON shapes.`;
       const paxTotalX=(Number(d.adults)||0)+(Number(d.children)||0)+(Number(d.infants)||0);
       (c.lines||[]).forEach(ln=>{
         if(!(ln.travellerIds||[]).length && !Number(ln.paxCancelled)) return;
-        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",land:"landVendors",visa:"visaVendors"};
+        const KIND2ARR={flight:"flightVendors",hotel:"hotelVendors",train:"trainVendors",land:"landVendors",visa:"visaVendors"};
         const arrKey=KIND2ARR[ln.compKind]; if(!arrKey) return;
         const nCancel=(ln.travellerIds||[]).length || Number(ln.paxCancelled)||0;
         const vendorLoss=Number(ln.vendorRetained)||0;
@@ -2525,6 +2560,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"client",label:"👤 Client"},
     ...(isBookedStage(deal)?[{id:"travellers",label:"🧑‍🤝‍🧑 Travellers"}]:[]),
     {id:"flights",label:"✈️ Flights"},
+    {id:"trains",label:"🚆 Trains"},
     {id:"hotels",label:"🏨 Hotels"},
     {id:"land",label:"🚌 Land"},
     {id:"visa",label:"🛂 Visa"},
@@ -2609,7 +2645,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     // otherwise it read as a fake loss (cost with zero sell).
     const byVendor = {};
     allD.filter(isBooked).forEach(d=>{
-      [...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].forEach(v=>{
+      [...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.trainVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].forEach(v=>{
         const raw=(v.name||"").trim(); if(!raw) return;
         const key=raw.toLowerCase();                     // "trip jack" and "Trip Jack" are one vendor
         if(!byVendor[key]) byVendor[key]={name:raw,deals:0,cost:0,paid:0,sell:0,priced:0};
@@ -3086,6 +3122,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
     const nightsTotal=hotels.reduce((s,h)=>s+(Number(h.nights)||0),0);
     const flights=(deal.flightVendors||[]).filter(f=>(f.sectors||[]).some(s=>s.from||s.to));
+    const trains=(deal.trainVendors||[]).filter(t=>(t.segments||[]).some(s=>s.from||s.to));
     const ref=deal.dealNumber||("VE"+String(Date.now()).slice(-6));
     const showF=propFlights!=="without" && flights.length>0;
     const showH=propFlights!=="only";
@@ -3304,6 +3341,43 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         ${noTimes?`<div style="background:#fdf9ee;font-size:10px;color:#8a6d1a;padding:7px 18px">🕐 Exact departure & arrival timings will be confirmed on your final ticket.</div>`:""}
       </div>`;}).join("") : "";
 
+    const trainBlocks = trains.map(tv=>{
+      const trainSegRow=(s)=>`
+        <div style="padding:14px 18px;border-top:1px solid #f0f4fa">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="font-size:13px;font-weight:800;color:#0d1b3e">${esc(s.trainNo||"")}${s.trainName?` <span style="font-weight:600;color:#5a6b8c">${esc(s.trainName)}</span>`:""}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${s.classOfTravel?`<span style="background:#eef3fc;color:#334e82;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">${esc(s.classOfTravel)}</span>`:""}
+              ${s.coach?`<span style="background:#faf1dc;color:#8a6d1f;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">Coach ${esc(s.coach)}</span>`:""}
+              ${s.pnr?`<span style="background:#f0faf4;color:#15803d;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">PNR ${esc(s.pnr)}</span>`:""}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:96px">
+              <div style="font-size:22px;font-weight:800;color:#0d1b3e;line-height:1">${esc(s.from||"—")}</div>
+              <div style="font-size:10.5px;color:#5a6b8c">${esc(s.fromStation||"")}</div>
+              <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${esc(s.depTime||"—")}</div>
+              <div style="font-size:10px;color:#8b98b4">${esc(s.date||"")}</div>
+            </div>
+            <div style="flex:0 0 60px;text-align:center;color:#c9961a;font-size:16px">🚆</div>
+            <div style="flex:1;min-width:96px;text-align:right">
+              <div style="font-size:22px;font-weight:800;color:#0d1b3e;line-height:1">${esc(s.to||"—")}</div>
+              <div style="font-size:10.5px;color:#5a6b8c">${esc(s.toStation||"")}</div>
+              <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${esc(s.arrTime||"—")}</div>
+            </div>
+          </div>
+        </div>`;
+      const outSegs=(tv.segments||[]).filter(s=>s.from||s.to);
+      const retSegs=(tv.returnSegments||[]).filter(s=>s.from||s.to);
+      const label=tv.tripType==="return"?"RETURN":tv.tripType==="multi-city"?"MULTI-LEG":"ONE WAY";
+      return `
+      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;overflow:hidden;margin-bottom:16px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+        <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;padding:10px 18px;font-size:12px;font-weight:700;letter-spacing:1px">🚆 TRAIN · ${label}${tv.isInternational?" · INTERNATIONAL":""}${tv.name?` · ${esc(tv.name)}`:""}</div>
+        ${outSegs.map(trainSegRow).join("")}
+        ${retSegs.map(s=>`<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>`+trainSegRow(s)).join("")}
+      </div>`;
+    }).join("");
+
     const hotelBlocks = showH ? hotels.map(h=>`
       <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
         ${h.photoUrl?`<img src="${esc(h.photoUrl)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>`:""}
@@ -3506,6 +3580,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${highlightsHTML}
     ${glimpseHTML}
     ${showF?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}`:""}
+    ${trains.length?`<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}`:""}
     ${tierOptionsBlock}
     ${showH&&hotels.length&&!tierOptionsBlock?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}`:""}
     ${landBlocks?`<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}`:""}
@@ -3669,7 +3744,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
   }
   function _cmpCalc(d0){
     const d=normalizeDeal(d0);
-    const allV=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
+    const allV=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.trainVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])];
     const refT=(d.refunds||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
     const sell=Math.max(0,allV.reduce((a,v)=>a+vendorINR(v).sellINR,0)-refT);
     const hotels=(d.hotelVendors||[]).filter(h=>h.hotelName||h.city).map(h=>({city:h.city,name:h.hotelName,star:h.starRating,room:h.roomCategory,n:Number(h.nights)||nightsBetween(h.checkIn,h.checkOut)||0}));
@@ -3732,6 +3807,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(!ph){window.veToast("Client phone number missing","error");return;}
     const hotels=(deal.hotelVendors||[]).filter(h=>h.hotelName||h.city);
     const flights=(deal.flightVendors||[]).filter(f=>(f.sectors||[]).some(s=>s.from||s.to));
+    const trains=(deal.trainVendors||[]).filter(t=>(t.segments||[]).some(s=>s.from||s.to));
     const sell=propSell();
     let m="✈️ *VOYAGE-ED TRAVELS — Trip Proposal*\n\n";
     m+="Hi "+((deal.clientName||"").split(" ")[0]||"")+"! Here is your personalised plan 🌍\n\n";
@@ -3739,6 +3815,10 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     if(propFlights!=="without"&&flights.length){
       m+="\n*✈️ Flights:*\n";
       flights.forEach(f=>(f.sectors||[]).forEach(s=>{ if(s.from||s.to) m+="• "+(s.airlineName||s.airlineCode||"Flight")+" — "+s.from+" → "+s.to+(s.date?" ("+s.date+")":"")+"\n"; }));
+    }
+    if(trains.length){
+      m+="\n*🚆 Trains:*\n";
+      trains.forEach(t=>(t.segments||[]).forEach(s=>{ if(s.from||s.to) m+="• "+(s.trainName||s.trainNo||"Train")+" — "+s.from+" → "+s.to+(s.date?" ("+s.date+")":"")+"\n"; }));
     }
     if(propFlights!=="only"&&hotels.length){
       m+="\n*🏨 Stays:*\n";
@@ -3858,7 +3938,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   const vi=vendorINR(v); const due=vi.costINR-vi.paidINR;
                   if(due>0.5){ payable+=due; rows.push({ic,vn:v.name||v.hotelName||v.city||"Vendor",client:d.clientName||"—",dest:d.destination||"",due,travel}); }
                 }));
-                const sc=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].reduce((a,v)=>a+vendorINR(v).sellINR,0);
+                const sc=[...(d.hotelVendors||[]),...(d.flightVendors||[]),...(d.trainVendors||[]),...(d.landVendors||[]),...(d.visaVendors||[])].reduce((a,v)=>a+vendorINR(v).sellINR,0);
                 const ref=(d.refunds||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
                 const rec=(d.clientPayments||[]).reduce((a,x)=>a+(Number(x.amount)||0),0);
                 receivable+=Math.max(0,(sc-ref)-(rec-ref));
@@ -4740,6 +4820,104 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         )}
 
         {/* ══ HOTELS TAB ══ */}
+        {tab==="trains"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div className="card" style={{borderColor:"#334e82"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:8}}>
+                <span style={{fontSize:15,fontWeight:800,color:"#334e82"}}>🚆 Train Vendors</span>
+                <button onClick={addTV} className="btn btn-ind">+ Add Train Vendor</button>
+              </div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Domestic (IRCTC / Rajdhani / Vande Bharat) ya international (Eurostar, Shinkansen, Trenitalia) — dono add kar sakte ho. Multi-leg journey ke liye segments add karte jao.</div>
+
+              {(deal.trainVendors||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:13,padding:"22px 0"}}>Koi train nahi. "+ Add Train Vendor" se shuru karo.</div>}
+
+              {(deal.trainVendors||[]).map((tv,idx)=>{
+                const needsRate=tv.currency&&tv.currency!=="INR";
+                const inrCost=toINR(tv.costPrice,tv.currency,tv.exchangeRate);
+                const inrSell=toINR(tv.sellingPrice,tv.currency,tv.exchangeRate);
+                const paid=sum(tv.payments||[],"amount");
+                const segKey = tv.tripType==="return" ? ["segments","returnSegments"] : ["segments"];
+                return <div key={tv.id} style={{border:"1px solid #d4e0f5",borderRadius:12,padding:"14px 15px",marginBottom:14,background:"#fbfdff"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12}}>
+                    <span style={{background:"#334e82",color:"#fff",borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:800}}>{idx+1}</span>
+                    <input value={tv.name} onChange={e=>updT(tv.id,"name",e.target.value)} placeholder="Vendor name (IRCTC / Trainline / etc.)" style={{flex:"1 1 200px",border:"1px solid #d4e0f5",borderRadius:8,padding:"8px",fontSize:12.5}}/>
+                    <label style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#6b7a99",cursor:"pointer"}}>
+                      <input type="checkbox" checked={!!tv.isInternational} onChange={e=>updT(tv.id,"isInternational",e.target.checked)}/> International
+                    </label>
+                    <button onClick={()=>rmTV(tv.id)} className="btn btn-danger">✕</button>
+                  </div>
+
+                  {/* Money row */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:9,marginBottom:10}}>
+                    <div><span className="lbl">Currency</span>
+                      <select value={tv.currency} onChange={e=>updT(tv.id,"currency",e.target.value)}>
+                        {CURRENCIES.map(c=><option key={c}>{c}</option>)}
+                      </select></div>
+                    {needsRate&&<div><span className="lbl">1 {tv.currency} = ₹</span>
+                      <input className="mono" type="number" value={tv.exchangeRate} onChange={e=>updT(tv.id,"exchangeRate",e.target.value)} placeholder="0"/></div>}
+                    <div><span className="lbl">Cost ({tv.currency})</span>
+                      <input className="mono" type="number" value={tv.costPrice} onChange={e=>updT(tv.id,"costPrice",e.target.value)} placeholder="0"/>
+                      {needsRate&&<div style={{fontSize:9.5,color:"#94a3b8",marginTop:2}}>= ₹{Math.round(inrCost).toLocaleString("en-IN")}</div>}</div>
+                    <div><span className="lbl">Selling ({tv.currency})</span>
+                      <input className="mono" type="number" value={tv.sellingPrice} onChange={e=>updT(tv.id,"sellingPrice",e.target.value)} placeholder="0"/>
+                      {needsRate&&<div style={{fontSize:9.5,color:"#94a3b8",marginTop:2}}>= ₹{Math.round(inrSell).toLocaleString("en-IN")}</div>}</div>
+                  </div>
+                  {PaxBlock("trainVendors",tv)}
+
+                  {/* Trip type */}
+                  <div style={{display:"flex",gap:8,margin:"12px 0",flexWrap:"wrap"}}>
+                    {[["one-way","One Way"],["return","Return"],["multi-city","Multi Leg"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>updT(tv.id,"tripType",v)}
+                        style={{border:"1px solid "+(tv.tripType===v?"#334e82":"#d4e0f5"),background:tv.tripType===v?"#eef3fc":"#fff",color:tv.tripType===v?"#334e82":"#6b7a99",borderRadius:20,padding:"5px 13px",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>{l}</button>
+                    ))}
+                  </div>
+
+                  {/* Segments */}
+                  {segKey.map(seg=>(
+                    <div key={seg} style={{marginBottom:8}}>
+                      {tv.tripType==="return"&&<div style={{fontSize:10,fontWeight:800,letterSpacing:.7,color:"#c9942a",marginBottom:5,textTransform:"uppercase"}}>{seg==="segments"?"Outbound":"Return"}</div>}
+                      {(tv[seg]||[]).map((sg,i)=>(
+                        <div key={sg.id||i} style={{border:"1px dashed #d4e0f5",borderRadius:9,padding:"10px 12px",marginBottom:7,background:"#fff"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:9.5,fontWeight:800,letterSpacing:.6,color:"#94a3b8"}}>SEGMENT {i+1}</span>
+                            {(tv[seg]||[]).length>1&&<button onClick={()=>rmTSeg(tv.id,i,seg)} style={{marginLeft:"auto",border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:13,fontWeight:700}}>✕</button>}
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+                            <div><span className="lbl">Train No.</span><input value={sg.trainNo} onChange={e=>updTSeg(tv.id,i,seg,{trainNo:e.target.value})} placeholder="12951"/></div>
+                            <div><span className="lbl">Train Name</span><input value={sg.trainName} onChange={e=>updTSeg(tv.id,i,seg,{trainName:e.target.value})} placeholder="Mumbai Rajdhani"/></div>
+                            <div><span className="lbl">From (Station Code)</span><input value={sg.from} onChange={e=>updTSeg(tv.id,i,seg,{from:e.target.value.toUpperCase()})} placeholder="MMCT"/></div>
+                            <div><span className="lbl">From (Station Name)</span><input value={sg.fromStation} onChange={e=>updTSeg(tv.id,i,seg,{fromStation:e.target.value})} placeholder="Mumbai Central"/></div>
+                            <div><span className="lbl">To (Station Code)</span><input value={sg.to} onChange={e=>updTSeg(tv.id,i,seg,{to:e.target.value.toUpperCase()})} placeholder="NDLS"/></div>
+                            <div><span className="lbl">To (Station Name)</span><input value={sg.toStation} onChange={e=>updTSeg(tv.id,i,seg,{toStation:e.target.value})} placeholder="New Delhi"/></div>
+                            <div><span className="lbl">Date</span><input type="date" value={sg.date} onChange={e=>updTSeg(tv.id,i,seg,{date:e.target.value})}/></div>
+                            <div><span className="lbl">Dep Time</span><input value={sg.depTime} onChange={e=>updTSeg(tv.id,i,seg,{depTime:e.target.value})} placeholder="1705"/></div>
+                            <div><span className="lbl">Arr Time</span><input value={sg.arrTime} onChange={e=>updTSeg(tv.id,i,seg,{arrTime:e.target.value})} placeholder="0835"/></div>
+                            <div><span className="lbl">Class</span>
+                              <select value={sg.classOfTravel} onChange={e=>updTSeg(tv.id,i,seg,{classOfTravel:e.target.value})}>
+                                <option value="">—</option>
+                                {TRAIN_CLASSES.map(c=><option key={c}>{c}</option>)}
+                              </select></div>
+                            <div><span className="lbl">Coach / Berth</span><input value={sg.coach} onChange={e=>updTSeg(tv.id,i,seg,{coach:e.target.value})} placeholder="A1 / 42"/></div>
+                            <div><span className="lbl">PNR</span><input value={sg.pnr} onChange={e=>updTSeg(tv.id,i,seg,{pnr:e.target.value})} placeholder="booking ref"/></div>
+                          </div>
+                        </div>
+                      ))}
+                      <button onClick={()=>addTSeg(tv.id,seg)} className="btn btn-sm" style={{background:"#eef3fc",color:"#334e82",border:"1px solid #d4e0f5"}}>+ Segment</button>
+                    </div>
+                  ))}
+
+                  {/* Money footer */}
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11.5,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"8px 12px",marginTop:10}}>
+                    <span>Profit: <b style={{color:(inrSell-inrCost)>=0?"#15803d":"#dc2626"}}>{fmtINR(inrSell-inrCost)}</b></span>
+                    <span>Paid: <b>{fmtINR(paid)}</b></span>
+                    <span>Balance: <b style={{color:"#b45309"}}>{fmtINR(Math.max(0,inrCost-paid))}</b></span>
+                  </div>
+                </div>;
+              })}
+            </div>
+          </div>
+        )}
+
         {tab==="hotels"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
