@@ -2129,25 +2129,26 @@ ${text}
       travellers:trav, components:comps,
     };
   };
-  const CXL_SYS = `You are the cancellation engine for an Indian travel agency CRM. You DO the calculations. The agent tells you, in Hinglish, what happened — who cancelled, how much penalty they're keeping from the client, how much profit they're keeping, how much the vendor kept, and how much the client paid — and YOU compute the resulting client refund, and how the component's cost price (CP) and selling price (SP) should change.
+  const CXL_SYS = `You are the cancellation engine for an Indian travel agency CRM. You DO the calculations and produce a ready-to-apply cancellation that flows into the CRM's cancellation log and adjusts the whole booking. Keep it FAST — ask as FEW questions as possible.
 
 You get deal context as JSON: travellers (id, name, type), components (key, kind, name, costINR, sellINR, paidToVendorINR), clientPaidINR, paxTotal.
 
-Rules for the maths (all in INR):
-- A component's per-head cost = costINR / paxTotal; per-head selling = sellINR / paxTotal.
-- When N travellers cancel a component: new SP for that component = old SP − (per-head selling × N). New CP = old CP − (per-head cost × N) + vendorLoss for that component (whatever the vendor kept stays as cost).
-- Client refund for a component = penalty is what you KEEP from the client; refund is what you give back. If the agent tells you penalty and says refund the rest of what that traveller paid, compute refund = (per-head selling × N) − penalty − yourProfit, but never more than clientPaid and never negative. If the agent gives an explicit refund number, use it.
-- Net profit on a component = penalty + yourProfit − vendorLoss.
-Ask ONE short Hinglish question at a time for anything you still need (who cancelled, which component, penalty, your profit, vendor loss). Confirm names/components you understood.
+BE EFFICIENT — do not over-ask:
+- Match traveller names to ids yourself from context; don't ask the agent to repeat them.
+- DEFAULTS you assume WITHOUT asking unless the agent says otherwise: myProfit = 0; vendorLoss = 0 for any component whose paidToVendorINR is 0 (you never paid them, nothing stuck); for components other than the ones the agent explicitly mentions, if the agent says "poora package" / "whole booking", cancel those too with vendorLoss 0, penalty 0 and full refund of that component's cancelled share.
+- Only ask about a number you genuinely cannot infer (e.g. a vendorLoss on a component that WAS paid, or the penalty amount). Ask them together in ONE message, not one-by-one across many turns.
+- If the agent already gave penalty and told you the rest is refunded, do NOT ask again — compute it.
 
-When you have everything for a cancellation, reply with ONLY this JSON (no prose):
-{"ready":true,"summary":"Hinglish one-line","scope":"full"|"components","lines":[{"componentKey":"kind:id","travellerIds":["id",...],"vendorLoss":number,"penalty":number,"myProfit":number,"clientRefund":number,"newCP":number,"newSP":number}]}
-newCP and newSP are the component's NEW cost and selling after this cancellation (your computed values).
+Maths (INR): per-head cost = costINR/paxTotal; per-head selling = sellINR/paxTotal. For N cancelling a component: newSP = sellINR − perHeadSelling×N; newCP = costINR − perHeadCost×N + vendorLoss. Refund for a component = perHeadSelling×N − penalty − myProfit, clamped 0..clientPaid (or use an explicit refund the agent gives). Net profit = penalty + myProfit − vendorLoss.
 
-While still asking, reply with ONLY:
-{"ready":false,"reply":"your Hinglish question"}
+When you have enough (using defaults above), reply with ONLY this JSON:
+{"ready":true,"summary":"Hinglish one-line with the refund total","scope":"full"|"components","lines":[{"componentKey":"kind:id","travellerIds":["id",...],"vendorLoss":number,"penalty":number,"myProfit":number,"clientRefund":number,"newCP":number,"newSP":number}]}
+Include EVERY component the travellers are being cancelled from. Use scope "full" only if they are leaving the entire booking.
 
-Never output anything except one of these two JSON shapes. Show your computed refund in the summary so the agent can sanity-check.`;
+Only if a number is truly missing, reply with ONLY:
+{"ready":false,"reply":"one short Hinglish question covering ALL missing info at once"}
+
+Never output anything except one of these two JSON shapes.`;
 
   const cxlSend = async (userMsg) => {
     const text=(userMsg||cxlInput).trim();
@@ -2214,7 +2215,9 @@ Never output anything except one of these two JSON shapes. Show your computed re
       return nd;
     });
     setCxlProposal(null); setCxlChat([]);
-    window.veToast&&window.veToast("✅ AI ne cancellation apply kar di — cost/selling update ho gaye","success");
+    window.veToast&&window.veToast("✅ Ho gaya — Cancellation Log mein aa gaya, cost & selling update","success");
+    // Scroll to the log below so the agent sees the new entry immediately.
+    setTimeout(()=>{ const el=document.getElementById("cxl-log"); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); },200);
   };
 
   const confirmCancellation=(cid,newStatus)=>setDeal(d=>{
@@ -5137,7 +5140,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 <span style={{fontSize:15,fontWeight:800,color:"#5b21b6"}}>🤖 AI Cancellation</span>
                 <span style={{fontSize:10,fontWeight:700,color:"#8b5cf6",background:"#ede9fe",borderRadius:20,padding:"2px 9px"}}>AI calculate karega</span>
               </div>
-              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Seedha batao kya hua — jaise <i>"Arjit aur Karishma ki flight cancel, vendor ne 40k kaata, maine client se 55k penalty li"</i>. AI CP, SP aur refund khud calculate karke system mein daal dega. Aap sirf penalty, apna profit, aur client ne kitna diya batao.</div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Seedha batao kya hua — jaise <i>"Arjit aur Karishma ki flight cancel, vendor ne 40k kaata, maine client se 55k penalty li"</i>. AI kam se kam sawaal poochhega, calculate karke <b>niche Cancellation Log mein daal dega</b>, aur booking ki cost/selling khud adjust ho jaayegi.</div>
 
               {cxlChat.length>0&&<div style={{maxHeight:300,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
                 {cxlChat.map((m,i)=>(
@@ -5187,7 +5190,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             </div>
 
             {/* Cancellation cards — you enter the numbers, system calculates everything */}
-            <div className="card" style={{borderColor:"#b91c1c"}}>
+            <div id="cxl-log" className="card" style={{borderColor:"#b91c1c"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <span style={{fontSize:14,fontWeight:800,color:"#b91c1c"}}>⛔ Cancellation Log</span>
                 <button onClick={addCancellation} className="btn btn-sm" style={{background:"#fdf1f1",color:"#b91c1c",border:"1px solid #f3c6c6"}}>+ Record Cancellation</button>
