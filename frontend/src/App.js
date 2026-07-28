@@ -4883,6 +4883,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 const inrSell=toINR(tv.sellingPrice,tv.currency,tv.exchangeRate);
                 const paid=sum(tv.payments||[],"amount");
                 const segKey = tv.tripType==="return" ? ["segments","returnSegments"] : ["segments"];
+                const tvExp = expandedVendor===tv.id;
                 return <div key={tv.id} style={{border:"1px solid #d4e0f5",borderRadius:12,padding:"14px 15px",marginBottom:14,background:"#fbfdff"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12}}>
                     <span style={{background:"#334e82",color:"#fff",borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:800}}>{idx+1}</span>
@@ -4890,6 +4891,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                     <label style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#6b7a99",cursor:"pointer"}}>
                       <input type="checkbox" checked={!!tv.isInternational} onChange={e=>updT(tv.id,"isInternational",e.target.checked)}/> International
                     </label>
+                    <button onClick={()=>setExpandedVendor(tvExp?null:tv.id)} className="btn btn-sm" style={{fontSize:11,padding:"5px 10px",fontWeight:800,whiteSpace:"nowrap"}}>{tvExp?"▲ Close":"💳 Payments"}</button>
                     <button onClick={()=>rmTV(tv.id)} className="btn btn-danger">✕</button>
                   </div>
 
@@ -4951,6 +4953,27 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                       <button onClick={()=>addTSeg(tv.id,seg)} className="btn btn-sm" style={{background:"#eef3fc",color:"#334e82",border:"1px solid #d4e0f5"}}>+ Segment</button>
                     </div>
                   ))}
+
+                  {/* Payments (expandable — same pattern as flights/hotels/land/visa) */}
+                  {tvExp&&(
+                    <div style={{marginTop:16,paddingTop:14,borderTop:"1px dashed #d4e0f5"}}>
+                      <div style={{fontSize:11,color:"#334e82",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
+                        Payments to {tv.name||"Vendor"} · <span className="mono">Paid: {fmtINR(paid)}</span> · <span className="mono" style={{color:(inrCost-paid)>0?"#ef4444":"#10b981"}}>Balance: {fmtINR(Math.max(0,inrCost-paid))}</span>
+                      </div>
+                      {(tv.payments||[]).map((pmt,pi)=>(
+                        <div key={pmt.id} className="prow">
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1.8fr 1fr 1.5fr auto",gap:8,alignItems:"end"}}>
+                            <div><span className="lbl">#{pi+1} Amount (₹)</span><input className="mono" type="number" value={pmt.amount} onChange={e=>updVPmt("trainVendors",tv.id,pmt.id,"amount",e.target.value)} placeholder="0" /></div>
+                            <div><span className="lbl">Mode</span><select value={pmt.mode} onChange={e=>updVPmt("trainVendors",tv.id,pmt.id,"mode",e.target.value)}>{VENDOR_MODES.map(m=><option key={m}>{m}</option>)}</select></div>
+                            <div><span className="lbl">Date</span><input type="date" value={pmt.date} onChange={e=>updVPmt("trainVendors",tv.id,pmt.id,"date",e.target.value)} /></div>
+                            <div><span className="lbl">Note</span><input value={pmt.note} onChange={e=>updVPmt("trainVendors",tv.id,pmt.id,"note",e.target.value)} placeholder="UTR / Ref…" /></div>
+                            <button className="btn btn-danger" style={{marginBottom:1}} onClick={()=>rmVPmt("trainVendors",tv.id,pmt.id)}>✕</button>
+                          </div>
+                        </div>
+                      ))}
+                      <button className="btn btn-dashed" onClick={()=>addVPmt("trainVendors",tv.id)}>+ Add Payment Entry</button>
+                    </div>
+                  )}
 
                   {/* Money footer */}
                   <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11.5,color:"#475569",background:"#f8fafd",borderRadius:8,padding:"8px 12px",marginTop:10}}>
