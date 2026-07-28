@@ -4859,6 +4859,21 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 
               {(deal.trainVendors||[]).length===0 && <div style={{textAlign:"center",color:"#a9bce0",fontSize:13,padding:"22px 0"}}>Koi train nahi. "+ Add Train Vendor" se shuru karo.</div>}
 
+              {/* Summary bar — mirrors Flights/Hotels/Land tabs */}
+              {(deal.trainVendors||[]).length>0&&(()=>{
+                const t=(deal.trainVendors||[]);
+                const c=t.reduce((s,v)=>s+toINR(v.costPrice,v.currency,v.exchangeRate),0);
+                const sl=t.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
+                const p=t.reduce((s,v)=>s+sum(v.payments||[],"amount"),0);
+                return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:14}}>
+                  <div style={{background:"#fff",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>TOTAL COST</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#0f2350"}}>{fmtINR(c)}</div></div>
+                  <div style={{background:"#fff",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>TOTAL SELLING</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#0f2350"}}>{fmtINR(sl)}</div></div>
+                  <div style={{background:"#fff",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PROFIT</div><div className="mono" style={{fontSize:15,fontWeight:800,color:(sl-c)>=0?"#15803d":"#dc2626"}}>{fmtINR(sl-c)}</div></div>
+                  <div style={{background:"#fff",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>PAID</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#0f2350"}}>{fmtINR(p)}</div></div>
+                  <div style={{background:"#fff",border:"1px solid #e3eaf7",borderRadius:10,padding:"10px 12px"}}><div style={{fontSize:9,color:"#6b7a99",letterSpacing:1}}>BALANCE</div><div className="mono" style={{fontSize:15,fontWeight:800,color:"#b45309"}}>{fmtINR(Math.max(0,c-p))}</div></div>
+                </div>;
+              })()}
+
               {(deal.trainVendors||[]).map((tv,idx)=>{
                 const needsRate=tv.currency&&tv.currency!=="INR";
                 const inrCost=toINR(tv.costPrice,tv.currency,tv.exchangeRate);
