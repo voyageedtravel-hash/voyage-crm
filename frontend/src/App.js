@@ -443,7 +443,7 @@ const bookedTierOf = (d) => {
   const t = d.tiers.find(x=>x && x.booked && Number(x.totalPrice)>0);
   return t || null;
 };
-const tierSellINR = (d) => { const t=bookedTierOf(d); return t?Number(t.totalPrice)||0:null; };
+const tierSellINR = (d) => { const t=bookedTierOf(d); const p=t?Number(t.totalPrice)||0:0; return (t&&p>0)?p:null; };
 const fmtINR = (val) => "₹"+(Math.round(n(val))).toLocaleString("en-IN");
 
 // ── UNIFIED DEAL STATUS (single source of truth) ─────────────────────
@@ -1721,6 +1721,7 @@ ${text}
     hotel:'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
     land:'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
     ticket:'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed (they must match the passport). (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
+    train:'You extract train booking details for a travel agency CRM (domestic Indian trains like IRCTC/Rajdhani/Vande Bharat or international rail like Eurostar/Shinkansen/Trenitalia). Output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"isInternational":boolean,"tripType":"one-way|return|multi-city","segments":[...],"returnSegments":[...]}. Each segment = {"trainNo":string,"trainName":string,"from":"station code","fromStation":"full station name","to":"station code","toStation":"full station name","date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","classOfTravel":"1A|2A|3A|SL|CC|EC|2S|Sleeper|First Class|Business|Standard|Other","coach":string,"pnr":string}. RULES: (1) Distinguish tripType: "return" if journey goes A→B and later comes back B→A — outbound legs in segments, homebound in returnSegments; "one-way" if single direction; "multi-city" for 3+ cities in open-jaw. (2) For Indian trains: use IRCTC station codes (NDLS, MMCT, HWH, MAS, etc.) and Indian classes (1A/2A/3A/SL/CC/EC/2S). Set isInternational=false. (3) For international: use rail station codes if visible, common classes First/Business/Standard. Set isInternational=true. (4) PNR is 10 digits for IRCTC. Read train number and name carefully. Missing fields = empty string or null. Never invent a PNR — leave empty if unclear.',
     passport:'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ (the two machine-readable lines at the passport bottom) when available — it is the most reliable source.'
   };
   async function runAIExtract(){
@@ -1792,6 +1793,30 @@ ${text}
         setDeal(d=>({...d,flightVendors:[...(d.flightVendors||[]),nv]}));
         const tlabel = ftype==="return"?"return (2-way)":ftype==="multi-city"?"multi-city":"one-way";
         window.veToast("✅ "+tlabel+" flight — "+secs.length+(retSecs.length?"+"+retSecs.length:"")+" sector(s) bhar diye. Check kar lo","success");
+      }else if(aiX==="train"){
+        const mapSeg=(x)=>({...emptyTrainSegment(),
+          trainNo:x.trainNo||"", trainName:x.trainName||"",
+          from:(x.from||"").toUpperCase(), fromStation:x.fromStation||"",
+          to:(x.to||"").toUpperCase(), toStation:x.toStation||"",
+          date:x.date||"", depTime:x.depTime||"", arrTime:x.arrTime||"",
+          classOfTravel:x.classOfTravel||"", coach:x.coach||"", pnr:x.pnr||""});
+        const segs=(j.segments||[]).map(mapSeg);
+        const retSegs=(j.returnSegments||[]).map(mapSeg);
+        if(!segs.length) throw new Error("no train segments");
+        let ttype=(j.tripType||"").toLowerCase();
+        if(!["one-way","return","multi-city"].includes(ttype)){
+          const orig=(segs[0].from||"").toUpperCase();
+          const lastTo=(segs[segs.length-1].to||"").toUpperCase();
+          ttype = retSegs.length ? "return" : (lastTo===orig?"return":segs.length>2?"multi-city":"one-way");
+        }
+        const nv={...emptyTrainVendor(),
+          name:j.vendorName||"AI Extracted",
+          costPrice:j.costPrice!=null?String(j.costPrice):"",
+          isInternational:!!j.isInternational,
+          tripType:ttype, segments:segs, returnSegments:retSegs.length?retSegs:[emptyTrainSegment()]};
+        setDeal(d=>({...d,trainVendors:[...(d.trainVendors||[]),nv]}));
+        const tlabel = ttype==="return"?"return (2-way)":ttype==="multi-city"?"multi-city":"one-way";
+        window.veToast("✅ "+tlabel+" train — "+segs.length+(retSegs.length?"+"+retSegs.length:"")+" segment(s) bhar diye. Check kar lo","success");
       }else if(aiX==="hotel"){
         const hs=(j.hotels||[]);
         if(!hs.length) throw new Error("no hotels");
@@ -2889,9 +2914,9 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const prTotal=(deal.pricingRows||[]).reduce((a,r)=>a+((Number(r.count)||0)*(Number(r.pp)||0)),0);
     if(deal.usePricingTotal&&prTotal>0) return prTotal;
     let vend=[];
-    if(propFlights==="only") vend=[...(deal.flightVendors||[])];
+    if(propFlights==="only") vend=[...(deal.flightVendors||[]),...(deal.trainVendors||[])];
     else if(propFlights==="without") vend=[...(deal.hotelVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
-    else vend=[...(deal.hotelVendors||[]),...(deal.flightVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
+    else vend=[...(deal.hotelVendors||[]),...(deal.flightVendors||[]),...(deal.trainVendors||[]),...(deal.landVendors||[]),...(deal.visaVendors||[])];
     return vend.reduce((s,v)=>s+toINR(v.sellingPrice,v.currency,v.exchangeRate),0);
   }
   function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
@@ -4230,8 +4255,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       {aiX&&(
         <div onClick={()=>!aiXBusy&&setAiX(null)} style={{position:"fixed",inset:0,background:"rgba(10,21,48,.55)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:18,width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"22px",boxShadow:"0 30px 80px rgba(0,0,0,.35)"}}>
-            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":aiX==="passport"?"Passport / ID Details":aiX==="ticket"?"E-Ticket (PNR, passengers, segments)":"Land / Itinerary"}</div>
-            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>{aiX==="ticket"?"Akbar / MakeMyTrip ka e-ticket paste ya upload karo — AI PNR, passenger names, ticket numbers aur saare segments padh lega, phir Voyage-Ed branded ticket ban jayega.":aiX==="passport"?"Passport ya Aadhaar ki photo(s) paste/upload karo — AI naam, DOB, passport number, issue/expiry sab bhar dega. Surname na ho toh LNU daal dega.":<>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</>}</div>
+            <div style={{fontSize:15,fontWeight:800,color:"#0f2350",marginBottom:4}}>✨ AI Extract — {aiX==="flight"?"Flight Details":aiX==="hotel"?"Hotel Details":aiX==="train"?"Train Details":aiX==="passport"?"Passport / ID Details":aiX==="ticket"?"E-Ticket (PNR, passengers, segments)":"Land / Itinerary"}</div>
+            <div style={{fontSize:11,color:"#7d8bab",marginBottom:12}}>{aiX==="train"?"IRCTC ticket, Eurostar booking, Shinkansen reservation — pic ya PDF paste/upload karo. AI train number, station codes, PNR, class sab bhar dega.":aiX==="ticket"?"Akbar / MakeMyTrip ka e-ticket paste ya upload karo — AI PNR, passenger names, ticket numbers aur saare segments padh lega, phir Voyage-Ed branded ticket ban jayega.":aiX==="passport"?"Passport ya Aadhaar ki photo(s) paste/upload karo — AI naam, DOB, passport number, issue/expiry sab bhar dega. Surname na ho toh LNU daal dega.":<>Vendor ka email text paste karo, ya quote/PNR/itinerary ki <b>photo</b> — AI khud padh ke {aiX==="land"?"day-wise itinerary":"saare columns"} bhar dega. Baad mein form mein edit kar sakte ho.</>}</div>
             <div tabIndex={0}
               onPaste={e=>{
                 const items=Array.from(e.clipboardData.items||[]);
@@ -4825,7 +4850,10 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div className="card" style={{borderColor:"#334e82"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:8}}>
                 <span style={{fontSize:15,fontWeight:800,color:"#334e82"}}>🚆 Train Vendors</span>
-                <button onClick={addTV} className="btn btn-ind">+ Add Train Vendor</button>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={addTV} className="btn btn-ind">+ Add Train Vendor</button>
+                  <button onClick={()=>setAiX("train")} className="btn" style={{background:"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none"}}>✨ AI Extract (pic/PDF)</button>
+                </div>
               </div>
               <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Domestic (IRCTC / Rajdhani / Vande Bharat) ya international (Eurostar, Shinkansen, Trenitalia) — dono add kar sakte ho. Multi-leg journey ke liye segments add karte jao.</div>
 
