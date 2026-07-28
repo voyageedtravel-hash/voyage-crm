@@ -2552,20 +2552,23 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
 
   const hotel=sectionCalc(deal.hotelVendors);
   const flight=sectionCalc(deal.flightVendors);
+  const train=sectionCalc(deal.trainVendors);
   const land=sectionCalc(deal.landVendors);
   const visa=sectionCalc(deal.visaVendors);
-  const totalCost=hotel.cost+flight.cost+land.cost+visa.cost;
+  const totalCost=hotel.cost+flight.cost+train.cost+land.cost+visa.cost;
   const _bookedTierSell=tierSellINR(deal);           // if a star-tier is booked, its price = selling
-  const totalSell=_bookedTierSell!=null?_bookedTierSell:(hotel.sell+flight.sell+land.sell+visa.sell);
-  const totalPaidToVendors=hotel.paid+flight.paid+land.paid+visa.paid;
+  const totalSell=_bookedTierSell!=null?_bookedTierSell:(hotel.sell+flight.sell+train.sell+land.sell+visa.sell);
+  const totalPaidToVendors=hotel.paid+flight.paid+train.paid+land.paid+visa.paid;
   const totalRefunded=sum(deal.refunds||[],"amount");
   const netSell=totalSell-totalRefunded;            // refund => selling cost se minus
   const gpm=netSell-totalCost;                      // => profit se bhi automatically minus
   // Per-component GST exclusion: exempt sections' amounts are subtracted from GST base
   const exempt = deal.gstExemptSections || [];
   const gstSell = netSell - (exempt.includes("flights")?flight.sell:0) - (exempt.includes("hotels")?hotel.sell:0)
+    - (exempt.includes("trains")?train.sell:0)
     - (exempt.includes("land")?land.sell:0) - (exempt.includes("visa")?visa.sell:0);
   const gstCost = totalCost - (exempt.includes("flights")?flight.cost:0) - (exempt.includes("hotels")?hotel.cost:0)
+    - (exempt.includes("trains")?train.cost:0)
     - (exempt.includes("land")?land.cost:0) - (exempt.includes("visa")?visa.cost:0);
   const gstGpm = gstSell - gstCost;
   const gst = deal.gstMode === "none" ? 0
