@@ -2314,20 +2314,23 @@ Never output anything except one of these two JSON shapes.`;
   const ACCT_SYS = `You are a bookkeeping helper for an Indian travel agency's ledger. The user types a plain Hinglish note about what happened. You convert it into one or more ledger rows.
 
 Rules:
-- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number}], "summary":"one-line Hinglish"}
-- kind rules: 'expense' for money spent (office kharcha, food, Bazar MCC); 'salary' for salaries paid; 'income' for money received that isn't a client deal payment; 'transfer' for moving cash between locations; 'receivable' when someone owes us and no cash moved yet; 'payable' when we owe someone and no cash moved yet.
-- Dates: if user says "aaj/today" use today; "kal" = yesterday; specific date otherwise. Default today.
-- If user says "Sahitya ne kharche" and then "wapas de diye" — that's two rows: an expense (party = Bazar MCC or whoever), then a transfer (Sahitya's cash box → the person paid back).
-- Only use cashFrom / cashTo when cash actually moved between the tracked cash locations. bankDelta is positive if bank went up, negative if down.
-- Amounts are numbers (no ₹, no commas). Never invent numbers not in the text.
+- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|gst|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number,"queryTag":"deal number OR client name to tag this row against"}], "summary":"one-line Hinglish"}
+- kind rules: 'expense' for money spent (office kharcha, food, Bazar MCC); 'salary' for salaries paid; 'gst' for GST payment to government; 'income' for money received that isn't a client deal payment; 'transfer' for moving cash between locations.
+- Dates: 'aaj/today' = today; 'kal' = yesterday; specific date otherwise. Default today.
+- If user says "Sahitya ne kharche" and then "wapas de diye" — that's two rows: an expense, then a transfer.
+- Only use cashFrom / cashTo when cash actually moved between tracked cash locations. bankDelta positive = bank up, negative = down.
+- Amounts are numbers only. Never invent numbers not in the text.
+- queryTag: if the user names a client or deal (e.g. "Nikhil Agarwal ke 16000 diye cash", "Ramakant Chauhan ka hotel"), match against the bookedDeals list in context and put the exact dealNumber in queryTag. If no client mentioned or you can't match, leave queryTag empty.
 
-Cash locations available and recent context are passed in the user turn. Match names loosely (case-insensitive, substring).`;
+Cash locations and booked deals list are passed in the user turn.`;
   const acctAiSend = async () => {
     const text=(acctAiInput||"").trim(); if(!text) return;
     setAcctAiBusy(true); setAcctAiProposal(null);
     try{
       const today=new Date().toISOString().slice(0,10);
-      const ctx={today, cashLocations:(accounts.cashLocations||[]).map(c=>c.name)};
+      const allDs=loadAllDeals().map(normalizeDeal).filter(isBookedStage);
+      const bookedDeals=allDs.map(d=>({dealNumber:d.dealNumber, client:d.clientName, destination:d.destination}));
+      const ctx={today, cashLocations:(accounts.cashLocations||[]).map(c=>c.name), bookedDeals};
       const res=await fetch(`${API_BASE}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1200,system:ACCT_SYS,messages:[
           {role:"user",content:"CONTEXT:\n"+JSON.stringify(ctx)+"\n\nUser: "+text}
@@ -2348,6 +2351,7 @@ Cash locations available and recent context are passed in the user turn. Match n
       party:r.party||"",
       amount:r.amount!=null?String(r.amount):"",
       note:r.note||"",
+      queryTag:r.queryTag||"",
       source:"ai"}));
     setAccounts(a=>{
       let na={...a, ledger:[...(a.ledger||[]), ...rows]};
@@ -2774,14 +2778,15 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
   if(screen==="accounts"){
     const allD = loadAllDeals().map(normalizeDeal);
     const inr = (x)=>"₹"+Math.round(Number(x)||0).toLocaleString("en-IN");
-    // Receivables — every deal with clientDue > 0
-    const receivables = allD.filter(d=>{const F=dealFinance(d); return F.clientDue>0.5;})
+    // Receivables — every BOOKED deal with clientDue > 0
+    const bookedD = allD.filter(isBookedStage);
+    const receivables = bookedD.filter(d=>{const F=dealFinance(d); return F.clientDue>0.5;})
       .map(d=>({d, amount:dealFinance(d).clientDue}))
       .sort((a,b)=>b.amount-a.amount);
     const totalReceivable = receivables.reduce((s,r)=>s+r.amount,0);
-    // Payables — every deal's vendor dues, itemised by vendor
+    // Payables — every BOOKED deal's vendor dues, itemised by vendor
     const payables = [];
-    allD.forEach(d=>{
+    bookedD.forEach(d=>{
       const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
                 ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
                 ...(d.trainVendors||[]).map(v=>({...v,_k:"Train",_n:v.name})),
@@ -2815,7 +2820,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const kindLabel=(k)=>({expense:"Expense",salary:"Salary",gst:"GST",income:"Income",transfer:"Transfer",receivable:"Receivable",payable:"Payable",other:"Other"}[k]||k);
 
     const addLedgerRow=()=>setAccounts(a=>({...a,ledger:[...(a.ledger||[]),
-      {id:uid(),date:new Date().toISOString().slice(0,10),kind:"expense",party:"",amount:"",note:"",source:"manual"}]}));
+      {id:uid(),date:new Date().toISOString().slice(0,10),kind:"expense",party:"",amount:"",note:"",queryTag:"",source:"manual"}]}));
     const updLedgerRow=(id,key,val)=>setAccounts(a=>{
       const row=(a.ledger||[]).find(r=>r.id===id); if(row&&isRowLocked(row)){ window.veToast&&window.veToast("🔒 Frozen — pehle unlock karo","warning"); return a; }
       return {...a,ledger:(a.ledger||[]).map(r=>r.id===id?{...r,[key]:val}:r)};
@@ -2858,6 +2863,10 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       setUnlockBusy(false);
     };
     const relock = (mk) => setAccounts(a=>{const f={...(a.frozenMonths||{})}; delete f[mk]; return {...a, frozenMonths:f};});
+
+    // Deal-number → client name map (used in both AI preview and ledger tags)
+    const dealNumToName={};
+    allD.forEach(d=>{ if(d.dealNumber) dealNumToName[d.dealNumber]=d.clientName||""; });
 
     return (
       <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
@@ -2998,9 +3007,16 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 <div style={{fontSize:11,fontWeight:800,color:"#5b21b6",marginBottom:8}}>AI ne ye samjha:</div>
                 <div style={{fontSize:12,color:"#334e82",marginBottom:10,fontStyle:"italic"}}>{acctAiProposal.summary}</div>
                 {(acctAiProposal.rows||[]).map((r,i)=>(
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px dashed #f1f5f9",fontSize:12}}>
-                    <span><b style={{color:kindColor(r.kind)}}>{kindLabel(r.kind)}</b> · {r.party||"—"} · <span style={{color:"#94a3b8"}}>{r.date}</span></span>
-                    <b className="mono" style={{color:"#0f2350"}}>{inr(r.amount)}</b>
+                  <div key={i} style={{padding:"7px 0",borderBottom:"1px dashed #f1f5f9",fontSize:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                      <span><b style={{color:kindColor(r.kind)}}>{kindLabel(r.kind)}</b> · {r.party||"—"} · <span style={{color:"#94a3b8"}}>{r.date}</span></span>
+                      <b className="mono" style={{color:"#0f2350"}}>{inr(r.amount)}</b>
+                    </div>
+                    <div style={{marginTop:4,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                      {r.queryTag
+                        ? <span style={{fontSize:10,fontWeight:800,padding:"1px 7px",borderRadius:5,background:"#ede9fe",color:"#5b21b6"}}>🔗 {r.queryTag}{dealNumToName[r.queryTag]?" · "+dealNumToName[r.queryTag]:""}</span>
+                        : <span style={{fontSize:10,fontWeight:700,color:"#b45309"}}>⚠️ Kisi query se tag nahi hua — apply ke baad ledger mein manually tag kar sakte ho</span>}
+                    </div>
                   </div>
                 ))}
                 <div style={{display:"flex",gap:8,marginTop:10}}>
@@ -3011,42 +3027,85 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             )}
           </div>
 
-          {/* 7) LEDGER TABLE */}
-          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase"}}>📒 Ledger</div>
-              <button onClick={addLedgerRow} className="btn btn-sm">+ Add Row</button>
-            </div>
-            <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Manually add karo ya AI se. GPM se expenses aur salaries automatically minus ho jaate hain top snapshot mein.</div>
-            {ledger.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"14px 0",textAlign:"center"}}>Abhi koi entry nahi. AI se ya "+ Add Row" se shuru karo.</div>:
-              ledger.map(r=>{
-                const locked=isRowLocked(r);
-                const mk=monthKeyOf(r.date);
-                const stamp=(accounts.frozenMonths||{})[mk];
-                return <div key={r.id} style={{border:"1px solid "+(locked?"#f3d5b8":"#eef2f8"),borderRadius:9,padding:"10px 12px",marginBottom:7,background:locked?"#fefaf3":"#fff"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"110px 100px 1.5fr 1fr auto",gap:7,alignItems:"center"}}>
-                    <input type="date" disabled={locked} value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,background:locked?"#f8fafd":"#fff",cursor:locked?"not-allowed":"text"}}/>
-                    <select disabled={locked} value={r.kind} onChange={e=>updLedgerRow(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,color:kindColor(r.kind),fontWeight:700,background:locked?"#f8fafd":"#fff"}}>
-                      {["expense","salary","gst","income","transfer","receivable","payable","other"].map(k=><option key={k} value={k}>{kindLabel(k)}</option>)}
-                    </select>
-                    <input disabled={locked} value={r.party} onChange={e=>updLedgerRow(r.id,"party",e.target.value)} placeholder="Kise / Kaha" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,background:locked?"#f8fafd":"#fff"}}/>
-                    <input type="number" disabled={locked} className="mono" value={r.amount} onChange={e=>updLedgerRow(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,textAlign:"right",background:locked?"#f8fafd":"#fff"}}/>
-                    {locked
-                      ? <button onClick={()=>setUnlockAsk({monthKey:mk})} title="Unlock month" style={{border:"1px solid #f3c88a",background:"#fdf1dc",color:"#8a6d1f",borderRadius:6,padding:"6px 8px",fontSize:11,fontWeight:800,cursor:"pointer"}}>🔒 Unlock</button>
-                      : <button onClick={()=>rmLedgerRow(r.id)} className="btn btn-danger btn-sm">✕</button>}
+          {/* 7) LEDGER — month-wise notebook (We Owe | We Will Get) */}
+          {(()=>{
+            // Group ledger rows by YYYY-MM (newest month first).
+            const byMonth={};
+            ledger.forEach(r=>{ const mk=monthKeyOf(r.date)||"—"; (byMonth[mk]=byMonth[mk]||[]).push(r); });
+            const months=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+            const monthName=(mk)=>{ if(mk==="—")return "Undated"; const [y,m]=mk.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"}); };
+            // "We Will Get" = incoming (income + receivable)
+            // "We Owe"      = outgoing (expense, salary, gst, payable)
+            const isOwed=(r)=>["expense","salary","gst","payable"].includes(r.kind);
+            const isReceive=(r)=>["income","receivable"].includes(r.kind);
+
+            const rowEditor=(r)=>{
+              const locked=isRowLocked(r); const mk=monthKeyOf(r.date);
+              return <div key={r.id} style={{border:"1px solid "+(locked?"#f3d5b8":"#eef2f8"),borderRadius:8,padding:"8px 10px",marginBottom:6,background:locked?"#fefaf3":"#fff"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}>
+                  <input type="date" disabled={locked} value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:5,padding:"5px 7px",fontSize:10.5,background:locked?"#f8fafd":"#fff",width:120}}/>
+                  <select disabled={locked} value={r.kind} onChange={e=>updLedgerRow(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:5,padding:"5px 7px",fontSize:10.5,color:kindColor(r.kind),fontWeight:700,background:locked?"#f8fafd":"#fff",flex:1}}>
+                    {["expense","salary","gst","income","transfer","receivable","payable","other"].map(k=><option key={k} value={k}>{kindLabel(k)}</option>)}
+                  </select>
+                  {locked
+                    ? <button onClick={()=>setUnlockAsk({monthKey:mk})} title="Unlock month" style={{border:"1px solid #f3c88a",background:"#fdf1dc",color:"#8a6d1f",borderRadius:5,padding:"4px 7px",fontSize:10,fontWeight:800,cursor:"pointer"}}>🔒</button>
+                    : <button onClick={()=>rmLedgerRow(r.id)} style={{border:"none",background:"transparent",color:"#cbd5e1",cursor:"pointer",fontSize:14}}>✕</button>}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:6,marginBottom:5}}>
+                  <input disabled={locked} value={r.party} onChange={e=>updLedgerRow(r.id,"party",e.target.value)} placeholder="Kise / Kaha" style={{border:"1px solid #d4e0f5",borderRadius:5,padding:"6px 8px",fontSize:11,background:locked?"#f8fafd":"#fff"}}/>
+                  <input type="number" disabled={locked} className="mono" value={r.amount} onChange={e=>updLedgerRow(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:5,padding:"6px 8px",fontSize:11,textAlign:"right",background:locked?"#f8fafd":"#fff"}}/>
+                </div>
+                <select disabled={locked} value={r.queryTag||""} onChange={e=>updLedgerRow(r.id,"queryTag",e.target.value)} style={{width:"100%",border:"1px dashed "+(r.queryTag?"#c4b5fd":"#d4e0f5"),borderRadius:5,padding:"5px 7px",fontSize:10.5,background:locked?"#f8fafd":r.queryTag?"#f5f3ff":"#fff",color:r.queryTag?"#5b21b6":"#94a3b8"}}>
+                  <option value="">— No query tag —</option>
+                  {allD.filter(isBookedStage).map(d=><option key={d._localId} value={d.dealNumber||""}>{(d.dealNumber||"")} · {d.clientName||"(no name)"}{d.destination?" · "+d.destination:""}</option>)}
+                </select>
+                {r.note&&<div style={{fontSize:10,color:"#94a3b8",marginTop:4,fontStyle:"italic"}}>{r.note}</div>}
+              </div>;
+            };
+
+            if(months.length===0) return <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"22px",textAlign:"center",color:"#94a3b8",fontSize:12.5}}>Abhi koi ledger entry nahi. Upar AI se ya "+ Add Row" se shuru karo.</div>;
+            return months.map(mk=>{
+              const rows=byMonth[mk]||[];
+              const owe=rows.filter(isOwed);
+              const receive=rows.filter(isReceive);
+              const other=rows.filter(r=>!isOwed(r)&&!isReceive(r));
+              const oweTot=owe.reduce((s,r)=>s+(Number(r.amount)||0),0);
+              const receiveTot=receive.reduce((s,r)=>s+(Number(r.amount)||0),0);
+              const balance=receiveTot-oweTot;
+              const anyLocked=rows.some(r=>isRowLocked(r));
+              return <div key={mk} style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"16px 18px",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,paddingBottom:10,borderBottom:"1px solid #eef2f8",flexWrap:"wrap",gap:8}}>
+                  <div style={{fontSize:14,fontWeight:800,color:"#0f2350",display:"flex",alignItems:"center",gap:8}}>
+                    📖 {monthName(mk)}
+                    {anyLocked&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:"#faf1dc",color:"#8a6d1f"}}>🔒 Frozen</span>}
                   </div>
-                  {(r.note||r.source||locked)&&<div style={{fontSize:10.5,color:"#94a3b8",marginTop:5,display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                    <span>{r.note}</span>
-                    <span style={{display:"flex",gap:8,alignItems:"center"}}>
-                      {locked&&<span style={{background:"#faf1dc",color:"#8a6d1f",padding:"1px 7px",borderRadius:5,fontWeight:700}}>🔒 Frozen · {mk}</span>}
-                      {stamp&&stamp.unlocked&&<span style={{background:"#e0f7fb",color:"#0e7490",padding:"1px 7px",borderRadius:5,fontWeight:700}}>Unlocked by {stamp.unlockedBy} · {new Date(stamp.unlockedAt).toLocaleString("en-IN")}</span>}
-                      {r.source&&r.source!=="manual"&&<span style={{background:"#f1f5f9",padding:"1px 7px",borderRadius:5,fontWeight:700}}>{r.source}</span>}
-                    </span>
-                  </div>}
-                </div>;
-              })
-            }
-          </div>
+                  <button onClick={addLedgerRow} className="btn btn-sm">+ Add Row</button>
+                </div>
+                {/* Notebook — two columns */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  <div style={{borderRight:"2px solid #eef2f8",paddingRight:12}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#dc2626",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#fef2f2",padding:"5px",borderRadius:6}}>← We Owe (Dena Hai)</div>
+                    {owe.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:owe.map(rowEditor)}
+                    <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #fde5e5",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#dc2626"}}><span>Total</span><b className="mono">{inr(oweTot)}</b></div>
+                  </div>
+                  <div style={{paddingLeft:2}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#15803d",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#f0faf4",padding:"5px",borderRadius:6}}>We Will Get (Lena Hai) →</div>
+                    {receive.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:receive.map(rowEditor)}
+                    <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #d9f5e3",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#15803d"}}><span>Total</span><b className="mono">{inr(receiveTot)}</b></div>
+                  </div>
+                </div>
+                {other.length>0&&<div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed #e3eaf7"}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Transfers &amp; Other</div>
+                  {other.map(rowEditor)}
+                </div>}
+                {/* Balance */}
+                <div style={{marginTop:14,padding:"12px 15px",background:balance>=0?"#f0faf4":"#fef2f2",border:"1px solid "+(balance>=0?"#d9f5e3":"#fde5e5"),borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,fontWeight:800,color:"#0f2350"}}>Month Balance ({monthName(mk)})</span>
+                  <b className="mono" style={{fontSize:16,fontWeight:800,color:balance>=0?"#15803d":"#dc2626"}}>{balance>=0?"+ ":"− "}{inr(Math.abs(balance))}</b>
+                </div>
+              </div>;
+            });
+          })()}
 
           {/* Frozen months summary — jab bhi kuch unlock hua, saaf dikhe */}
           {Object.keys(accounts.frozenMonths||{}).length>0&&<div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"14px 18px"}}>
