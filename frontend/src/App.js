@@ -807,11 +807,13 @@ const defaultAccounts = () => ({
     {id:uid(), name:"Claude API",        amount:"2400",  day:29, kind:"expense",         active:true, note:"AI"},
     {id:uid(), name:"Gursimran salary",  amount:"3000",  day:9,  kind:"salary",          active:true, note:""},
     {id:uid(), name:"Harman salary",     amount:"",      day:27, kind:"salary",          active:true, note:"joined 27 Jul 2026 — first month pro-rated on 15 Aug"},
+    {id:uid(), name:"GST payment",       amount:"",      day:16, kind:"gst",             active:true, note:"Sarkar ko GST — har mahine 14-16 tarik amount decide karke daalein"},
     {id:uid(), name:"Vishal salary",     amount:"",      day:16, kind:"salary",          active:true, note:"variable — enter each month"},
     {id:uid(), name:"Sahitya salary",    amount:"",      day:16, kind:"salary",          active:true, note:"variable — enter each month"},
   ],
   ledger:[],                           // { id, date, kind, party, amount, note, source, dealId? }
   materialisedMonths:[],               // ["2026-08", ...] — so we don't create the same recurring row twice
+  frozenMonths:{},                     // {"2026-07": {locked:true, unlockedBy:null, unlockedAt:null}}
 });
 const loadAccounts = () => { try { const v=localStorage.getItem(ACCOUNTS_KEY); return v?{...defaultAccounts(),...JSON.parse(v)}:defaultAccounts(); } catch(e){return defaultAccounts();} };
 const saveAccounts = (a) => { try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); } catch(e){} };
@@ -1155,6 +1157,11 @@ export default function TravelCRM() {
   const [acctAiInput,setAcctAiInput]=useState("");
   const [acctAiBusy,setAcctAiBusy]=useState(false);
   const [acctAiProposal,setAcctAiProposal]=useState(null); // {rows:[...], summary}
+  // Ledger month freeze/unlock: past months are locked by default. Admin
+  // password re-entry via /api/auth/login → unlock stamp (who + when).
+  const [unlockAsk,setUnlockAsk]=useState(null);  // { monthKey }
+  const [unlockPw,setUnlockPw]=useState("");
+  const [unlockBusy,setUnlockBusy]=useState(false);
   // AI Cancellation assistant — conversational guide; maths stays in code.
   const [aiXImgs,setAiXImgs]=useState([]);
   const [aiXBusy,setAiXBusy]=useState(false);
@@ -2797,26 +2804,60 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     const now=new Date();
     const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
     const thisMonthRows = ledger.filter(r=>String(r.date).startsWith(thisMonthKey));
-    const thisMonthExpense = thisMonthRows.filter(r=>["expense","salary"].includes(r.kind))
+    const thisMonthExpense = thisMonthRows.filter(r=>["expense","salary","gst"].includes(r.kind))
                                           .reduce((s,r)=>s+(Number(r.amount)||0),0);
     // Total booked GPM (before GST) minus forfeits
     const bookedGpm = allD.filter(isBookedStage).reduce((s,d)=>{const F=dealFinance(d);return s+F.gpm;},0);
     const forfeitTotal = allD.filter(isBookedStage).reduce((s,d)=>s+(Number(d.forfeitAmount)||0),0);
     const netAfterExpenses = bookedGpm - thisMonthExpense;
 
-    const kindColor=(k)=>({expense:"#dc2626",salary:"#b45309",income:"#15803d",transfer:"#4169E1",receivable:"#0e7490",payable:"#7c3aed",other:"#64748b"}[k]||"#64748b");
-    const kindLabel=(k)=>({expense:"Expense",salary:"Salary",income:"Income",transfer:"Transfer",receivable:"Receivable",payable:"Payable",other:"Other"}[k]||k);
+    const kindColor=(k)=>({expense:"#dc2626",salary:"#b45309",gst:"#4169E1",income:"#15803d",transfer:"#4169E1",receivable:"#0e7490",payable:"#7c3aed",other:"#64748b"}[k]||"#64748b");
+    const kindLabel=(k)=>({expense:"Expense",salary:"Salary",gst:"GST",income:"Income",transfer:"Transfer",receivable:"Receivable",payable:"Payable",other:"Other"}[k]||k);
 
     const addLedgerRow=()=>setAccounts(a=>({...a,ledger:[...(a.ledger||[]),
       {id:uid(),date:new Date().toISOString().slice(0,10),kind:"expense",party:"",amount:"",note:"",source:"manual"}]}));
-    const updLedgerRow=(id,key,val)=>setAccounts(a=>({...a,ledger:(a.ledger||[]).map(r=>r.id===id?{...r,[key]:val}:r)}));
-    const rmLedgerRow=(id)=>setAccounts(a=>({...a,ledger:(a.ledger||[]).filter(r=>r.id!==id)}));
+    const updLedgerRow=(id,key,val)=>setAccounts(a=>{
+      const row=(a.ledger||[]).find(r=>r.id===id); if(row&&isRowLocked(row)){ window.veToast&&window.veToast("🔒 Frozen — pehle unlock karo","warning"); return a; }
+      return {...a,ledger:(a.ledger||[]).map(r=>r.id===id?{...r,[key]:val}:r)};
+    });
+    const rmLedgerRow=(id)=>setAccounts(a=>{
+      const row=(a.ledger||[]).find(r=>r.id===id); if(row&&isRowLocked(row)){ window.veToast&&window.veToast("🔒 Frozen — pehle unlock karo","warning"); return a; }
+      return {...a,ledger:(a.ledger||[]).filter(r=>r.id!==id)};
+    });
     const addCashLoc=()=>setAccounts(a=>({...a,cashLocations:[...(a.cashLocations||[]),{id:uid(),name:"New location",amount:"",note:""}]}));
     const updCashLoc=(id,key,val)=>setAccounts(a=>({...a,cashLocations:(a.cashLocations||[]).map(c=>c.id===id?{...c,[key]:val}:c)}));
     const rmCashLoc=(id)=>setAccounts(a=>({...a,cashLocations:(a.cashLocations||[]).filter(c=>c.id!==id)}));
     const addRecurring=()=>setAccounts(a=>({...a,recurring:[...(a.recurring||[]),{id:uid(),name:"",amount:"",day:1,kind:"expense",active:true,note:""}]}));
     const updRecurring=(id,key,val)=>setAccounts(a=>({...a,recurring:(a.recurring||[]).map(r=>r.id===id?{...r,[key]:val}:r)}));
     const rmRecurring=(id)=>setAccounts(a=>({...a,recurring:(a.recurring||[]).filter(r=>r.id!==id)}));
+
+    // ── Freeze / Unlock month ──
+    // A row is locked if its month is before the current month AND that month
+    // has not been explicitly unlocked. Recurring/manual/AI edits all respect it.
+    const monthKeyOf=(dateStr)=>{ if(!dateStr) return ""; const [y,m]=String(dateStr).split("-"); return y&&m?`${y}-${m}`:""; };
+    const isPastMonth=(mk)=>{ if(!mk) return false; const [y,m]=mk.split("-").map(Number); if(!y||!m) return false; return (y<now.getFullYear())||(y===now.getFullYear()&&m<(now.getMonth()+1)); };
+    const isRowLocked=(row)=>{
+      const mk=monthKeyOf(row.date); if(!mk) return false;
+      if(!isPastMonth(mk)) return false;
+      const st=(accounts.frozenMonths||{})[mk];
+      return !st || !st.unlocked;
+    };
+    const doUnlock = async () => {
+      if(!unlockAsk) return;
+      setUnlockBusy(true);
+      try{
+        const email=(currentUser&&currentUser.email)||"";
+        if(!email){ throw new Error("Login info nahi mili"); }
+        const res=await fetch(`${API_BASE}/api/auth/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:unlockPw})});
+        if(!res.ok){ throw new Error("Password galat"); }
+        const stamp={unlocked:true, unlockedBy:currentUser.name||email, unlockedRole:currentUser.role||"admin", unlockedAt:new Date().toISOString()};
+        setAccounts(a=>({...a, frozenMonths:{...(a.frozenMonths||{}), [unlockAsk.monthKey]:stamp}}));
+        setUnlockAsk(null); setUnlockPw("");
+        window.veToast&&window.veToast(`✓ ${unlockAsk.monthKey} unlocked`,"success");
+      }catch(e){ window.veToast&&window.veToast("⚠️ "+((e&&e.message)||"Unlock fail"),"error"); }
+      setUnlockBusy(false);
+    };
+    const relock = (mk) => setAccounts(a=>{const f={...(a.frozenMonths||{})}; delete f[mk]; return {...a, frozenMonths:f};});
 
     return (
       <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
@@ -2926,6 +2967,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                   <select value={r.kind} onChange={e=>updRecurring(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12}}>
                     <option value="expense">Expense</option>
                     <option value="salary">Salary</option>
+                    <option value="gst">GST</option>
                     <option value="income">Income</option>
                   </select>
                   <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -2977,27 +3019,67 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Manually add karo ya AI se. GPM se expenses aur salaries automatically minus ho jaate hain top snapshot mein.</div>
             {ledger.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"14px 0",textAlign:"center"}}>Abhi koi entry nahi. AI se ya "+ Add Row" se shuru karo.</div>:
-              ledger.map(r=>(
-                <div key={r.id} style={{border:"1px solid #eef2f8",borderRadius:9,padding:"10px 12px",marginBottom:7}}>
+              ledger.map(r=>{
+                const locked=isRowLocked(r);
+                const mk=monthKeyOf(r.date);
+                const stamp=(accounts.frozenMonths||{})[mk];
+                return <div key={r.id} style={{border:"1px solid "+(locked?"#f3d5b8":"#eef2f8"),borderRadius:9,padding:"10px 12px",marginBottom:7,background:locked?"#fefaf3":"#fff"}}>
                   <div style={{display:"grid",gridTemplateColumns:"110px 100px 1.5fr 1fr auto",gap:7,alignItems:"center"}}>
-                    <input type="date" value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5}}/>
-                    <select value={r.kind} onChange={e=>updLedgerRow(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,color:kindColor(r.kind),fontWeight:700}}>
-                      {["expense","salary","income","transfer","receivable","payable","other"].map(k=><option key={k} value={k}>{kindLabel(k)}</option>)}
+                    <input type="date" disabled={locked} value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,background:locked?"#f8fafd":"#fff",cursor:locked?"not-allowed":"text"}}/>
+                    <select disabled={locked} value={r.kind} onChange={e=>updLedgerRow(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,color:kindColor(r.kind),fontWeight:700,background:locked?"#f8fafd":"#fff"}}>
+                      {["expense","salary","gst","income","transfer","receivable","payable","other"].map(k=><option key={k} value={k}>{kindLabel(k)}</option>)}
                     </select>
-                    <input value={r.party} onChange={e=>updLedgerRow(r.id,"party",e.target.value)} placeholder="Kise / Kaha" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5}}/>
-                    <input type="number" className="mono" value={r.amount} onChange={e=>updLedgerRow(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,textAlign:"right"}}/>
-                    <button onClick={()=>rmLedgerRow(r.id)} className="btn btn-danger btn-sm">✕</button>
+                    <input disabled={locked} value={r.party} onChange={e=>updLedgerRow(r.id,"party",e.target.value)} placeholder="Kise / Kaha" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,background:locked?"#f8fafd":"#fff"}}/>
+                    <input type="number" disabled={locked} className="mono" value={r.amount} onChange={e=>updLedgerRow(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,textAlign:"right",background:locked?"#f8fafd":"#fff"}}/>
+                    {locked
+                      ? <button onClick={()=>setUnlockAsk({monthKey:mk})} title="Unlock month" style={{border:"1px solid #f3c88a",background:"#fdf1dc",color:"#8a6d1f",borderRadius:6,padding:"6px 8px",fontSize:11,fontWeight:800,cursor:"pointer"}}>🔒 Unlock</button>
+                      : <button onClick={()=>rmLedgerRow(r.id)} className="btn btn-danger btn-sm">✕</button>}
                   </div>
-                  {(r.note||r.source)&&<div style={{fontSize:10.5,color:"#94a3b8",marginTop:5,display:"flex",justifyContent:"space-between"}}>
+                  {(r.note||r.source||locked)&&<div style={{fontSize:10.5,color:"#94a3b8",marginTop:5,display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
                     <span>{r.note}</span>
-                    {r.source&&r.source!=="manual"&&<span style={{background:"#f1f5f9",padding:"1px 7px",borderRadius:5,fontWeight:700}}>{r.source}</span>}
+                    <span style={{display:"flex",gap:8,alignItems:"center"}}>
+                      {locked&&<span style={{background:"#faf1dc",color:"#8a6d1f",padding:"1px 7px",borderRadius:5,fontWeight:700}}>🔒 Frozen · {mk}</span>}
+                      {stamp&&stamp.unlocked&&<span style={{background:"#e0f7fb",color:"#0e7490",padding:"1px 7px",borderRadius:5,fontWeight:700}}>Unlocked by {stamp.unlockedBy} · {new Date(stamp.unlockedAt).toLocaleString("en-IN")}</span>}
+                      {r.source&&r.source!=="manual"&&<span style={{background:"#f1f5f9",padding:"1px 7px",borderRadius:5,fontWeight:700}}>{r.source}</span>}
+                    </span>
                   </div>}
-                </div>
-              ))
+                </div>;
+              })
             }
           </div>
 
+          {/* Frozen months summary — jab bhi kuch unlock hua, saaf dikhe */}
+          {Object.keys(accounts.frozenMonths||{}).length>0&&<div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"14px 18px"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>🔓 Unlocked Months</div>
+            {Object.entries(accounts.frozenMonths||{}).map(([mk,st])=>(
+              st.unlocked?<div key={mk} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px dashed #eef2f8",fontSize:12}}>
+                <span>{mk} — Unlocked by <b>{st.unlockedBy}</b> · {new Date(st.unlockedAt).toLocaleString("en-IN")}</span>
+                <button onClick={()=>relock(mk)} style={{border:"1px solid #d4e0f5",background:"#f8fafd",color:"#64748b",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>Re-lock</button>
+              </div>:null
+            ))}
+          </div>}
+
         </div>
+
+        {/* UNLOCK MODAL — password re-entry every time */}
+        {unlockAsk&&<div onClick={()=>{if(!unlockBusy){setUnlockAsk(null);setUnlockPw("");}}} style={{position:"fixed",inset:0,background:"rgba(15,35,80,.55)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"6vh 16px"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:14,width:"min(440px,100%)",boxShadow:"0 20px 60px rgba(0,0,0,.25)",overflow:"hidden"}}>
+            <div style={{padding:"16px 20px",background:"linear-gradient(135deg,#8a6d1f,#c9942a)",color:"#fff"}}>
+              <div style={{fontSize:10,letterSpacing:2,color:"#faf1dc",fontWeight:800}}>ADMIN CONFIRMATION</div>
+              <div style={{fontSize:17,fontWeight:800,marginTop:2}}>🔒 Unlock {unlockAsk.monthKey}</div>
+            </div>
+            <div style={{padding:"18px 20px"}}>
+              <div style={{fontSize:12,color:"#6b7a99",marginBottom:12,lineHeight:1.5}}>Pichle mahine ki entries edit karne ke liye password dobara daalein. Aapka login: <b style={{color:"#0f2350"}}>{currentUser.name||currentUser.email}</b> ({currentUser.role})</div>
+              <input type="password" autoFocus value={unlockPw} onChange={e=>setUnlockPw(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!unlockBusy&&unlockPw)doUnlock();}}
+                placeholder="Password" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"11px 13px",fontSize:13,outline:"none",marginBottom:14}}/>
+              <div style={{display:"flex",gap:8}}>
+                <button disabled={unlockBusy||!unlockPw} onClick={doUnlock} style={{flex:1,background:unlockBusy?"#c9942a":"linear-gradient(135deg,#8a6d1f,#c9942a)",color:"#fff",border:"none",borderRadius:8,padding:"11px",fontSize:13,fontWeight:800,cursor:unlockBusy?"wait":"pointer"}}>{unlockBusy?"Verifying…":"🔓 Unlock"}</button>
+                <button onClick={()=>{setUnlockAsk(null);setUnlockPw("");}} style={{background:"#f1f5f9",color:"#64748b",border:"none",borderRadius:8,padding:"11px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>}
       </div>
     );
   }
