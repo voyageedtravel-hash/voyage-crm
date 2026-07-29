@@ -1143,6 +1143,8 @@ export default function TravelCRM() {
   const isAdmin=currentUser.role==="admin";
   // Dashboard date range
   const [dateFrom,setDateFrom]=useState("");
+  // Dashboard KPI drilldown — { title, deals:[{deal,value,label}] }
+  const [drilldown,setDrilldown]=useState(null);
   const [dateTo,setDateTo]=useState("");
   const [dateMode,setDateMode]=useState("query");   // query | travel | booking
   const [stageTab,setStageTab]=useState("All");     // deal-list status tab
@@ -4120,18 +4122,22 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
           <div style={{fontSize:12,color:"#10b981",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>✅ Booked — {B.count} deals</div>
           <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:28}}>
             {[
-              {l:"Sale Price",v:fmtINR(B.sell),c:"#1a2c52"},
-              {l:"Cost Price",v:fmtINR(B.cost),c:"#33446b"},
-              {l:"Gross Profit",v:fmtINR(B.gpm),c:B.gpm>=0?"#10b981":"#ef4444"},
-              ...(B.anyCxl?[{l:"Profit After Cancellation",v:fmtINR(B.revisedProfit),c:B.revisedProfit>=0?"#0891b2":"#ef4444"}]:[]),
-              {l:"Net (after GST)",v:fmtINR(B.net),c:B.net>=0?"#f97316":"#ef4444"},
-              {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#4169E1"},
-              {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981"},
-              {l:"Client Received",v:fmtINR(B.clientRec),c:"#10b981"},
-              {l:"Client Pending",v:fmtINR(B.clientDue),c:B.clientDue>0?"#f59e0b":"#10b981"},
-              ...(B.clientAdvance>0?[{l:"Client Advance (refundable)",v:fmtINR(B.clientAdvance),c:"#7c3aed"}]:[]),
+              {l:"Sale Price",v:fmtINR(B.sell),c:"#1a2c52",field:"sell"},
+              {l:"Cost Price",v:fmtINR(B.cost),c:"#33446b",field:"cost"},
+              {l:"Gross Profit",v:fmtINR(B.gpm),c:B.gpm>=0?"#10b981":"#ef4444",field:"gpm"},
+              ...(B.anyCxl?[{l:"Profit After Cancellation",v:fmtINR(B.revisedProfit),c:B.revisedProfit>=0?"#0891b2":"#ef4444",field:"revisedProfit"}]:[]),
+              {l:"Net (after GST)",v:fmtINR(B.net),c:B.net>=0?"#f97316":"#ef4444",field:"net"},
+              {l:"Vendor Paid",v:fmtINR(B.vendorPaid),c:"#4169E1",field:"vendorPaid"},
+              {l:"Vendor Pending",v:fmtINR(B.vendorDue),c:B.vendorDue>0?"#ef4444":"#10b981",field:"vendorDue"},
+              {l:"Client Received",v:fmtINR(B.clientRec),c:"#10b981",field:"clientRec"},
+              {l:"Client Pending",v:fmtINR(B.clientDue),c:B.clientDue>0?"#f59e0b":"#10b981",field:"clientDue"},
+              ...(B.clientAdvance>0?[{l:"Client Advance (refundable)",v:fmtINR(B.clientAdvance),c:"#7c3aed",field:"clientAdvance"}]:[]),
             ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff",border:"1px solid #15803d",borderRadius:12,padding:"16px 18px"}}>
+              <div key={i} onClick={()=>setDrilldown({title:"Booked · "+s.l, field:s.field, deals:bookedDeals})}
+                title="Click for per-deal breakdown"
+                style={{background:"#ffffff",border:"1px solid #15803d",borderRadius:12,padding:"16px 18px",cursor:"pointer",transition:"transform .1s, box-shadow .1s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 18px rgba(21,128,61,.14)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
                 <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
                 <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
               </div>
@@ -4142,15 +4148,19 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
           <div style={{fontSize:12,color:"#ef4444",fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>❌ Cancelled — {C.count} deals</div>
           <div className="dash-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:14,marginBottom:32}}>
             {[
-              {l:"Sale Price",v:fmtINR(C.sell),c:"#33446b"},
-              {l:"Cost Price",v:fmtINR(C.cost),c:"#33446b"},
-              {l:"Lost Profit",v:fmtINR(C.gpm),c:"#ef4444"},
-              {l:"Vendor Paid",v:fmtINR(C.vendorPaid),c:"#4169E1"},
-              {l:"Vendor Pending",v:fmtINR(C.vendorDue),c:C.vendorDue>0?"#ef4444":"#10b981"},
-              {l:"Client Received",v:fmtINR(C.clientRec),c:"#10b981"},
-              {l:"Client Refund Due",v:fmtINR(C.clientRec),c:"#f59e0b"},
+              {l:"Sale Price",v:fmtINR(C.sell),c:"#33446b",field:"sell"},
+              {l:"Cost Price",v:fmtINR(C.cost),c:"#33446b",field:"cost"},
+              {l:"Lost Profit",v:fmtINR(C.gpm),c:"#ef4444",field:"gpm"},
+              {l:"Vendor Paid",v:fmtINR(C.vendorPaid),c:"#4169E1",field:"vendorPaid"},
+              {l:"Vendor Pending",v:fmtINR(C.vendorDue),c:C.vendorDue>0?"#ef4444":"#10b981",field:"vendorDue"},
+              {l:"Client Received",v:fmtINR(C.clientRec),c:"#10b981",field:"clientRec"},
+              {l:"Client Refund Due",v:fmtINR(C.clientRec),c:"#f59e0b",field:"clientRec"},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff",border:"1px solid #fdeaea",borderRadius:12,padding:"16px 18px"}}>
+              <div key={i} onClick={()=>setDrilldown({title:"Cancelled · "+s.l, field:s.field, deals:cancelledDeals})}
+                title="Click for per-deal breakdown"
+                style={{background:"#ffffff",border:"1px solid #fdeaea",borderRadius:12,padding:"16px 18px",cursor:"pointer",transition:"transform .1s, box-shadow .1s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 18px rgba(239,68,68,.12)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
                 <div style={{fontSize:9,color:"#6b7a99",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>{s.l}</div>
                 <div style={{fontFamily:"monospace",fontSize:17,fontWeight:800,color:s.c}}>{s.v}</div>
               </div>
@@ -4244,6 +4254,83 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
               })}
             </div>
           </div>
+
+          {/* KPI drilldown modal — clicking any card opens this */}
+          {drilldown&&(()=>{
+            const rowsRaw = (drilldown.deals||[]).map(d=>{
+              const F=dealFinance(d);
+              const value = drilldown.field==="sell" ? F.sell
+                : drilldown.field==="cost" ? F.cost
+                : drilldown.field==="gpm" ? (F.sell-F.cost)
+                : drilldown.field==="revisedProfit" ? F.revisedProfit
+                : drilldown.field==="net" ? ((F.sell-F.cost) - (d.gstMode==="none"?0:d.gstMode==="package"?F.sell*GST_RATE_PACKAGE:((F.sell-F.cost)>0?(F.sell-F.cost)*GST_RATE_PROFIT:0)))
+                : drilldown.field==="vendorPaid" ? F.vendorPaid
+                : drilldown.field==="vendorDue" ? F.vendorDue
+                : drilldown.field==="clientRec" ? F.clientRec
+                : drilldown.field==="clientDue" ? F.clientDue
+                : drilldown.field==="clientAdvance" ? F.clientAdvance : 0;
+              return {deal:d,value};
+            });
+            // Show contributing deals: for pending/receivable metrics hide zero rows;
+            // for totals show all so numbers add up.
+            const hideZero = ["vendorDue","clientDue","clientAdvance"].includes(drilldown.field);
+            const rows = (hideZero?rowsRaw.filter(r=>r.value>0.5):rowsRaw).sort((a,b)=>b.value-a.value);
+            const total = rows.reduce((s,r)=>s+r.value,0);
+            return <div onClick={()=>setDrilldown(null)} style={{position:"fixed",inset:0,background:"rgba(15,35,80,.55)",zIndex:9999,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"6vh 16px",overflowY:"auto"}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,width:"min(920px,100%)",boxShadow:"0 20px 60px rgba(0,0,0,.25)",overflow:"hidden"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 22px",background:"linear-gradient(135deg,#0f2350,#1a3060)",color:"#fff"}}>
+                  <div>
+                    <div style={{fontSize:10,letterSpacing:2,color:"#f0c842",fontWeight:800}}>DRILLDOWN</div>
+                    <div style={{fontSize:18,fontWeight:800,marginTop:2}}>{drilldown.title}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,letterSpacing:2,color:"#9fb4e0"}}>{rows.length} {rows.length===1?"deal":"deals"} · Total</div>
+                    <div className="mono" style={{fontSize:20,fontWeight:800,color:"#f0c842"}}>{fmtINR(total)}</div>
+                  </div>
+                </div>
+                <div style={{maxHeight:"70vh",overflowY:"auto"}}>
+                  {rows.length===0?<div style={{padding:"30px",textAlign:"center",color:"#94a3b8"}}>Is category mein koi deal nahi.</div>:rows.map(({deal:d,value})=>{
+                    const vendors=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
+                                   ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
+                                   ...(d.trainVendors||[]).map(v=>({...v,_k:"Train",_n:v.name})),
+                                   ...(d.landVendors||[]).map(v=>({...v,_k:"Land",_n:v.name})),
+                                   ...(d.visaVendors||[]).map(v=>({...v,_k:"Visa",_n:v.name}))];
+                    const showVendors = ["vendorPaid","vendorDue","cost"].includes(drilldown.field);
+                    return <div key={d._localId||d._id} style={{borderBottom:"1px solid #eef2f8",padding:"14px 22px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"center"}}>
+                        <div style={{flex:"1 1 240px",cursor:"pointer"}} onClick={()=>{setDrilldown(null); openDeal(d);}}>
+                          <div style={{fontSize:14,fontWeight:800,color:"#0f2350"}}>{d.clientName||"(no name)"}</div>
+                          <div style={{fontSize:11,color:"#6b7a99"}}>{d.destination||"—"} · {d.travelDate?new Date(d.travelDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"no travel date"}</div>
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div className="mono" style={{fontSize:16,fontWeight:800,color:value>0?"#0f2350":"#94a3b8"}}>{fmtINR(value)}</div>
+                          <button onClick={()=>{setDrilldown(null); openDeal(d);}} className="btn btn-sm" style={{marginTop:6,fontSize:10.5,padding:"4px 10px"}}>Open Query →</button>
+                        </div>
+                      </div>
+                      {showVendors&&vendors.length>0&&<div style={{marginTop:10,paddingLeft:6}}>
+                        {vendors.map((v,vi)=>{
+                          const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
+                          const paid=sum(v.payments||[],"amount");
+                          const bal=Math.max(0,cost-paid);
+                          if(drilldown.field==="vendorDue"&&bal<=0.5) return null;
+                          return <div key={vi} style={{display:"flex",gap:10,alignItems:"center",padding:"5px 0",fontSize:11.5,borderBottom:"1px dashed #eef2f8"}}>
+                            <span style={{fontSize:9,fontWeight:800,color:"#6b7a99",width:44}}>{v._k}</span>
+                            <span style={{flex:1,color:"#334e82"}}>{v._n||"(unnamed)"}</span>
+                            <span style={{color:"#6b7a99"}}>Cost <b className="mono" style={{color:"#0f2350"}}>{fmtINR(cost)}</b></span>
+                            <span style={{color:"#6b7a99"}}>Paid <b className="mono" style={{color:"#4169E1"}}>{fmtINR(paid)}</b></span>
+                            <span style={{color:"#6b7a99"}}>Bal <b className="mono" style={{color:bal>0?"#ef4444":"#10b981"}}>{fmtINR(bal)}</b></span>
+                          </div>;
+                        })}
+                      </div>}
+                    </div>;
+                  })}
+                </div>
+                <div style={{padding:"12px 22px",borderTop:"1px solid #eef2f8",display:"flex",justifyContent:"flex-end"}}>
+                  <button onClick={()=>setDrilldown(null)} className="btn btn-sm">Close</button>
+                </div>
+              </div>
+            </div>;
+          })()}
         </div>
       );
     }
