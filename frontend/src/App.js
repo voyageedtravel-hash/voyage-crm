@@ -814,6 +814,7 @@ const defaultAccounts = () => ({
   ledger:[],                           // { id, date, kind, party, amount, note, source, dealId? }
   materialisedMonths:[],               // ["2026-08", ...] — so we don't create the same recurring row twice
   frozenMonths:{},                     // {"2026-07": {locked:true, unlockedBy:null, unlockedAt:null}}
+  commitments:[],                      // AI advisor memory: {id, date, kind, note, dealNumber?, amount?, status:"open|done|cancelled", resolvedAt?}
 });
 const loadAccounts = () => { try { const v=localStorage.getItem(ACCOUNTS_KEY); return v?{...defaultAccounts(),...JSON.parse(v)}:defaultAccounts(); } catch(e){return defaultAccounts();} };
 const saveAccounts = (a) => { try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); } catch(e){} };
@@ -1162,6 +1163,12 @@ export default function TravelCRM() {
   const [unlockAsk,setUnlockAsk]=useState(null);  // { monthKey }
   const [unlockPw,setUnlockPw]=useState("");
   const [unlockBusy,setUnlockBusy]=useState(false);
+  // Accounts landing: month picker → chosen month opens
+  const [acctOpenMonth,setAcctOpenMonth]=useState(null);
+  // AI salary/close advisor
+  const [advChat,setAdvChat]=useState([]);           // [{role,content}]
+  const [advBusy,setAdvBusy]=useState(false);
+  const [advInput,setAdvInput]=useState("");
   // AI Cancellation assistant — conversational guide; maths stays in code.
   const [aiXImgs,setAiXImgs]=useState([]);
   const [aiXBusy,setAiXBusy]=useState(false);
@@ -2376,6 +2383,79 @@ Cash locations and booked deals list are passed in the user turn.`;
     window.veToast&&window.veToast("✅ Ledger update ho gaya","success");
   };
 
+  // ── AI Salary/Close Advisor — checks cash-in-hand vs upcoming vendor payments ─
+  const ADV_SYS = `You are the financial advisor for Voyage-Ed Travels, a two-founder travel agency. You help Vishal decide monthly salary safely.
+
+You are given a JSON context with: cashInHand (total cash across locations), bankBalance, receivablesTotal (money coming from booked clients), payablesTotal (money going to vendors on booked deals), payablesByDeal (each upcoming vendor payment with dealNumber, client, vendor, amount), thisMonthCommitted (already spent this month), openCommitments (previous urgent items you asked about, with their status), today.
+
+RULES:
+- Salary ONLY comes from cash-in-hand and bank — NEVER from money that hasn't arrived yet from clients.
+- Before suggesting salary amounts, ALWAYS ask if there are any urgent vendor payments due in the next 3 days. List candidate vendors from payablesByDeal so the user can confirm.
+- When user answers, note which of those are urgent + how they'll be arranged (client payment coming, use cash, delay, etc.) and echo back: "Yaad rakhunga: [list]".
+- If openCommitments is non-empty and any status is 'open', ASK FIRST about those before anything else: "Pichli baar aapne bola tha X — wo sort hua? kese?".
+- Only after urgent-vendor and open-commitments check, propose salary split: Vishal ₹___, Sahitya ₹___, Balance in Company ₹___. Base on cash+bank minus urgent-vendor need. Be conservative.
+- Speak Hinglish, short and clear. Ask ONE thing at a time.
+
+Reply ONLY in these two shapes:
+{"type":"ask","reply":"Hinglish question","newCommitments":[{"kind":"urgent-vendor|other","note":"","dealNumber":"","amount":0,"status":"open"}]}
+{"type":"suggest","summary":"one line","vishalSalary":number,"sahityaSalary":number,"balance":number,"reasoning":"1-2 line why","newCommitments":[...]}
+
+If it's the first turn, ALWAYS start with type "ask" — never suggest salary until you've confirmed there are no urgent vendor payments and no open commitments.`;
+
+  const advSend = async (msg) => {
+    const text=(msg||advInput||"").trim(); if(!text) return;
+    const history=[...advChat,{role:"user",content:text}];
+    setAdvChat(history); setAdvInput(""); setAdvBusy(true);
+    try{
+      // Build the context from live CRM state.
+      const allDs=loadAllDeals().map(normalizeDeal).filter(isBookedStage);
+      const cashInHand=(accounts.cashLocations||[]).reduce((s,c)=>s+(Number(c.amount)||0),0);
+      const bankBalance=Number(accounts.bankBalance)||0;
+      const receivablesTotal=allDs.reduce((s,d)=>s+dealFinance(d).clientDue,0);
+      const payablesByDeal=[];
+      allDs.forEach(d=>{
+        const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
+                  ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
+                  ...(d.trainVendors||[]).map(v=>({...v,_k:"Train",_n:v.name})),
+                  ...(d.landVendors||[]).map(v=>({...v,_k:"Land",_n:v.name})),
+                  ...(d.visaVendors||[]).map(v=>({...v,_k:"Visa",_n:v.name}))];
+        vs.forEach(v=>{
+          const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
+          const paid=sum(v.payments||[],"amount");
+          const bal=cost-paid;
+          if(bal>0.5) payablesByDeal.push({dealNumber:d.dealNumber, client:d.clientName, vendor:v._n, kind:v._k, amount:Math.round(bal), travelDate:d.travelDate||""});
+        });
+      });
+      const payablesTotal=payablesByDeal.reduce((s,p)=>s+p.amount,0);
+      const now3=new Date(); const mkNow=`${now3.getFullYear()}-${String(now3.getMonth()+1).padStart(2,"0")}`;
+      const thisMonthCommitted=(accounts.ledger||[]).filter(r=>String(r.date).startsWith(mkNow)&&["expense","salary","gst"].includes(r.kind)).reduce((s,r)=>s+(Number(r.amount)||0),0);
+      const openCommitments=(accounts.commitments||[]).filter(c=>c.status==="open");
+      const ctx={today:now3.toISOString().slice(0,10), cashInHand, bankBalance, receivablesTotal, payablesTotal, payablesByDeal, thisMonthCommitted, openCommitments};
+
+      const msgs=[{role:"user",content:"CONTEXT:\n"+JSON.stringify(ctx)}, ...history.map(m=>({role:m.role,content:m.content}))];
+      const res=await fetch(`${API_BASE}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1500,system:ADV_SYS,messages:msgs})});
+      const data=await res.json();
+      if(!res.ok||data.error) throw new Error((data.error&&(data.error.message||data.error))||"AI error");
+      const raw=((data.content||[]).map(c=>c.text||"").join("")||"").replace(/```json|```/g,"").trim();
+      let j; try{ j=JSON.parse(raw); }catch{ throw new Error("AI ka jawab samajh nahi aaya"); }
+
+      // Save any new commitments so we can remind next time.
+      if(Array.isArray(j.newCommitments)&&j.newCommitments.length){
+        setAccounts(a=>({...a, commitments:[...(a.commitments||[]),
+          ...j.newCommitments.map(nc=>({id:uid(), date:new Date().toISOString().slice(0,10), status:"open", ...nc}))]}));
+      }
+
+      if(j.type==="suggest"){
+        setAdvChat(h=>[...h,{role:"assistant",content:`💡 ${j.summary||"Suggestion"}\n\nVishal salary: ₹${(j.vishalSalary||0).toLocaleString("en-IN")}\nSahitya salary: ₹${(j.sahityaSalary||0).toLocaleString("en-IN")}\nBalance in company: ₹${(j.balance||0).toLocaleString("en-IN")}\n\n${j.reasoning||""}`}]);
+      }else{
+        setAdvChat(h=>[...h,{role:"assistant",content:j.reply||"..."}]);
+      }
+    }catch(e){ setAdvChat(h=>[...h,{role:"assistant",content:"⚠️ "+((e&&e.message)||"gadbad")}]); }
+    setAdvBusy(false);
+  };
+  const advResolveCommitment=(id,how)=>setAccounts(a=>({...a,commitments:(a.commitments||[]).map(c=>c.id===id?{...c,status:"done",resolvedAt:new Date().toISOString(),resolvedNote:how||""}:c)}));
+
   const cxlApplyProposal = () => {
     if(!cxlProposal) return;
     const p=cxlProposal;
@@ -2891,6 +2971,43 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
           </div>
 
+          {/* 1.5) AI SALARY ADVISOR */}
+          <div style={{background:"linear-gradient(180deg,#faf8ff,#fff)",border:"1px solid #c4b5fd",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#5b21b6",letterSpacing:1.5,textTransform:"uppercase"}}>🧠 Salary Advisor</div>
+              {advChat.length>0&&<button onClick={()=>{setAdvChat([]); setAdvInput("");}} style={{border:"1px solid #d4c9f5",background:"#fff",color:"#64748b",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>↺ Reset</button>}
+            </div>
+            <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:10,lineHeight:1.6}}>Cash-in-hand aur bank ke basis pe salary suggest karega. Pehle poochhega ki agle 3 din mein koi urgent vendor payment toh nahi — aur aapki commitments yaad rakhta hai.</div>
+
+            {/* Open commitments AI is watching */}
+            {(accounts.commitments||[]).filter(c=>c.status==="open").length>0&&<div style={{background:"#fef3e2",border:"1px solid #f3d5b8",borderRadius:9,padding:"10px 12px",marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#8a6d1f",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>📌 Open Commitments (AI yaad rakhega)</div>
+              {(accounts.commitments||[]).filter(c=>c.status==="open").map(c=>(
+                <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11.5,padding:"5px 0"}}>
+                  <span style={{color:"#0f2350"}}>{c.note} {c.dealNumber&&<span style={{background:"#faf1dc",padding:"1px 6px",borderRadius:4,marginLeft:5,fontFamily:"monospace",fontWeight:700}}>{c.dealNumber}</span>} {c.amount>0&&<b className="mono" style={{marginLeft:5,color:"#dc2626"}}>{inr(c.amount)}</b>}</span>
+                  <button onClick={()=>{ const how=prompt("Ye kese sort hua?","")||"—"; advResolveCommitment(c.id,how); }} style={{border:"1px solid #c4b5fd",background:"#fff",color:"#5b21b6",borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:700,cursor:"pointer"}}>✓ Sort ho gaya</button>
+                </div>
+              ))}
+            </div>}
+
+            {advChat.length>0&&<div style={{maxHeight:340,overflowY:"auto",display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
+              {advChat.map((m,i)=>(
+                <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"90%",background:m.role==="user"?"#ede9fe":"#f4f7fc",color:"#0f2350",borderRadius:12,padding:"10px 13px",fontSize:12.5,whiteSpace:"pre-wrap",lineHeight:1.6,border:"1px solid "+(m.role==="user"?"#ddd6fe":"#e3eaf7")}}>{m.content}</div>
+              ))}
+              {advBusy&&<div style={{alignSelf:"flex-start",fontSize:11,color:"#8b5cf6",padding:"6px 12px"}}>Soch raha hai…</div>}
+            </div>}
+
+            <div style={{display:"flex",gap:8}}>
+              <input value={advInput} onChange={e=>setAdvInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!advBusy){advSend();}}}
+                placeholder={advChat.length?"Jawab likho…":"Salary calculate karo — start karo"}
+                style={{flex:1,border:"1px solid #d4c9f5",borderRadius:10,padding:"11px 13px",fontSize:12.5,outline:"none"}}/>
+              {advChat.length===0
+                ? <button disabled={advBusy} onClick={()=>advSend("Salary decide karni hai is mahine ki. Shuru karo.")} style={{background:advBusy?"#c4b5fd":"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none",borderRadius:10,padding:"0 18px",fontSize:12.5,fontWeight:800,cursor:advBusy?"wait":"pointer",whiteSpace:"nowrap"}}>🧮 Salary Calculate Karo</button>
+                : <button disabled={advBusy||!advInput.trim()} onClick={()=>advSend()} style={{background:advBusy?"#c4b5fd":"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none",borderRadius:10,padding:"0 18px",fontSize:13,fontWeight:800,cursor:advBusy?"wait":"pointer"}}>Send</button>}
+            </div>
+          </div>
+
           {/* 2) BANK + CASH */}
           <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
             <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>🏦 Bank &amp; Cash</div>
@@ -3027,20 +3144,98 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             )}
           </div>
 
-          {/* 7) LEDGER — month-wise notebook (We Owe | We Will Get) */}
+          {/* 7) LEDGER — month picker landing, then selected month with auto-injected system rows */}
           {(()=>{
-            // Group ledger rows by YYYY-MM (newest month first).
-            const byMonth={};
-            ledger.forEach(r=>{ const mk=monthKeyOf(r.date)||"—"; (byMonth[mk]=byMonth[mk]||[]).push(r); });
-            const months=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-            const monthName=(mk)=>{ if(mk==="—")return "Undated"; const [y,m]=mk.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"}); };
-            // "We Will Get" = incoming (income + receivable)
-            // "We Owe"      = outgoing (expense, salary, gst, payable)
+            const monthName=(mk)=>{ if(mk==="—")return "Undated"; const [y,m]=mk.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"short",year:"numeric"}); };
+            const monthLong=(mk)=>{ if(mk==="—")return "Undated"; const [y,m]=mk.split("-").map(Number); return new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"}); };
+
+            // Build the union of months from ledger + this month + last 3 months.
+            const now2=new Date();
+            const monthKeys=new Set(ledger.map(r=>monthKeyOf(r.date)||"—").filter(mk=>mk!=="—"));
+            for(let i=0;i<4;i++){ const dt=new Date(now2.getFullYear(),now2.getMonth()-i,1); monthKeys.add(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`); }
+            const availableMonths=[...monthKeys].sort((a,b)=>b.localeCompare(a));
+
+            // Landing: month picker buttons.
+            if(!acctOpenMonth){
+              return <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"20px 22px"}}>
+                <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase",marginBottom:14}}>📖 Ledger — Month Choose Karo</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+                  {availableMonths.map(mk=>{
+                    const rowsHere=ledger.filter(r=>monthKeyOf(r.date)===mk);
+                    const isCurrent=mk===`${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
+                    const isLocked=isPastMonth(mk)&&!((accounts.frozenMonths||{})[mk]&&(accounts.frozenMonths||{})[mk].unlocked);
+                    return <button key={mk} onClick={()=>setAcctOpenMonth(mk)}
+                      style={{background:isCurrent?"linear-gradient(135deg,#0f2350,#1a3060)":"#fff",color:isCurrent?"#f0c842":"#0f2350",border:"1px solid "+(isCurrent?"#0f2350":"#d4e0f5"),borderRadius:10,padding:"14px 12px",cursor:"pointer",textAlign:"left"}}
+                      onMouseEnter={e=>{if(!isCurrent){e.currentTarget.style.borderColor="#c9942a";e.currentTarget.style.background="#faf1dc";}}}
+                      onMouseLeave={e=>{if(!isCurrent){e.currentTarget.style.borderColor="#d4e0f5";e.currentTarget.style.background="#fff";}}}>
+                      <div style={{fontSize:15,fontWeight:800,letterSpacing:.5}}>{monthName(mk)}</div>
+                      <div style={{fontSize:10.5,marginTop:4,opacity:.8}}>{rowsHere.length} manual entries {isLocked?" · 🔒":""} {isCurrent?" · current":""}</div>
+                    </button>;
+                  })}
+                </div>
+              </div>;
+            }
+
+            // Selected month view — auto-inject system rows from current CRM data.
+            const mk=acctOpenMonth;
+            const bookedD2 = allD.filter(isBookedStage);
+            // Client receivables (booked deals with dues) as read-only system rows.
+            const sysReceivables = bookedD2.filter(d=>{const F=dealFinance(d); return F.clientDue>0.5;})
+              .map(d=>{ const F=dealFinance(d); return {
+                _sys:true, id:"sys-r-"+(d._localId||d.dealNumber), date:new Date().toISOString().slice(0,10),
+                kind:"receivable", party:d.clientName||"(no name)",
+                amount:F.clientDue, queryTag:d.dealNumber||"", note:d.destination||"", dealId:d._localId,
+              };});
+            // Vendor payables as read-only system rows.
+            const sysPayables=[];
+            bookedD2.forEach(d=>{
+              const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
+                        ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
+                        ...(d.trainVendors||[]).map(v=>({...v,_k:"Train",_n:v.name})),
+                        ...(d.landVendors||[]).map(v=>({...v,_k:"Land",_n:v.name})),
+                        ...(d.visaVendors||[]).map(v=>({...v,_k:"Visa",_n:v.name}))];
+              vs.forEach(v=>{
+                const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
+                const paid=sum(v.payments||[],"amount");
+                const bal=cost-paid;
+                if(bal>0.5) sysPayables.push({
+                  _sys:true, id:"sys-p-"+(d._localId||d.dealNumber)+"-"+v.id,
+                  date:new Date().toISOString().slice(0,10), kind:"payable",
+                  party:`${v._n||"(vendor)"} · ${v._k}`, amount:bal,
+                  queryTag:d.dealNumber||"", note:d.clientName||"", dealId:d._localId,
+                });
+              });
+            });
+            // Only inject system rows into the CURRENT month (dena/lena is a live snapshot).
+            const currentKey=`${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
+            const injectSys = (mk===currentKey);
+            const manualRowsHere=ledger.filter(r=>monthKeyOf(r.date)===mk);
+            const allRowsHere = injectSys
+              ? [...sysReceivables, ...sysPayables, ...manualRowsHere]
+              : manualRowsHere;
+
             const isOwed=(r)=>["expense","salary","gst","payable"].includes(r.kind);
             const isReceive=(r)=>["income","receivable"].includes(r.kind);
 
+            const sysRow=(r)=>(
+              <div key={r.id} style={{border:"1px solid #e3eaf7",borderRadius:8,padding:"9px 11px",marginBottom:6,background:"#fbfdff",position:"relative"}}>
+                <div style={{position:"absolute",top:5,right:8,fontSize:8,fontWeight:800,letterSpacing:1,color:"#4169E1",background:"#eef3fc",padding:"1px 6px",borderRadius:4}}>AUTO</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#0f2350",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.party}</div>
+                    <div style={{fontSize:10.5,color:"#94a3b8",marginTop:2}}>
+                      {r.queryTag&&<span style={{background:"#faf1dc",color:"#8a6d1f",padding:"1px 6px",borderRadius:4,fontFamily:"monospace",marginRight:5}}>{r.queryTag}</span>}
+                      {r.note}
+                    </div>
+                  </div>
+                  <b className="mono" style={{fontSize:13,color:r.kind==="payable"?"#dc2626":"#f59e0b",whiteSpace:"nowrap"}}>{inr(r.amount)}</b>
+                </div>
+              </div>
+            );
+
             const rowEditor=(r)=>{
-              const locked=isRowLocked(r); const mk=monthKeyOf(r.date);
+              if(r._sys) return sysRow(r);
+              const locked=isRowLocked(r);
               return <div key={r.id} style={{border:"1px solid "+(locked?"#f3d5b8":"#eef2f8"),borderRadius:8,padding:"8px 10px",marginBottom:6,background:locked?"#fefaf3":"#fff"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,marginBottom:5,flexWrap:"wrap"}}>
                   <input type="date" disabled={locked} value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:5,padding:"5px 7px",fontSize:10.5,background:locked?"#f8fafd":"#fff",width:120}}/>
@@ -3057,54 +3252,54 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 </div>
                 <select disabled={locked} value={r.queryTag||""} onChange={e=>updLedgerRow(r.id,"queryTag",e.target.value)} style={{width:"100%",border:"1px dashed "+(r.queryTag?"#c4b5fd":"#d4e0f5"),borderRadius:5,padding:"5px 7px",fontSize:10.5,background:locked?"#f8fafd":r.queryTag?"#f5f3ff":"#fff",color:r.queryTag?"#5b21b6":"#94a3b8"}}>
                   <option value="">— No query tag —</option>
-                  {allD.filter(isBookedStage).map(d=><option key={d._localId} value={d.dealNumber||""}>{(d.dealNumber||"")} · {d.clientName||"(no name)"}{d.destination?" · "+d.destination:""}</option>)}
+                  {bookedD2.map(d=><option key={d._localId} value={d.dealNumber||""}>{(d.dealNumber||"")} · {d.clientName||"(no name)"}{d.destination?" · "+d.destination:""}</option>)}
                 </select>
                 {r.note&&<div style={{fontSize:10,color:"#94a3b8",marginTop:4,fontStyle:"italic"}}>{r.note}</div>}
               </div>;
             };
 
-            if(months.length===0) return <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"22px",textAlign:"center",color:"#94a3b8",fontSize:12.5}}>Abhi koi ledger entry nahi. Upar AI se ya "+ Add Row" se shuru karo.</div>;
-            return months.map(mk=>{
-              const rows=byMonth[mk]||[];
-              const owe=rows.filter(isOwed);
-              const receive=rows.filter(isReceive);
-              const other=rows.filter(r=>!isOwed(r)&&!isReceive(r));
-              const oweTot=owe.reduce((s,r)=>s+(Number(r.amount)||0),0);
-              const receiveTot=receive.reduce((s,r)=>s+(Number(r.amount)||0),0);
-              const balance=receiveTot-oweTot;
-              const anyLocked=rows.some(r=>isRowLocked(r));
-              return <div key={mk} style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"16px 18px",marginBottom:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,paddingBottom:10,borderBottom:"1px solid #eef2f8",flexWrap:"wrap",gap:8}}>
-                  <div style={{fontSize:14,fontWeight:800,color:"#0f2350",display:"flex",alignItems:"center",gap:8}}>
-                    📖 {monthName(mk)}
-                    {anyLocked&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:"#faf1dc",color:"#8a6d1f"}}>🔒 Frozen</span>}
-                  </div>
+            const owe=allRowsHere.filter(isOwed);
+            const receive=allRowsHere.filter(isReceive);
+            const other=allRowsHere.filter(r=>!isOwed(r)&&!isReceive(r));
+            const oweTot=owe.reduce((s,r)=>s+(Number(r.amount)||0),0);
+            const receiveTot=receive.reduce((s,r)=>s+(Number(r.amount)||0),0);
+            const balance=receiveTot-oweTot;
+            const anyLocked=allRowsHere.some(r=>!r._sys && isRowLocked(r));
+
+            return <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"16px 18px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,paddingBottom:10,borderBottom:"1px solid #eef2f8",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <button onClick={()=>setAcctOpenMonth(null)} style={{border:"1px solid #d4e0f5",background:"#f8fafd",borderRadius:7,padding:"5px 11px",fontSize:11.5,fontWeight:700,color:"#64748b",cursor:"pointer"}}>← Months</button>
+                  <div style={{fontSize:15,fontWeight:800,color:"#0f2350"}}>📖 {monthLong(mk)}</div>
+                  {anyLocked&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:"#faf1dc",color:"#8a6d1f"}}>🔒 Frozen</span>}
+                  {injectSys&&<span title="Client aur vendor dues live CRM se dikhte hain — 'AUTO' chip" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:5,background:"#eef3fc",color:"#4169E1"}}>Live sync</span>}
+                </div>
+                <div style={{display:"flex",gap:8}}>
                   <button onClick={addLedgerRow} className="btn btn-sm">+ Add Row</button>
+                  <button onClick={()=>{ saveAccounts(accounts); window.veToast&&window.veToast("✓ Saved","success"); }} className="btn btn-sm" style={{background:"#15803d",color:"#fff",borderColor:"#15803d"}}>💾 Save</button>
                 </div>
-                {/* Notebook — two columns */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-                  <div style={{borderRight:"2px solid #eef2f8",paddingRight:12}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#dc2626",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#fef2f2",padding:"5px",borderRadius:6}}>← We Owe (Dena Hai)</div>
-                    {owe.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:owe.map(rowEditor)}
-                    <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #fde5e5",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#dc2626"}}><span>Total</span><b className="mono">{inr(oweTot)}</b></div>
-                  </div>
-                  <div style={{paddingLeft:2}}>
-                    <div style={{fontSize:10,fontWeight:800,color:"#15803d",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#f0faf4",padding:"5px",borderRadius:6}}>We Will Get (Lena Hai) →</div>
-                    {receive.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:receive.map(rowEditor)}
-                    <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #d9f5e3",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#15803d"}}><span>Total</span><b className="mono">{inr(receiveTot)}</b></div>
-                  </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                <div style={{borderRight:"2px solid #eef2f8",paddingRight:12}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#dc2626",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#fef2f2",padding:"5px",borderRadius:6}}>← We Owe (Vendors ko + kharche)</div>
+                  {owe.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:owe.map(rowEditor)}
+                  <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #fde5e5",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#dc2626"}}><span>Total</span><b className="mono">{inr(oweTot)}</b></div>
                 </div>
-                {other.length>0&&<div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed #e3eaf7"}}>
-                  <div style={{fontSize:10,fontWeight:800,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Transfers &amp; Other</div>
-                  {other.map(rowEditor)}
-                </div>}
-                {/* Balance */}
-                <div style={{marginTop:14,padding:"12px 15px",background:balance>=0?"#f0faf4":"#fef2f2",border:"1px solid "+(balance>=0?"#d9f5e3":"#fde5e5"),borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:12,fontWeight:800,color:"#0f2350"}}>Month Balance ({monthName(mk)})</span>
-                  <b className="mono" style={{fontSize:16,fontWeight:800,color:balance>=0?"#15803d":"#dc2626"}}>{balance>=0?"+ ":"− "}{inr(Math.abs(balance))}</b>
+                <div style={{paddingLeft:2}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#15803d",letterSpacing:1.2,textTransform:"uppercase",marginBottom:8,textAlign:"center",background:"#f0faf4",padding:"5px",borderRadius:6}}>We Will Get (Clients se) →</div>
+                  {receive.length===0?<div style={{fontSize:11,color:"#cbd5e1",textAlign:"center",padding:"10px 0"}}>—</div>:receive.map(rowEditor)}
+                  <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #d9f5e3",display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:800,color:"#15803d"}}><span>Total</span><b className="mono">{inr(receiveTot)}</b></div>
                 </div>
-              </div>;
-            });
+              </div>
+              {other.length>0&&<div style={{marginTop:12,paddingTop:10,borderTop:"1px dashed #e3eaf7"}}>
+                <div style={{fontSize:10,fontWeight:800,color:"#64748b",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Transfers &amp; Other</div>
+                {other.map(rowEditor)}
+              </div>}
+              <div style={{marginTop:14,padding:"12px 15px",background:balance>=0?"#f0faf4":"#fef2f2",border:"1px solid "+(balance>=0?"#d9f5e3":"#fde5e5"),borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:12,fontWeight:800,color:"#0f2350"}}>Month Balance</span>
+                <b className="mono" style={{fontSize:16,fontWeight:800,color:balance>=0?"#15803d":"#dc2626"}}>{balance>=0?"+ ":"− "}{inr(Math.abs(balance))}</b>
+              </div>
+            </div>;
           })()}
 
           {/* Frozen months summary — jab bhi kuch unlock hua, saaf dikhe */}
