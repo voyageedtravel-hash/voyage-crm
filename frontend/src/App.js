@@ -547,7 +547,8 @@ const dealFinance = (d) => {
   const cxlOrigProfit=cxlR.reduce((s,r)=>s+r.cancelledCompOrigProfit,0);  // original profit of cancelled comps
   const clientRec=sum(d.clientPayments||[],"amount");
   const netSell=sell-refunded;
-  const gpm=netSell-cost;
+  const forfeit=Number(d.forfeitAmount)||0;   // client didn't pay full — absorbed, hits GPM only
+  const gpm=netSell-cost-forfeit;
   // Once a cancellation is CONFIRMED, the vendor cost/selling have already been
   // reduced in place, so `sell`/`cost` above are the post-cancellation figures.
   // The only thing not yet inside them is the cash refunded to the client,
@@ -558,7 +559,7 @@ const dealFinance = (d) => {
   const revisedProfit = gpm;
   const bal=netSell-clientRec;
   return {
-    sell, netSell, cost, refunded, gpm,
+    sell, netSell, cost, refunded, gpm, forfeit,
     vendorPaid, vendorDue:Math.max(0,cost-vendorPaid),
     clientRec,
     clientDue:Math.max(0,bal),        // money still to COLLECT
@@ -769,6 +770,8 @@ const initDeal = {
   leadSource:"",
   priority:"Normal",
   dealNumber:"",
+  forfeitAmount:"",       // client didn't pay full — this much is written off from GPM
+  forfeitNote:"",
   hotelVendors:[emptyHotelVendor()],
   flightVendors:[emptyFlightVendor()],
   trainVendors:[],
@@ -787,6 +790,31 @@ const initDeal = {
 const STORAGE_KEY = "travelcrm_deal";
 const VENDORS_KEY = "travelcrm_vendors";
 const DEALS_KEY = "travelcrm_all_deals";
+const ACCOUNTS_KEY = "travelcrm_accounts";
+
+// ── ACCOUNTS: cash boxes, bank, expenses, ledger entries (per month) ──────
+// A recurring rule fires once per month and materialises a ledger row on that
+// day; the user can edit the amount if the day arrives and reality differs.
+const defaultAccounts = () => ({
+  bankBalance:"",                      // user edits — one bank account
+  cashLocations:[                      // wherever cash physically sits
+    {id:uid(), name:"Company (Vishal)", amount:"900", note:""},
+    {id:uid(), name:"Sahitya", amount:"118000", note:"16k Nikhil Agarwal tickets · 2k Ramakant Chauhan hotel · 100k Ramakant Chauhan USA visa"},
+  ],
+  recurring:[                          // fires monthly → creates a ledger row
+    {id:uid(), name:"Rent",              amount:"27308", day:15, kind:"expense",         active:true, note:"office rent"},
+    {id:uid(), name:"Netlify",           amount:"860",   day:6,  kind:"expense",         active:true, note:"hosting"},
+    {id:uid(), name:"Claude API",        amount:"2400",  day:29, kind:"expense",         active:true, note:"AI"},
+    {id:uid(), name:"Gursimran salary",  amount:"3000",  day:9,  kind:"salary",          active:true, note:""},
+    {id:uid(), name:"Harman salary",     amount:"",      day:27, kind:"salary",          active:true, note:"joined 27 Jul 2026 — first month pro-rated on 15 Aug"},
+    {id:uid(), name:"Vishal salary",     amount:"",      day:16, kind:"salary",          active:true, note:"variable — enter each month"},
+    {id:uid(), name:"Sahitya salary",    amount:"",      day:16, kind:"salary",          active:true, note:"variable — enter each month"},
+  ],
+  ledger:[],                           // { id, date, kind, party, amount, note, source, dealId? }
+  materialisedMonths:[],               // ["2026-08", ...] — so we don't create the same recurring row twice
+});
+const loadAccounts = () => { try { const v=localStorage.getItem(ACCOUNTS_KEY); return v?{...defaultAccounts(),...JSON.parse(v)}:defaultAccounts(); } catch(e){return defaultAccounts();} };
+const saveAccounts = (a) => { try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); } catch(e){} };
 
 const loadDeal = () => { try { const d=localStorage.getItem(STORAGE_KEY); return d?JSON.parse(d):null; } catch(e){return null;} };
 // Purani-shape deals (missing fields) ko safe banata hai — har array field guaranteed
@@ -801,6 +829,13 @@ const normalizeDeal = (d) => { const x={...initDeal,...(d||{})};
   // Every deal belongs to an enquiry; legacy deals become a one-package enquiry.
   if(!x._localId) x._localId = uid();
   if(!x.enquiryId) x.enquiryId = x._localId;
+  // Human-readable deal number — VE-YYMM-XXXX, derived from _localId so it's stable.
+  if(!x.dealNumber){
+    const d=new Date(x.createdAt||Date.now());
+    const yymm = String(d.getFullYear()).slice(-2) + String(d.getMonth()+1).padStart(2,"0");
+    const short = String(x._localId).replace(/[^a-z0-9]/gi,"").slice(-4).toUpperCase().padStart(4,"0");
+    x.dealNumber = `VE-${yymm}-${short}`;
+  }
   // Heal legacy stage/status into the unified list, then auto-complete past trips
   x.stage = stageOf(x);
   if(shouldAutoComplete(x)) x.stage = "Completed";
@@ -1116,6 +1151,10 @@ export default function TravelCRM() {
   const [cxlInput,setCxlInput]=useState("");
   const [cxlBusy,setCxlBusy]=useState(false);
   const [cxlProposal,setCxlProposal]=useState(null);  // AI-computed values awaiting apply
+  // Accounts AI ledger — user types Hinglish, AI returns structured rows.
+  const [acctAiInput,setAcctAiInput]=useState("");
+  const [acctAiBusy,setAcctAiBusy]=useState(false);
+  const [acctAiProposal,setAcctAiProposal]=useState(null); // {rows:[...], summary}
   // AI Cancellation assistant — conversational guide; maths stays in code.
   const [aiXImgs,setAiXImgs]=useState([]);
   const [aiXBusy,setAiXBusy]=useState(false);
@@ -1145,6 +1184,29 @@ export default function TravelCRM() {
   const [dateFrom,setDateFrom]=useState("");
   // Dashboard KPI drilldown — { title, deals:[{deal,value,label}] }
   const [drilldown,setDrilldown]=useState(null);
+  // ── Accounts (ledger, cash, bank, recurring rules) ────────────────────
+  const [accounts,setAccounts]=useState(loadAccounts());
+  useEffect(()=>{ saveAccounts(accounts); },[accounts]);
+  // Once per month: materialise every active recurring rule into the ledger
+  // as of that month's target day. Runs on load; idempotent via materialisedMonths.
+  useEffect(()=>{
+    const now=new Date();
+    const y=now.getFullYear(), m=now.getMonth()+1;
+    const key=`${y}-${String(m).padStart(2,"0")}`;
+    if((accounts.materialisedMonths||[]).includes(key)) return;
+    setAccounts(a=>{
+      if((a.materialisedMonths||[]).includes(key)) return a;
+      const rows=(a.recurring||[]).filter(r=>r.active).map(r=>{
+        const d=new Date(y, m-1, Math.min(r.day||1, new Date(y,m,0).getDate()));
+        return {id:uid(), date:d.toISOString().slice(0,10),
+          kind:r.kind||"expense", party:r.name,
+          amount:r.amount||"", note:r.note||"", source:"recurring", ruleId:r.id};
+      });
+      return {...a, ledger:[...(a.ledger||[]), ...rows],
+        materialisedMonths:[...(a.materialisedMonths||[]), key]};
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   const [dateTo,setDateTo]=useState("");
   const [dateMode,setDateMode]=useState("query");   // query | travel | booking
   const [stageTab,setStageTab]=useState("All");     // deal-list status tab
@@ -2241,6 +2303,68 @@ Never output anything except one of these two JSON shapes.`;
   };
   // Apply the AI's computed proposal: create the cancellation AND write the new
   // CP/SP the AI calculated into each component.
+  // ── Accounts AI (Hinglish → ledger rows) ──────────────────────────────
+  const ACCT_SYS = `You are a bookkeeping helper for an Indian travel agency's ledger. The user types a plain Hinglish note about what happened. You convert it into one or more ledger rows.
+
+Rules:
+- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number}], "summary":"one-line Hinglish"}
+- kind rules: 'expense' for money spent (office kharcha, food, Bazar MCC); 'salary' for salaries paid; 'income' for money received that isn't a client deal payment; 'transfer' for moving cash between locations; 'receivable' when someone owes us and no cash moved yet; 'payable' when we owe someone and no cash moved yet.
+- Dates: if user says "aaj/today" use today; "kal" = yesterday; specific date otherwise. Default today.
+- If user says "Sahitya ne kharche" and then "wapas de diye" — that's two rows: an expense (party = Bazar MCC or whoever), then a transfer (Sahitya's cash box → the person paid back).
+- Only use cashFrom / cashTo when cash actually moved between the tracked cash locations. bankDelta is positive if bank went up, negative if down.
+- Amounts are numbers (no ₹, no commas). Never invent numbers not in the text.
+
+Cash locations available and recent context are passed in the user turn. Match names loosely (case-insensitive, substring).`;
+  const acctAiSend = async () => {
+    const text=(acctAiInput||"").trim(); if(!text) return;
+    setAcctAiBusy(true); setAcctAiProposal(null);
+    try{
+      const today=new Date().toISOString().slice(0,10);
+      const ctx={today, cashLocations:(accounts.cashLocations||[]).map(c=>c.name)};
+      const res=await fetch(`${API_BASE}/api/chat`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1200,system:ACCT_SYS,messages:[
+          {role:"user",content:"CONTEXT:\n"+JSON.stringify(ctx)+"\n\nUser: "+text}
+        ]})});
+      const data=await res.json();
+      if(!res.ok||data.error) throw new Error((data.error&&(data.error.message||data.error))||"AI error");
+      const raw=((data.content||[]).map(c=>c.text||"").join("")||"").replace(/```json|```/g,"").trim();
+      let j; try{ j=JSON.parse(raw); }catch{ throw new Error("AI ka jawab samajh nahi aaya"); }
+      setAcctAiProposal(j);
+    }catch(e){ window.veToast&&window.veToast("⚠️ "+((e&&e.message)||"gadbad"),"error"); }
+    setAcctAiBusy(false);
+  };
+  const acctAiApply = () => {
+    if(!acctAiProposal||!Array.isArray(acctAiProposal.rows)) return;
+    const rows=acctAiProposal.rows.map(r=>({id:uid(),
+      date:r.date||new Date().toISOString().slice(0,10),
+      kind:r.kind||"expense",
+      party:r.party||"",
+      amount:r.amount!=null?String(r.amount):"",
+      note:r.note||"",
+      source:"ai"}));
+    setAccounts(a=>{
+      let na={...a, ledger:[...(a.ledger||[]), ...rows]};
+      // Apply cash / bank movements too so the running totals stay accurate.
+      acctAiProposal.rows.forEach(r=>{
+        const amt=Number(r.amount)||0;
+        if(r.cashFrom){
+          na.cashLocations=(na.cashLocations||[]).map(c=>
+            c.name.toLowerCase().includes(String(r.cashFrom).toLowerCase())
+              ? {...c, amount:String(Math.max(0,(Number(c.amount)||0)-amt))} : c);
+        }
+        if(r.cashTo){
+          na.cashLocations=(na.cashLocations||[]).map(c=>
+            c.name.toLowerCase().includes(String(r.cashTo).toLowerCase())
+              ? {...c, amount:String((Number(c.amount)||0)+amt)} : c);
+        }
+        if(r.bankDelta){ na.bankBalance = String((Number(na.bankBalance)||0)+(Number(r.bankDelta)||0)); }
+      });
+      return na;
+    });
+    setAcctAiInput(""); setAcctAiProposal(null);
+    window.veToast&&window.veToast("✅ Ledger update ho gaya","success");
+  };
+
   const cxlApplyProposal = () => {
     if(!cxlProposal) return;
     const p=cxlProposal;
@@ -2596,6 +2720,7 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     {id:"visa",label:"🛂 Visa"},
     {id:"payments",label:"💰 Payments"},
     ...(isBookedStage(deal)?[{id:"cancel",label:"🚫 Cancellation"}]:[]),
+    ...(isBookedStage(deal)?[{id:"forfeit",label:"💸 Forfeit"}]:[]),
     {id:"attachments",label:"📎 Attachments"},
     {id:"summary",label:"📋 Summary"},
   ];
@@ -2637,6 +2762,246 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
     return <Login onLogin={() => setIsLoggedIn(true)} />;
   }
 // ── USERS SCREEN (admin only) ─────────────────────────────────────────────
+
+  // ─── 💰 ACCOUNTS SCREEN — ledger, cash, bank, dues, expenses, salaries ────
+  if(screen==="accounts"){
+    const allD = loadAllDeals().map(normalizeDeal);
+    const inr = (x)=>"₹"+Math.round(Number(x)||0).toLocaleString("en-IN");
+    // Receivables — every deal with clientDue > 0
+    const receivables = allD.filter(d=>{const F=dealFinance(d); return F.clientDue>0.5;})
+      .map(d=>({d, amount:dealFinance(d).clientDue}))
+      .sort((a,b)=>b.amount-a.amount);
+    const totalReceivable = receivables.reduce((s,r)=>s+r.amount,0);
+    // Payables — every deal's vendor dues, itemised by vendor
+    const payables = [];
+    allD.forEach(d=>{
+      const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
+                ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
+                ...(d.trainVendors||[]).map(v=>({...v,_k:"Train",_n:v.name})),
+                ...(d.landVendors||[]).map(v=>({...v,_k:"Land",_n:v.name})),
+                ...(d.visaVendors||[]).map(v=>({...v,_k:"Visa",_n:v.name}))];
+      vs.forEach(v=>{
+        const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
+        const paid=sum(v.payments||[],"amount");
+        const bal=cost-paid;
+        if(bal>0.5) payables.push({d, vendor:v, kind:v._k, amount:bal});
+      });
+    });
+    payables.sort((a,b)=>b.amount-a.amount);
+    const totalPayable = payables.reduce((s,p)=>s+p.amount,0);
+    const totalCash = (accounts.cashLocations||[]).reduce((s,c)=>s+(Number(c.amount)||0),0);
+    const bank = Number(accounts.bankBalance)||0;
+
+    // Ledger totals — expenses hit GPM. Group by month for tidy display.
+    const ledger = [...(accounts.ledger||[])].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+    const now=new Date();
+    const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const thisMonthRows = ledger.filter(r=>String(r.date).startsWith(thisMonthKey));
+    const thisMonthExpense = thisMonthRows.filter(r=>["expense","salary"].includes(r.kind))
+                                          .reduce((s,r)=>s+(Number(r.amount)||0),0);
+    // Total booked GPM (before GST) minus forfeits
+    const bookedGpm = allD.filter(isBookedStage).reduce((s,d)=>{const F=dealFinance(d);return s+F.gpm;},0);
+    const forfeitTotal = allD.filter(isBookedStage).reduce((s,d)=>s+(Number(d.forfeitAmount)||0),0);
+    const netAfterExpenses = bookedGpm - thisMonthExpense;
+
+    const kindColor=(k)=>({expense:"#dc2626",salary:"#b45309",income:"#15803d",transfer:"#4169E1",receivable:"#0e7490",payable:"#7c3aed",other:"#64748b"}[k]||"#64748b");
+    const kindLabel=(k)=>({expense:"Expense",salary:"Salary",income:"Income",transfer:"Transfer",receivable:"Receivable",payable:"Payable",other:"Other"}[k]||k);
+
+    const addLedgerRow=()=>setAccounts(a=>({...a,ledger:[...(a.ledger||[]),
+      {id:uid(),date:new Date().toISOString().slice(0,10),kind:"expense",party:"",amount:"",note:"",source:"manual"}]}));
+    const updLedgerRow=(id,key,val)=>setAccounts(a=>({...a,ledger:(a.ledger||[]).map(r=>r.id===id?{...r,[key]:val}:r)}));
+    const rmLedgerRow=(id)=>setAccounts(a=>({...a,ledger:(a.ledger||[]).filter(r=>r.id!==id)}));
+    const addCashLoc=()=>setAccounts(a=>({...a,cashLocations:[...(a.cashLocations||[]),{id:uid(),name:"New location",amount:"",note:""}]}));
+    const updCashLoc=(id,key,val)=>setAccounts(a=>({...a,cashLocations:(a.cashLocations||[]).map(c=>c.id===id?{...c,[key]:val}:c)}));
+    const rmCashLoc=(id)=>setAccounts(a=>({...a,cashLocations:(a.cashLocations||[]).filter(c=>c.id!==id)}));
+    const addRecurring=()=>setAccounts(a=>({...a,recurring:[...(a.recurring||[]),{id:uid(),name:"",amount:"",day:1,kind:"expense",active:true,note:""}]}));
+    const updRecurring=(id,key,val)=>setAccounts(a=>({...a,recurring:(a.recurring||[]).map(r=>r.id===id?{...r,[key]:val}:r)}));
+    const rmRecurring=(id)=>setAccounts(a=>({...a,recurring:(a.recurring||[]).filter(r=>r.id!==id)}));
+
+    return (
+      <div style={{minHeight:"100vh",background:"#f4f7fc",color:"#1a2c52",fontFamily:"Calibri,'Segoe UI',system-ui,sans-serif"}}>
+        <div className="crm-header" style={{background:"#fff",borderBottom:"1px solid #d4e0f5",padding:"18px 30px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontSize:10,letterSpacing:3,color:"#c9942a",fontWeight:800}}>VOYAGE-ED CRM · ACCOUNTS</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#0f2350",marginTop:2}}>💰 Accounts &amp; Ledger</div>
+          </div>
+          <button onClick={()=>setScreen("dashboard")} className="btn btn-sm">← Dashboard</button>
+        </div>
+
+        <div style={{maxWidth:1000,margin:"0 auto",padding:"22px 20px 60px",display:"flex",flexDirection:"column",gap:18}}>
+
+          {/* 1) TOP SNAPSHOT */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>💼 Snapshot</div>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,paddingBottom:8,borderBottom:"1px dashed #e3eaf7"}}><span>Booked GPM (before GST, after forfeit)</span><b className="mono" style={{color:"#0f2350"}}>{inr(bookedGpm)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,paddingBottom:8,borderBottom:"1px dashed #e3eaf7"}}><span>− Is month ke expenses + salaries</span><b className="mono" style={{color:"#dc2626"}}>− {inr(thisMonthExpense)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:14,paddingTop:5,fontWeight:800}}><span>Net after expenses (before GST)</span><b className="mono" style={{color:netAfterExpenses>=0?"#15803d":"#dc2626"}}>{inr(netAfterExpenses)}</b></div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#94a3b8",paddingTop:4}}><span>Forfeit written off (all bookings)</span><b className="mono">{inr(forfeitTotal)}</b></div>
+            </div>
+          </div>
+
+          {/* 2) BANK + CASH */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase",marginBottom:12}}>🏦 Bank &amp; Cash</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div>
+                <div style={{fontSize:10,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",fontWeight:800,marginBottom:4}}>Bank balance</div>
+                <input type="number" value={accounts.bankBalance||""} onChange={e=>setAccounts(a=>({...a,bankBalance:e.target.value}))} placeholder="Bank me kitna hai" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"11px",fontSize:14,fontFamily:"monospace"}}/>
+              </div>
+              <div style={{marginTop:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:10,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",fontWeight:800}}>Cash locations</div>
+                  <button onClick={addCashLoc} className="btn btn-sm">+ Add Location</button>
+                </div>
+                {(accounts.cashLocations||[]).map(c=>(
+                  <div key={c.id} style={{border:"1px solid #eef2f8",borderRadius:9,padding:"10px 12px",marginBottom:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr auto",gap:8,alignItems:"center"}}>
+                      <input value={c.name} onChange={e=>updCashLoc(c.id,"name",e.target.value)} placeholder="Location name" style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12.5}}/>
+                      <input type="number" className="mono" value={c.amount} onChange={e=>updCashLoc(c.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12.5}}/>
+                      <button onClick={()=>rmCashLoc(c.id)} className="btn btn-danger">✕</button>
+                    </div>
+                    <input value={c.note||""} onChange={e=>updCashLoc(c.id,"note",e.target.value)} placeholder="Note (breakdown / kis-kis ka)" style={{marginTop:6,width:"100%",border:"1px dashed #e3eaf7",borderRadius:6,padding:"7px 9px",fontSize:11.5,color:"#64748b"}}/>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:14,paddingTop:9,marginTop:5,borderTop:"1px solid #e3eaf7",fontWeight:800}}>
+                <span>Total (Bank + Cash)</span>
+                <b className="mono" style={{color:"#15803d"}}>{inr(bank+totalCash)}</b>
+              </div>
+            </div>
+          </div>
+
+          {/* 3) RECEIVABLES */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase"}}>📥 Clients se lena hai</div>
+              <b className="mono" style={{fontSize:15,color:"#f59e0b"}}>{inr(totalReceivable)}</b>
+            </div>
+            {receivables.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"8px 0"}}>Sab clear ✓</div>:
+              receivables.map(({d,amount})=>(
+                <div key={d._localId||d._id} onClick={()=>openDeal(d)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px dashed #e3eaf7",cursor:"pointer",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:"#0f2350"}}>{d.clientName||"(no name)"} {d.dealNumber&&<span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:"#faf1dc",color:"#8a6d1f",fontFamily:"monospace",marginLeft:6}}>{d.dealNumber}</span>}</div>
+                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{d.destination||"—"}</div>
+                  </div>
+                  <b className="mono" style={{fontSize:13,color:"#f59e0b"}}>{inr(amount)}</b>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* 4) PAYABLES */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase"}}>📤 Vendors ko dena hai</div>
+              <b className="mono" style={{fontSize:15,color:"#dc2626"}}>{inr(totalPayable)}</b>
+            </div>
+            {payables.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"8px 0"}}>Sab clear ✓</div>:
+              payables.map((p,i)=>(
+                <div key={i} onClick={()=>openDeal(p.d)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px dashed #e3eaf7",cursor:"pointer",gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:"#0f2350"}}>{p.vendor._n||"(vendor)"} <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:"#eef3fc",color:"#334e82",marginLeft:4}}>{p.kind}</span></div>
+                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{p.d.clientName||"(client)"} · {p.d.dealNumber||""}</div>
+                  </div>
+                  <b className="mono" style={{fontSize:13,color:"#dc2626"}}>{inr(p.amount)}</b>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* 5) RECURRING SCHEDULE */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase"}}>🔁 Monthly Recurring</div>
+              <button onClick={addRecurring} className="btn btn-sm">+ Add Recurring</button>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Har mahine specified day pe ledger mein auto entry banti hai. Variable salary khaali chhod do — us mahine amount daal dena.</div>
+            {(accounts.recurring||[]).map(r=>(
+              <div key={r.id} style={{border:"1px solid #eef2f8",borderRadius:9,padding:"10px 12px",marginBottom:8}}>
+                <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 60px 1fr auto",gap:8,alignItems:"center"}}>
+                  <input value={r.name} onChange={e=>updRecurring(r.id,"name",e.target.value)} placeholder="Name" style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12}}/>
+                  <input type="number" className="mono" value={r.amount} onChange={e=>updRecurring(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12}}/>
+                  <input type="number" min="1" max="31" className="mono" value={r.day} onChange={e=>updRecurring(r.id,"day",Number(e.target.value)||1)} title="Day of month" style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12,textAlign:"center"}}/>
+                  <select value={r.kind} onChange={e=>updRecurring(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:7,padding:"9px",fontSize:12}}>
+                    <option value="expense">Expense</option>
+                    <option value="salary">Salary</option>
+                    <option value="income">Income</option>
+                  </select>
+                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                    <label style={{display:"flex",alignItems:"center",gap:4,fontSize:10.5,color:"#64748b",cursor:"pointer"}}>
+                      <input type="checkbox" checked={!!r.active} onChange={e=>updRecurring(r.id,"active",e.target.checked)}/> on
+                    </label>
+                    <button onClick={()=>rmRecurring(r.id)} className="btn btn-danger btn-sm">✕</button>
+                  </div>
+                </div>
+                {r.note&&<div style={{fontSize:10.5,color:"#94a3b8",marginTop:5,fontStyle:"italic"}}>{r.note}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* 6) AI LEDGER INPUT */}
+          <div style={{background:"linear-gradient(180deg,#faf8ff,#fff)",border:"1px solid #c4b5fd",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#5b21b6",letterSpacing:1.5,textTransform:"uppercase",marginBottom:6}}>🤖 AI Ledger Entry</div>
+            <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:12}}>Seedha likho — <i>"Sahitya ne aaj 200 kharche Bazar MCC, maine wapas de diye"</i>, <i>"Nikhil ne 16000 diye cash mein"</i>, <i>"Bank se 5000 nikale Sahitya ke pass"</i>. AI parse karke ledger mein daal dega, cash locations bhi update ho jayengi.</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input value={acctAiInput} onChange={e=>setAcctAiInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!acctAiBusy){acctAiSend();}}}
+                placeholder="Seedha bolo…" style={{flex:1,border:"1px solid #d4c9f5",borderRadius:9,padding:"11px 13px",fontSize:12.5,outline:"none"}}/>
+              <button disabled={acctAiBusy||!acctAiInput.trim()} onClick={acctAiSend}
+                style={{background:acctAiBusy?"#c4b5fd":"linear-gradient(135deg,#6d28d9,#8b5cf6)",color:"#fff",border:"none",borderRadius:9,padding:"0 18px",fontSize:13,fontWeight:800,cursor:acctAiBusy?"wait":"pointer"}}>{acctAiBusy?"...":"Send"}</button>
+            </div>
+            {acctAiProposal&&(
+              <div style={{border:"1px solid #ddd6fe",borderRadius:10,padding:"12px 14px",background:"#fff"}}>
+                <div style={{fontSize:11,fontWeight:800,color:"#5b21b6",marginBottom:8}}>AI ne ye samjha:</div>
+                <div style={{fontSize:12,color:"#334e82",marginBottom:10,fontStyle:"italic"}}>{acctAiProposal.summary}</div>
+                {(acctAiProposal.rows||[]).map((r,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",borderBottom:"1px dashed #f1f5f9",fontSize:12}}>
+                    <span><b style={{color:kindColor(r.kind)}}>{kindLabel(r.kind)}</b> · {r.party||"—"} · <span style={{color:"#94a3b8"}}>{r.date}</span></span>
+                    <b className="mono" style={{color:"#0f2350"}}>{inr(r.amount)}</b>
+                  </div>
+                ))}
+                <div style={{display:"flex",gap:8,marginTop:10}}>
+                  <button onClick={acctAiApply} style={{flex:1,background:"#15803d",color:"#fff",border:"none",borderRadius:8,padding:"10px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>✓ Apply</button>
+                  <button onClick={()=>setAcctAiProposal(null)} style={{background:"#f1f5f9",color:"#64748b",border:"none",borderRadius:8,padding:"10px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 7) LEDGER TABLE */}
+          <div style={{background:"#fff",border:"1px solid #d4e0f5",borderRadius:14,padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#334e82",letterSpacing:1.5,textTransform:"uppercase"}}>📒 Ledger</div>
+              <button onClick={addLedgerRow} className="btn btn-sm">+ Add Row</button>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",marginBottom:10}}>Manually add karo ya AI se. GPM se expenses aur salaries automatically minus ho jaate hain top snapshot mein.</div>
+            {ledger.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"14px 0",textAlign:"center"}}>Abhi koi entry nahi. AI se ya "+ Add Row" se shuru karo.</div>:
+              ledger.map(r=>(
+                <div key={r.id} style={{border:"1px solid #eef2f8",borderRadius:9,padding:"10px 12px",marginBottom:7}}>
+                  <div style={{display:"grid",gridTemplateColumns:"110px 100px 1.5fr 1fr auto",gap:7,alignItems:"center"}}>
+                    <input type="date" value={r.date} onChange={e=>updLedgerRow(r.id,"date",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5}}/>
+                    <select value={r.kind} onChange={e=>updLedgerRow(r.id,"kind",e.target.value)} style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,color:kindColor(r.kind),fontWeight:700}}>
+                      {["expense","salary","income","transfer","receivable","payable","other"].map(k=><option key={k} value={k}>{kindLabel(k)}</option>)}
+                    </select>
+                    <input value={r.party} onChange={e=>updLedgerRow(r.id,"party",e.target.value)} placeholder="Kise / Kaha" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5}}/>
+                    <input type="number" className="mono" value={r.amount} onChange={e=>updLedgerRow(r.id,"amount",e.target.value)} placeholder="₹" style={{border:"1px solid #d4e0f5",borderRadius:6,padding:"8px",fontSize:11.5,textAlign:"right"}}/>
+                    <button onClick={()=>rmLedgerRow(r.id)} className="btn btn-danger btn-sm">✕</button>
+                  </div>
+                  {(r.note||r.source)&&<div style={{fontSize:10.5,color:"#94a3b8",marginTop:5,display:"flex",justifyContent:"space-between"}}>
+                    <span>{r.note}</span>
+                    {r.source&&r.source!=="manual"&&<span style={{background:"#f1f5f9",padding:"1px 7px",borderRadius:5,fontWeight:700}}>{r.source}</span>}
+                  </div>}
+                </div>
+              ))
+            }
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
   // ─── 📊 REPORTS SCREEN (repeat customers, vendor performance, monthly P&L) ──
   if(screen==="reports"){
     const allD = loadAllDeals().map(normalizeDeal);
@@ -3952,6 +4317,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <button onClick={()=>{newDeal();setScreen("deal");}} className="btn btn-ind">+ New Deal</button>
             <button onClick={()=>setScreen("deal")} className="btn btn-sm">Continue Draft →</button>
             <button onClick={()=>setScreen("reports")} className="btn btn-sm">📊 Reports</button>
+            <button onClick={()=>setScreen("accounts")} className="btn btn-sm" style={{borderColor:"#c9942a",color:"#8a6d1f"}}>💰 Accounts</button>
             <button onClick={()=>setDuesOpen(true)} className="btn btn-sm" style={{borderColor:"#f3c6c6",color:"#b91c1c"}}>💸 Dues</button>
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
             <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
@@ -4221,6 +4587,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                   <div>
                     <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                       {d.clientName||"Unnamed Client"}
+                      {d.dealNumber&&<span title="Deal ID" style={{fontSize:8.5,fontWeight:800,padding:"2px 7px",borderRadius:6,background:"#faf1dc",color:"#8a6d1f",fontFamily:"monospace",letterSpacing:1}}>{d.dealNumber}</span>}
                       <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:20,background:_sm.bg,color:_sm.color}}>{_sm.icon} {_stage}</span>
                       {(()=>{ const sb=siblingsOf(d,allDeals);
                         return <>
@@ -4599,7 +4966,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
           <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
             <button onClick={()=>setScreen("dashboard")} style={{background:"none",border:"1px solid #c2d2ee",borderRadius:6,color:"#5a6b8c",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:600}}>← Dashboard</button>
             <div style={{flex:1}}>
-              <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:3}}>VOYAGE-ED CRM · DEAL P&L</div>
+              <div style={{fontSize:10,letterSpacing:3,color:"#f97316",fontWeight:700,marginBottom:3}}>VOYAGE-ED CRM · DEAL P&L {deal.dealNumber?<span style={{background:"#faf1dc",color:"#8a6d1f",fontFamily:"monospace",fontWeight:800,fontSize:9.5,padding:"1px 7px",borderRadius:6,marginLeft:8,letterSpacing:1.5}}>{deal.dealNumber}</span>:null}</div>
               <input value={deal.destination||""} onChange={e=>upd("destination",e.target.value)} placeholder="Destination / Package Name..." style={{background:"transparent",border:"none",borderBottom:"1px solid #c2d2ee",borderRadius:0,color:"#0f2350",fontSize:18,fontWeight:800,padding:"2px 0",width:300,outline:"none"}} />
             </div>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -5710,6 +6077,39 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         )}
 
         {/* ══ ATTACHMENTS TAB ══ */}
+        {/* ══ FORFEIT TAB ══ */}
+        {tab==="forfeit"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div className="card" style={{borderColor:"#b45309"}}>
+              <div style={{fontSize:15,fontWeight:800,color:"#b45309",marginBottom:6}}>💸 Forfeit Amount</div>
+              <div style={{fontSize:11.5,color:"#6b7a99",marginBottom:14,lineHeight:1.6}}>
+                Jab client ne booking ka poora paisa nahi diya (jaise hotel ₹3,000 tha, ₹2,000 diya, ₹1,000 chhoot gaya) aur wo aap khud absorb kar rahe ho — us amount ko yahan daalo. Ye aapke GPM se minus ho jaayega, par selling price waisa hi rahega taaki record accurate rahe. Ledger aur reports mein saaf dikhega ki forfeit hua tha.
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:520}}>
+                <div>
+                  <div style={{fontSize:10,color:"#b45309",letterSpacing:.6,textTransform:"uppercase",fontWeight:800,marginBottom:4}}>Forfeit Amount ₹</div>
+                  <input type="number" value={deal.forfeitAmount||""} onChange={e=>upd("forfeitAmount",e.target.value)} placeholder="0" style={{width:"100%",border:"1px solid #f3c6c6",borderRadius:8,padding:"11px",fontSize:14,fontFamily:"monospace"}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:10,color:"#6b7a99",letterSpacing:.6,textTransform:"uppercase",fontWeight:800,marginBottom:4}}>Reason / Note</div>
+                  <input value={deal.forfeitNote||""} onChange={e=>upd("forfeitNote",e.target.value)} placeholder="Client hotel ka ₹1000 nahi diya, hum ne cover kiya…" style={{width:"100%",border:"1px solid #d4e0f5",borderRadius:8,padding:"11px",fontSize:12.5}}/>
+                </div>
+              </div>
+              {Number(deal.forfeitAmount)>0&&(()=>{
+                const F=dealFinance(deal);
+                const gpmBefore = F.sell - F.cost;
+                const gpmAfter = gpmBefore - Number(deal.forfeitAmount);
+                return <div style={{marginTop:16,background:"#eff4fb",border:"1px solid #d4e0f5",borderRadius:11,padding:"14px 16px"}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#334e82",letterSpacing:.6,textTransform:"uppercase",marginBottom:8}}>Impact</div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>GPM (before forfeit)</span><b className="mono" style={{color:"#0f2350"}}>{fmtINR(gpmBefore)}</b></div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"3px 0",color:"#475569"}}><span>− Forfeit written off</span><b className="mono" style={{color:"#b45309"}}>− {fmtINR(Number(deal.forfeitAmount))}</b></div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:14,padding:"7px 0 0",marginTop:5,borderTop:"1px solid #d4e0f5",color:"#0f2350",fontWeight:800}}><span>GPM (after forfeit)</span><b className="mono" style={{color:gpmAfter>=0?"#15803d":"#dc2626"}}>{fmtINR(gpmAfter)}</b></div>
+                </div>;
+              })()}
+            </div>
+          </div>
+        )}
+
         {tab==="attachments"&&(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
