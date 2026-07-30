@@ -565,6 +565,15 @@ const start = async () => {
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
+    // ── Backup: routes + daily cron ──
+    try {
+      const { attachBackupRoutes, startBackupCron } = require("./backup");
+      attachBackupRoutes(app, authMiddleware);
+      startBackupCron();
+    } catch (e) {
+      console.warn("[backup] not enabled:", e.message);
+    }
+
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT} 🚀`));
 

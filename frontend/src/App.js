@@ -2723,6 +2723,37 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
   };
 
   const newDeal=()=>{ if(window.confirm("Start a new deal? Current draft is auto-saved.")){const d={...initDeal,createdAt:new Date().toISOString(),_localId:uid()};setDeal(d);saveDeal(d);setTab("client");} };
+  // ── Backup helpers ─────────────────────────────────────────────────────
+  // Local snapshot of everything in the browser (deals + accounts + user prefs)
+  // — used as a manual "download now" so the agent can email it or archive it.
+  const downloadLocalBackup = () => {
+    const snap = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      source: "voyage-crm frontend",
+      deals: loadAllDeals(),
+      accounts: (()=>{ try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY)||"null"); } catch(e){ return null; } })(),
+      other: (()=>{ const o={}; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith("travelcrm_")&&k!==DEALS_KEY&&k!==ACCOUNTS_KEY) o[k]=localStorage.getItem(k); } }catch(e){} return o; })(),
+    };
+    const blob=new Blob([JSON.stringify(snap,null,2)],{type:"application/json"});
+    const stamp=new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download=`voyage-crm-backup-${stamp}.json`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    window.veToast && window.veToast("💾 Local backup downloaded","success");
+  };
+  // Ask backend to email a full server backup to the configured address.
+  const emailBackupNow = async () => {
+    if(!window.confirm("Backup email bhejein — voyageedtravel@gmail.com pe?")) return;
+    try {
+      const token=localStorage.getItem("token")||"";
+      const res=await fetch(`${API_BASE}/api/backup/send-now`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":token?("Bearer "+token):""}});
+      const j=await res.json();
+      if(!res.ok) throw new Error(j.error||("HTTP "+res.status));
+      window.veToast && window.veToast(`📧 Backup email sent to ${j.to} (${(j.bytes/1024).toFixed(1)} KB)`,"success");
+    } catch(e){ window.veToast && window.veToast("Backup email failed: "+e.message,"error"); }
+  };
+
   const openDeal=(d)=>{ const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd); setScreen("deal"); setTab("client"); };
 
   // ── Add another destination to the SAME client enquiry ──
@@ -4739,6 +4770,8 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <button onClick={()=>setScreen("reports")} className="btn btn-sm">📊 Reports</button>
             <button onClick={()=>setScreen("accounts")} className="btn btn-sm" style={{borderColor:"#c9942a",color:"#8a6d1f"}}>💰 Accounts</button>
             <button onClick={()=>setDuesOpen(true)} className="btn btn-sm" style={{borderColor:"#f3c6c6",color:"#b91c1c"}}>💸 Dues</button>
+            {isAdmin&&<button onClick={downloadLocalBackup} title="Download full CRM JSON backup to this device" className="btn btn-sm" style={{borderColor:"#c9942a",color:"#8a6d1f"}}>💾 Backup</button>}
+            {isAdmin&&<button onClick={emailBackupNow} title="Email backup to voyageedtravel@gmail.com now" className="btn btn-sm" style={{borderColor:"#0d1b3e",color:"#0d1b3e"}}>📧 Email Backup</button>}
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
             <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
             {duesOpen&&(()=>{
