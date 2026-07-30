@@ -4458,6 +4458,90 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     w.document.write(buildProposalHTML());
     w.document.close();
   }
+
+  // ── COMBINED PROPOSAL — multiple destinations of one enquiry in ONE PDF ──
+  // Reuses each package's buildProposalHTML output (same premium design as the
+  // Vietnam cover the agent shared), stitching them with page-breaks and one
+  // unified cover title. Because each package's document already has the full
+  // cover, stats, flights, hotels, itinerary, terms and acceptance, the output
+  // reads as a proper multi-destination proposal instead of an odd concatenation.
+  async function openCombinedProposal(){
+    persistQuoteVT(quoteVT);
+    try{ saveToAllDeals(true); }catch(e){}
+    const allNow = loadAllDeals();
+    const sibsAll = siblingsOf(deal, allNow);
+    const pkgs = sibsAll
+      .filter(p=>!isFrozenPkg(p,sibsAll))
+      .filter(p=>(p.destination||"").trim() || (p.hotelVendors||[]).length || (p.flightVendors||[]).length);
+    if(pkgs.length<2){ window.veToast && window.veToast("Is enquiry mein sirf ek active destination hai — normal proposal use karo","warning"); return; }
+    // Save current tab index so we can restore it — building each proposal
+    // needs the deal state to swap in temporarily.
+    const originalDeal = deal;
+    setQuoteBusy && setQuoteBusy(true);
+    try {
+      const bodies=[]; const failed=[];
+      for(let i=0;i<pkgs.length;i++){
+        const p=normalizeDeal(pkgs[i]);
+        try{
+          // Temporarily set deal so buildProposalHTML uses this package's data.
+          // Since buildProposalHTML reads from the deal closure, we call it
+          // through a small trampoline that awaits a state flush.
+          setDeal(p);
+          await new Promise(res=>setTimeout(res,60));
+          const html=buildProposalHTML();
+          const m=html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+          bodies.push({ html, inner:m?m[1]:html, dest:p.destination||("Destination "+(i+1)) });
+        }catch(err){ failed.push(p.destination||("Destination "+(i+1))); }
+      }
+      // Restore original deal state.
+      setDeal(originalDeal);
+      if(!bodies.length) throw new Error("Koi bhi package build nahi hua");
+      const first=bodies[0].html;
+      const head=(first.match(/<head[^>]*>[\s\S]*?<\/head>/i)||[""])[0];
+      // Combined intro cover — sits on top of the stacked destination proposals.
+      const dests = pkgs.map(p=>p.destination||"").filter(Boolean);
+      const client = originalDeal.clientName||"";
+      const ref = originalDeal.dealNumber || ("VE"+String(Date.now()).slice(-6));
+      const introCover = `
+      <div style="background:linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0f2350 100%);color:#fff;padding:70px 60px;min-height:900px;position:relative;overflow:hidden;box-sizing:border-box;font-family:'DM Sans',sans-serif">
+        <div style="position:absolute;top:40px;left:60px;background:#fff;border-radius:14px;padding:10px 16px;box-shadow:0 4px 18px rgba(0,0,0,.2)">
+          <div style="font-size:11px;color:#0d1b3e;font-weight:800;letter-spacing:3px">VOYAGE-ED</div>
+          <div style="font-size:8.5px;color:#c9961a;letter-spacing:2px;margin-top:1px">TRAVELS</div>
+        </div>
+        <div style="position:absolute;top:180px;right:60px;text-align:right;opacity:.14;font-size:170px;font-weight:900;line-height:1;font-family:'Playfair Display',serif">${dests.length}</div>
+        <div style="margin-top:200px">
+          <div style="font-size:13px;letter-spacing:4px;color:#f0c842;font-weight:800;margin-bottom:14px">A MULTI-DESTINATION JOURNEY</div>
+          <h1 style="font-family:'Playfair Display',serif;font-size:74px;font-weight:900;line-height:1.02;margin:0;color:#fff">Trip to<br>${dests.map((d,i)=>`<span style="color:${i===dests.length-1?'#f0c842':'#fff'}">${esc(d)}</span>`).join(`<span style="color:#c9961a"> · </span>`)}</h1>
+          <div style="font-size:15px;letter-spacing:5px;color:#f0c842;margin-top:16px;font-weight:700">LEARN · TRAVEL · EXPLORE</div>
+          <div style="font-size:13px;color:#a9bce0;margin-top:28px">Reference: <b style="color:#fff;font-family:monospace;letter-spacing:1px">${esc(ref)}</b></div>
+        </div>
+        <div style="position:absolute;bottom:80px;left:60px;right:60px;padding-top:22px;border-top:1px solid rgba(255,255,255,.18)">
+          <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:18px">
+            ${dests.map((d,i)=>`<div style="display:flex;align-items:center;gap:8px"><span style="width:26px;height:26px;border-radius:50%;background:#c9961a;color:#0d1b3e;font-weight:900;font-size:13px;display:inline-flex;align-items:center;justify-content:center">${i+1}</span><span style="font-size:16px;font-weight:700">${esc(d)}</span></div>`).join("")}
+          </div>
+          <div style="font-size:13px;color:#a9bce0">Specially crafted for <b style="color:#f0c842">${esc(client||"our valued guest")}</b> by <b style="color:#fff">VOYAGE-ED TRAVELS</b> · <span style="color:#f0c842">📞 +91 70096 59048</span></div>
+        </div>
+      </div>
+      <div style="page-break-after:always;height:0"></div>`;
+      // Each destination gets a small separator title before it so the reader
+      // knows they're entering a new package.
+      const sectioned = bodies.map((b,i)=>{
+        const label = `
+        <div style="background:#faf1dc;color:#8a6d1f;padding:12px 40px;border-top:3px solid #c9961a;border-bottom:1px solid #ecdcb4;font-size:11px;letter-spacing:4px;font-weight:800;font-family:'DM Sans',sans-serif">
+          DESTINATION ${i+1} OF ${bodies.length} &nbsp;·&nbsp; <span style="color:#0d1b3e">${esc(b.dest.toUpperCase())}</span>
+        </div>`;
+        return label + b.inner + `<div style="page-break-after:always;height:0"></div>`;
+      }).join("");
+      const combined = `<!DOCTYPE html><html>${head}<body>${introCover}${sectioned}</body></html>`;
+      const w = window.open("","_blank");
+      if(!w){ window.veToast && window.veToast("Popup blocked — allow popups","error"); return; }
+      w.document.write(combined); w.document.close();
+      window.veToast && window.veToast(`✅ ${bodies.length} destinations combined proposal ready`+(failed.length?` (${failed.join(", ")} skip)`:""), failed.length?"warning":"success");
+    } catch(e){
+      setDeal(originalDeal);
+      window.veToast && window.veToast("Combined proposal failed: "+e.message,"error");
+    } finally { setQuoteBusy && setQuoteBusy(false); }
+  }
   function downloadProposalHTML(){
     persistQuoteVT(quoteVT);
     try{ saveToAllDeals(true); }catch(e){}
@@ -5308,6 +5392,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
               {dirty?<span style={{fontSize:11,color:"#b45309",fontWeight:700}}>● Unsaved</span>:(saveStatus&&<span style={{fontSize:11,color:"#10b981",fontWeight:600}}>✓ {saveStatus}</span>)}
               <button onClick={()=>setProposalOpen(true)} style={{background:"linear-gradient(135deg,#f0c842,#c9961a)",border:"none",borderRadius:8,color:"#0d1b3e",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>📄 Proposal</button>
+              {siblingsOf(deal, loadAllDeals()).filter(p=>(p.destination||"").trim()||(p.hotelVendors||[]).length||(p.flightVendors||[]).length).length>=2&&<button onClick={openCombinedProposal} title="Saari destinations ek proposal mein" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🌍 Combined Proposal</button>}
               {isBookedStage(deal)&&<button onClick={openVouchers} title="Hotel & service vouchers — Voyage-Ed branded PDF" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🎫 Vouchers</button>}
               {isBookedStage(deal)&&(deal.eTickets||[]).length>0&&<button onClick={openETickets} title="Voyage-Ed branded e-tickets" style={{background:"linear-gradient(135deg,#0d1b3e,#1a3060)",border:"none",borderRadius:8,color:"#f0c842",padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800}}>🛫 E-Tickets ({(deal.eTickets||[]).length})</button>}
               <select value={stageOf(deal)} onChange={e=>{const v=e.target.value; setDeal(d=>{const old=stageOf(d); if(old===v) return d; return {...d,stage:v,status:STAGE_TO_STATUS[v]||"Not Actioned",auditLog:[...(d.auditLog||[]),auditEntry(currentUser,"Stage changed",old+" \u2192 "+v)]};});}}
