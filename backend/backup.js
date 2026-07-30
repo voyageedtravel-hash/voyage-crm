@@ -127,6 +127,70 @@ function attachBackupRoutes(app, authMiddleware) {
       res.status(500).json({ error: e.message });
     }
   });
+
+  // ── Restore: two-step (dry-run then apply) ─────────────────────────────
+  // Restore is dangerous, so this route ALWAYS takes a safety snapshot of the
+  // current DB first, emails it out, and only then applies. It also accepts
+  // ?mode=merge (default, adds/updates by _id) or ?mode=replace (wipes each
+  // collection first — for a true "back to that moment" restore).
+  app.post("/api/backup/restore", authMiddleware, async (req, res) => {
+    try {
+      if (!req.user || req.user.role !== "admin") return res.status(403).json({ error: "admin only" });
+      const body = req.body || {};
+      const snapshot = body.snapshot;
+      if (!snapshot || !snapshot.collections) return res.status(400).json({ error: "snapshot missing (upload a valid backup JSON)" });
+      const dryRun = !!body.dryRun;
+      const mode = body.mode === "replace" ? "replace" : "merge";
+      const report = { mode, dryRun, collections: {}, safetyBackup: null };
+
+      // Dry-run: just count what would happen, don't touch anything.
+      for (const [name, docs] of Object.entries(snapshot.collections)) {
+        if (!Array.isArray(docs)) { report.collections[name] = { skipped:"not an array" }; continue; }
+        let Model;
+        try { Model = mongoose.model(name); }
+        catch(e){ report.collections[name] = { skipped:"model not registered on server" }; continue; }
+        const existing = await Model.countDocuments({});
+        report.collections[name] = { existing, inBackup: docs.length };
+        if (dryRun) continue;
+
+        // For real: take safety backup first (only once, before any writes).
+        if (!report.safetyBackup) {
+          try {
+            const r = await sendBackupEmail("pre-restore-safety");
+            report.safetyBackup = { ok:true, filename:r.filename, to:r.to, bytes:r.bytes };
+          } catch (e) {
+            report.safetyBackup = { ok:false, error:"Safety backup failed: "+e.message };
+            // Bail out — don't overwrite anything if we couldn't back up first.
+            return res.status(500).json({ error: "safety backup failed; nothing was changed", report });
+          }
+        }
+        // Apply.
+        if (mode === "replace") {
+          await Model.deleteMany({});
+          if (docs.length) await Model.insertMany(docs, { ordered:false });
+          report.collections[name].wiped = existing;
+          report.collections[name].inserted = docs.length;
+        } else {
+          // Merge by _id — upsert every doc.
+          let inserted = 0, updated = 0;
+          for (const doc of docs) {
+            const _id = doc._id;
+            if (_id) {
+              const r2 = await Model.updateOne({ _id }, { $set: doc }, { upsert: true });
+              if (r2.upsertedCount) inserted++; else if (r2.modifiedCount) updated++;
+            } else {
+              await Model.create(doc); inserted++;
+            }
+          }
+          report.collections[name].inserted = inserted;
+          report.collections[name].updated  = updated;
+        }
+      }
+      res.json({ ok:true, ...report });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 }
 
 function startBackupCron() {

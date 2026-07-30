@@ -2754,6 +2754,42 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
     } catch(e){ window.veToast && window.veToast("Backup email failed: "+e.message,"error"); }
   };
 
+  // Restore from a backup JSON file — dry-run preview first, then apply.
+  const [restorePreview,setRestorePreview]=useState(null);  // {file, snapshot, report}
+  const [restoreBusy,setRestoreBusy]=useState(false);
+  const [restoreMode,setRestoreMode]=useState("merge");     // 'merge' or 'replace'
+  const doRestoreDryRun = async (file) => {
+    setRestoreBusy(true);
+    try {
+      const text = await file.text();
+      let snapshot; try { snapshot = JSON.parse(text); } catch(e){ throw new Error("File JSON valid nahi hai"); }
+      if(!snapshot.collections) throw new Error("Ye Voyage-Ed backup nahi lagta (collections missing)");
+      const token=localStorage.getItem("token")||"";
+      const res=await fetch(`${API_BASE}/api/backup/restore`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":token?("Bearer "+token):""},
+        body:JSON.stringify({snapshot, dryRun:true, mode:restoreMode})});
+      const j=await res.json();
+      if(!res.ok) throw new Error(j.error||("HTTP "+res.status));
+      setRestorePreview({file:file.name, snapshot, report:j});
+    } catch(e){ window.veToast && window.veToast("Restore preview failed: "+e.message,"error"); }
+    setRestoreBusy(false);
+  };
+  const doRestoreApply = async () => {
+    if(!restorePreview) return;
+    const modeWord = restoreMode==="replace" ? "REPLACE (existing data wipe hoga)" : "MERGE (existing update hoga)";
+    if(!window.confirm(`⚠️ RESTORE CONFIRM\n\nMode: ${modeWord}\nBackup: ${restorePreview.file}\n\nRestore chalu karne se pehle current data ka SAFETY BACKUP email hoga.\n\nProceed?`)) return;
+    setRestoreBusy(true);
+    try {
+      const token=localStorage.getItem("token")||"";
+      const res=await fetch(`${API_BASE}/api/backup/restore`,{method:"POST",headers:{"Content-Type":"application/json","Authorization":token?("Bearer "+token):""},
+        body:JSON.stringify({snapshot:restorePreview.snapshot, dryRun:false, mode:restoreMode})});
+      const j=await res.json();
+      if(!res.ok) throw new Error(j.error||("HTTP "+res.status));
+      setRestorePreview({...restorePreview, report:j, applied:true});
+      window.veToast && window.veToast("✅ Restore complete — safety backup bhi email ho gaya","success");
+    } catch(e){ window.veToast && window.veToast("Restore failed: "+e.message,"error"); }
+    setRestoreBusy(false);
+  };
+
   const openDeal=(d)=>{ const nd=normalizeDeal(d); setDeal(nd); saveDeal(nd); setScreen("deal"); setTab("client"); };
 
   // ── Add another destination to the SAME client enquiry ──
@@ -4772,6 +4808,10 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
             <button onClick={()=>setDuesOpen(true)} className="btn btn-sm" style={{borderColor:"#f3c6c6",color:"#b91c1c"}}>💸 Dues</button>
             {isAdmin&&<button onClick={downloadLocalBackup} title="Download full CRM JSON backup to this device" className="btn btn-sm" style={{borderColor:"#c9942a",color:"#8a6d1f"}}>💾 Backup</button>}
             {isAdmin&&<button onClick={emailBackupNow} title="Email backup to voyageedtravel@gmail.com now" className="btn btn-sm" style={{borderColor:"#0d1b3e",color:"#0d1b3e"}}>📧 Email Backup</button>}
+            {isAdmin&&<label title="Restore from a backup JSON — safety backup first, then apply" className="btn btn-sm" style={{borderColor:"#dc2626",color:"#dc2626",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5}}>
+              🔄 Restore
+              <input type="file" accept="application/json,.json" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0]; if(f) doRestoreDryRun(f); e.target.value="";}}/>
+            </label>}
             {isAdmin&&<button onClick={()=>{setScreen("users");loadUsers();}} className="btn btn-sm">👥 Users</button>}
             <button onClick={handleLogout} className="btn btn-sm" style={{borderColor:"#dc2626",color:"#b91c1c"}}>Logout</button>
             {duesOpen&&(()=>{
@@ -4827,6 +4867,56 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
                 </div>
               );
             })()}
+
+            {/* RESTORE PREVIEW MODAL */}
+            {restorePreview&&<div onClick={()=>{if(!restoreBusy){setRestorePreview(null);}}} style={{position:"fixed",inset:0,background:"rgba(15,35,80,.65)",zIndex:9999,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 16px",overflowY:"auto"}}>
+              <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:14,width:"min(680px,100%)",boxShadow:"0 24px 60px rgba(0,0,0,.3)",overflow:"hidden"}}>
+                <div style={{padding:"18px 22px",background:"linear-gradient(135deg,#7f1d1d,#dc2626)",color:"#fff"}}>
+                  <div style={{fontSize:10,letterSpacing:2,color:"#fecaca",fontWeight:800}}>DATABASE RESTORE</div>
+                  <div style={{fontSize:18,fontWeight:800,marginTop:2}}>{restorePreview.applied?"✅ Restore Complete":"🔄 Preview — Confirm to Apply"}</div>
+                  <div style={{fontSize:11,color:"#fecaca",marginTop:3,fontFamily:"monospace"}}>{restorePreview.file}</div>
+                </div>
+                <div style={{padding:"18px 22px",maxHeight:"60vh",overflowY:"auto"}}>
+                  {!restorePreview.applied&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"12px 14px",marginBottom:14,fontSize:12,lineHeight:1.6,color:"#7f1d1d"}}>
+                    <b>⚠️ Ye action database change karega.</b> Apply karne se pehle current data ka <b>safety backup</b> voyageedtravel@gmail.com pe email hoga — agar wo fail hua toh restore chalu nahi hoga.
+                  </div>}
+                  <div style={{display:"flex",gap:12,marginBottom:14}}>
+                    <label style={{flex:1,padding:"10px 12px",border:"2px solid "+(restoreMode==="merge"?"#dc2626":"#e3eaf7"),borderRadius:9,cursor:"pointer",background:restoreMode==="merge"?"#fef2f2":"#fff"}}>
+                      <input type="radio" name="rmode" checked={restoreMode==="merge"} onChange={()=>setRestoreMode("merge")} style={{marginRight:6}}/>
+                      <b style={{fontSize:12,color:"#0f2350"}}>Merge (safe)</b>
+                      <div style={{fontSize:10.5,color:"#6b7a99",marginTop:3}}>Backup se documents upsert honge. Backup mein jo nahi hai wo current mein bacha rahega.</div>
+                    </label>
+                    <label style={{flex:1,padding:"10px 12px",border:"2px solid "+(restoreMode==="replace"?"#dc2626":"#e3eaf7"),borderRadius:9,cursor:"pointer",background:restoreMode==="replace"?"#fef2f2":"#fff"}}>
+                      <input type="radio" name="rmode" checked={restoreMode==="replace"} onChange={()=>setRestoreMode("replace")} style={{marginRight:6}}/>
+                      <b style={{fontSize:12,color:"#dc2626"}}>Replace (wipe)</b>
+                      <div style={{fontSize:10.5,color:"#6b7a99",marginTop:3}}>Har collection wipe hoga, phir backup se load. "Us moment pe wapas jao" — but permanent.</div>
+                    </label>
+                  </div>
+                  <div style={{background:"#f8fafd",border:"1px solid #eef2f8",borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontSize:10,letterSpacing:1.5,fontWeight:800,color:"#334e82",marginBottom:8,textTransform:"uppercase"}}>Impact</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,fontSize:12,alignItems:"center"}}>
+                      <div style={{fontWeight:700,color:"#6b7a99"}}>Collection</div>
+                      <div style={{fontWeight:700,color:"#6b7a99",textAlign:"right"}}>Current</div>
+                      <div style={{fontWeight:700,color:"#6b7a99",textAlign:"right"}}>In Backup</div>
+                      {Object.entries((restorePreview.report&&restorePreview.report.collections)||{}).map(([name,info])=>(
+                        <React.Fragment key={name}>
+                          <div style={{color:"#0f2350",fontWeight:600}}>{name}{info.skipped&&<span style={{fontSize:10,color:"#94a3b8",marginLeft:6,fontWeight:400}}>({info.skipped})</span>}</div>
+                          <div className="mono" style={{textAlign:"right",color:"#0f2350"}}>{info.existing!=null?info.existing:"—"}{info.wiped!=null&&<span style={{color:"#dc2626"}}> → wiped</span>}</div>
+                          <div className="mono" style={{textAlign:"right",color:"#15803d"}}>{info.inBackup!=null?info.inBackup:"—"}{info.inserted!=null&&<span style={{color:"#4169E1"}}> +{info.inserted}</span>}{info.updated!=null&&info.updated>0&&<span style={{color:"#c9942a"}}> ~{info.updated}</span>}</div>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                  {restorePreview.applied&&restorePreview.report.safetyBackup&&<div style={{marginTop:14,background:"#f0faf4",border:"1px solid #d9f5e3",borderRadius:10,padding:"12px 14px",fontSize:11.5,color:"#166534"}}>
+                    ✅ Safety backup email: <b style={{fontFamily:"monospace"}}>{restorePreview.report.safetyBackup.filename}</b> → {restorePreview.report.safetyBackup.to}
+                  </div>}
+                </div>
+                <div style={{padding:"14px 22px",borderTop:"1px solid #eef2f8",display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  {!restorePreview.applied&&<button onClick={doRestoreApply} disabled={restoreBusy} style={{background:restoreBusy?"#fca5a5":"linear-gradient(135deg,#7f1d1d,#dc2626)",color:"#fff",border:"none",borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:800,cursor:restoreBusy?"wait":"pointer"}}>{restoreBusy?"Applying…":"🔄 Apply Restore"}</button>}
+                  <button onClick={()=>setRestorePreview(null)} disabled={restoreBusy} className="btn btn-sm">{restorePreview.applied?"Close":"Cancel"}</button>
+                </div>
+              </div>
+            </div>}
           </div>
         </div>
 

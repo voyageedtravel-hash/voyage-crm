@@ -31,6 +31,7 @@ let compression=null; try{ compression=require("compression"); app.use(compressi
 // base64, so this one route needs a bigger ceiling. Everything else stays at
 // 2mb — booking payloads don't need more, and the low cap blocks abuse.
 app.use("/api/chat", express.json({ limit: "25mb" }));
+app.use("/api/backup/restore", express.json({ limit: "100mb" }));  // whole backup JSON
 app.use(express.json({ limit: "2mb" }));
 
 // ─── Basic security headers ───
