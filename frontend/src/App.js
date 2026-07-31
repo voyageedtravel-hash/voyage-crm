@@ -2931,8 +2931,8 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
       .map(d=>({d, amount:dealFinance(d).clientDue}))
       .sort((a,b)=>b.amount-a.amount);
     const totalReceivable = receivables.reduce((s,r)=>s+r.amount,0);
-    // Payables — every BOOKED deal's vendor dues, itemised by vendor
-    const payables = [];
+    // Payables — GROUPED BY VENDOR NAME across every BOOKED deal
+    const _payMap = new Map();
     bookedD.forEach(d=>{
       const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
                 ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
@@ -2943,10 +2943,15 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
         const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
         const paid=sum(v.payments||[],"amount");
         const bal=cost-paid;
-        if(bal>0.5) payables.push({d, vendor:v, kind:v._k, amount:bal});
+        if(bal<=0.5) return;
+        const key=`${(v._n||"(vendor)").trim().toLowerCase()}::${v._k}`;
+        if(!_payMap.has(key)) _payMap.set(key,{name:v._n||"(vendor)", kind:v._k, amount:0, breakdown:[]});
+        const g=_payMap.get(key);
+        g.amount += bal;
+        g.breakdown.push({d, amount:bal});
       });
     });
-    payables.sort((a,b)=>b.amount-a.amount);
+    const payables = [...(_payMap.values())].sort((a,b)=>b.amount-a.amount);
     const totalPayable = payables.reduce((s,p)=>s+p.amount,0);
     const totalCash = (accounts.cashLocations||[]).reduce((s,c)=>s+(Number(c.amount)||0),0);
     const bank = Number(accounts.bankBalance)||0;
@@ -3133,12 +3138,23 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
             </div>
             {payables.length===0?<div style={{fontSize:12,color:"#94a3b8",padding:"8px 0"}}>Sab clear ✓</div>:
               payables.map((p,i)=>(
-                <div key={i} onClick={()=>openDeal(p.d)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px dashed #e3eaf7",cursor:"pointer",gap:8}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12.5,fontWeight:700,color:"#0f2350"}}>{p.vendor._n||"(vendor)"} <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:"#eef3fc",color:"#334e82",marginLeft:4}}>{p.kind}</span></div>
-                    <div style={{fontSize:10.5,color:"#94a3b8"}}>{p.d.clientName||"(client)"} · {p.d.dealNumber||""}</div>
+                <div key={i} style={{padding:"9px 0",borderBottom:"1px dashed #e3eaf7"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,cursor:p.breakdown.length===1?"pointer":"default"}}
+                    onClick={()=>{ if(p.breakdown.length===1) openDeal(p.breakdown[0].d); }}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12.5,fontWeight:700,color:"#0f2350"}}>{p.name} <span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:"#eef3fc",color:"#334e82",marginLeft:4}}>{p.kind}</span>{p.breakdown.length>1&&<span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:5,background:"#faf1dc",color:"#8a6d1f",marginLeft:5}}>{p.breakdown.length} deals</span>}</div>
+                      {p.breakdown.length===1&&<div style={{fontSize:10.5,color:"#94a3b8"}}>{p.breakdown[0].d.clientName||"(client)"} · {p.breakdown[0].d.dealNumber||""}</div>}
+                    </div>
+                    <b className="mono" style={{fontSize:13,color:"#dc2626"}}>{inr(p.amount)}</b>
                   </div>
-                  <b className="mono" style={{fontSize:13,color:"#dc2626"}}>{inr(p.amount)}</b>
+                  {p.breakdown.length>1&&<div style={{marginTop:6,marginLeft:12,paddingLeft:10,borderLeft:"2px solid #f1f5f9"}}>
+                    {p.breakdown.map((b,j)=>(
+                      <div key={j} onClick={()=>openDeal(b.d)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",cursor:"pointer",fontSize:11}}>
+                        <span style={{color:"#334e82"}}>{b.d.clientName||"(client)"} {b.d.dealNumber&&<span style={{background:"#faf1dc",color:"#8a6d1f",padding:"1px 5px",borderRadius:4,marginLeft:5,fontFamily:"monospace",fontWeight:700,fontSize:9.5}}>{b.d.dealNumber}</span>}</span>
+                        <b className="mono" style={{color:"#94a3b8",fontSize:11}}>{inr(b.amount)}</b>
+                      </div>
+                    ))}
+                  </div>}
                 </div>
               ))
             }
@@ -3253,8 +3269,10 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 kind:"receivable", party:d.clientName||"(no name)",
                 amount:F.clientDue, queryTag:d.dealNumber||"", note:d.destination||"", dealId:d._localId,
               };});
-            // Vendor payables as read-only system rows.
-            const sysPayables=[];
+            // Vendor payables — GROUPED BY VENDOR NAME so the same vendor
+            // across multiple deals is one row (Grand Gold Hotel ₹86,856 with a
+            // "3 deals" breakup) instead of three separate lines.
+            const vendorMap = new Map();
             bookedD2.forEach(d=>{
               const vs=[...(d.hotelVendors||[]).map(v=>({...v,_k:"Hotel",_n:v.hotelName||v.name})),
                         ...(d.flightVendors||[]).map(v=>({...v,_k:"Flight",_n:v.name})),
@@ -3265,14 +3283,27 @@ const sectionCalc = (vendors) => (vendors || []).reduce((acc, v) => {
                 const cost=toINR(v.costPrice,v.currency,v.exchangeRate);
                 const paid=sum(v.payments||[],"amount");
                 const bal=cost-paid;
-                if(bal>0.5) sysPayables.push({
-                  _sys:true, id:"sys-p-"+(d._localId||d.dealNumber)+"-"+v.id,
-                  date:new Date().toISOString().slice(0,10), kind:"payable",
-                  party:`${v._n||"(vendor)"} · ${v._k}`, amount:bal,
-                  queryTag:d.dealNumber||"", note:d.clientName||"", dealId:d._localId,
-                });
+                if(bal<=0.5) return;
+                const key=`${(v._n||"(vendor)").trim().toLowerCase()}::${v._k}`;
+                if(!vendorMap.has(key)) vendorMap.set(key,{name:v._n||"(vendor)", kind:v._k, amount:0, deals:[]});
+                const g=vendorMap.get(key);
+                g.amount += bal;
+                g.deals.push({dealNumber:d.dealNumber||"", client:d.clientName||"", amount:bal});
               });
             });
+            const sysPayables=[...vendorMap.values()]
+              .sort((a,b)=>b.amount-a.amount)
+              .map(g=>({
+                _sys:true, id:`sys-p-${g.name.replace(/[^a-z0-9]/gi,"")}-${g.kind}`,
+                date:new Date().toISOString().slice(0,10), kind:"payable",
+                party:`${g.name} · ${g.kind}`, amount:g.amount,
+                // For grouped rows: show first tag if all deals share one, else "Multiple"
+                queryTag: g.deals.length===1 ? g.deals[0].dealNumber : "",
+                note: g.deals.length===1
+                  ? g.deals[0].client
+                  : `${g.deals.length} deals: ${g.deals.map(x=>x.client).filter(Boolean).slice(0,3).join(", ")}${g.deals.length>3?"…":""}`,
+                _deals: g.deals,
+              }));
             // Only inject system rows into the CURRENT month (dena/lena is a live snapshot).
             const currentKey=`${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,"0")}`;
             const injectSys = (mk===currentKey);
