@@ -1,0 +1,17 @@
+{
+  "name": "voyage-crm-workspace",
+  "version": "2.0.0-alpha.2",
+  "private": true,
+  "description": "Voyage-Ed CRM V2 monorepo — web, mobile, shared logic, backend",
+  "workspaces": [
+    "packages/*",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "test": "cd packages/shared && npm test",
+    "test:shared": "cd packages/shared && npm test"
+  },
+  "author": "Voyage-Ed Travels",
+  "license": "UNLICENSED"
+}

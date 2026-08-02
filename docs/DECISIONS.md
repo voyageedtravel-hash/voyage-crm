@@ -294,6 +294,240 @@ Blueprint mandates 16th-to-15th business month cycle for finance. V1 currently u
 
 ---
 
+## ADR-009: Sticky finance bar on Deal Detail
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+Deal Detail is a long-scroll page (Client, Flights, Hotels, Trains, Tours, Cruises, Transfers, Cabs, Attractions, Visa, Insurance, Forex, SIM, Extras, Payments, Timeline). When scrolling through vendors deep in the page, the user loses sight of financial totals (Selling, Cost, Profit, Paid, Due) that were visible at the top. This forces scroll-up/scroll-down cycles.
+
+**Options considered:**
+- **A. Static financial ribbon at top only** — original mockup approach.
+- **B. Sticky financial ribbon that pins to top on scroll** — user's requested improvement.
+- **C. Floating pill overlay** — cluttered, mobile-unfriendly.
+
+**Final decision:** B. Sticky finance bar.
+
+**Reasoning:**
+- Every vendor edit affects the totals; keeping totals visible during editing is a real productivity gain.
+- CSS `position: sticky` is well-supported and cheap.
+- On mobile, the same bar collapses to a single compact strip (Selling · Profit · Due).
+
+**Future impact:**
+- Applies to Deal Detail on both web and mobile.
+- Mobile version drops fields; only key three shown.
+- Drill-down on profit (see ADR-014) is triggered from this bar.
+
+---
+
+## ADR-010: Accordion (expand/collapse) sections on Deal Detail
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+A booking with 20-30 services (Flights, Hotels for 4 cities, Cruises, Transfers, Cabs, Attractions, Visa, Insurance, Forex, SIM, Extras) is unmanageable when all sections are always expanded. Scrolling becomes exhausting.
+
+**Options considered:**
+- **A. All sections always expanded** — clean but heavy.
+- **B. All sections collapsible with accordion pattern** — user's requested improvement.
+- **C. Only one section expanded at a time (strict accordion)** — annoying when comparing vendors.
+
+**Final decision:** B. All sections collapsible independently. Default expanded state:
+- Client & Travellers: expanded
+- Any section with vendors: expanded
+- Empty sections (no vendors added): collapsed with "+ Add" prompt visible
+
+**Reasoning:**
+- Non-strict accordion (independent open/close) is friendlier than strict.
+- Empty sections auto-collapse to remove clutter without hiding functionality.
+- Section state persists per deal in localStorage (Vishal opens Flights on deal X → next time he opens deal X, Flights still open).
+
+**Future impact:**
+- Every travel-component section (Flights, Hotels, ..., Extras) is an accordion by default.
+- Shared component: `<CollapsibleSection>` in `packages/ui/`.
+- Aria-controls / aria-expanded for accessibility.
+
+---
+
+## ADR-011: Floating AI button (bottom-right) for deal-scoped actions
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+Blueprint asks for "AI only when I ask it." Current design has AI Insights card in right rail which invites the eye. Better UX: AI is invoked from a floating pill that stays out of the way until needed.
+
+**Options considered:**
+- **A. AI as right-rail card always visible** — original mockup, adequate but occupies space.
+- **B. Floating AI button, bottom-right, opens action sheet** — user's requested improvement.
+- **C. AI in top navigation only** — too far from the deal context.
+
+**Final decision:** B. Floating AI button on Deal Detail (and future long screens).
+
+**Actions available in the AI sheet (deal-scoped):**
+1. Generate Proposal
+2. Generate Voucher
+3. Cancellation (existing 4-field engine)
+4. Cover Letter
+5. Send Reminder
+6. OCR Extract (opens camera or upload)
+7. Ask about this deal (chat)
+
+**Reasoning:**
+- Floating pattern is battle-tested (Material FAB, iOS floating action).
+- Every action is user-initiated → controls API costs (blueprint principle).
+- Sheet UI groups actions logically vs. cluttering the page with 7 buttons.
+- On mobile, same floating button is thumb-reachable.
+
+**Future impact:**
+- Component: `<AIFloatingButton scope="deal" dealId={id}>` in `packages/ui/`.
+- Actions can be extended per screen (dashboard scope will have different actions in Phase 8).
+- Rate limit: same user can trigger max 5 AI actions per minute (safety).
+
+---
+
+## ADR-012: Color-coded activity timeline states
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+Original activity timeline used only gold + navy dots. Blueprint's spirit is "recognize state at a glance."
+
+**Final decision:** Four semantic dot colors on timeline:
+- 🟢 Green (`--success`) — Completed
+- 🟡 Amber (`--warning`) — Pending / In Progress
+- 🔵 Blue (`--info`) — Reminder / Scheduled
+- 🔴 Red (`--danger`) — Overdue / Failed
+
+**Reasoning:**
+- Semantic colors are universally recognized.
+- Same palette used across dashboard KPIs, department chips, and timeline — consistency.
+- Colorblind-safe with icon backup (checkmark, hourglass, bell, warning-triangle).
+
+**Future impact:**
+- Timeline component in `packages/ui/` uses this palette.
+- Every event type in `audit_logs` collection has a `state` field mapping to one of these 4.
+
+---
+
+## ADR-013: Mobile is NOT a resized desktop
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+Mockups so far are desktop-only. Vishal explicit: mobile must NOT copy desktop layout.
+
+**Final decision:** Mobile UI patterns (React Native / Expo) are:
+
+1. **Card-based layout** — no tables. Each deal, vendor, payment = a card.
+2. **Sticky bottom navigation** — 5 tabs: Dashboard / Leads / Deals / Scan / More.
+3. **Thumb-friendly buttons** — minimum 44×44 px touch targets, primary actions in bottom third of screen.
+4. **Camera scan first** — dedicated "Scan" tab in bottom nav; every input form has a camera icon adjacent.
+5. **Sheet-based details** — tapping a deal opens a bottom sheet that scrolls up, not a full page navigate.
+6. **Pull-to-refresh** — standard native gesture on lists.
+7. **Haptic feedback** — subtle vibration on primary actions (Convert Lead, Confirm Payment).
+8. **Bottom action sheet for AI** — same floating AI button (ADR-011), but on mobile opens a bottom sheet.
+
+**Shared with desktop:**
+- Colors (design tokens)
+- Business logic (packages/shared)
+- Backend API contract
+
+**Not shared:**
+- UI components (React vs React Native are different primitives)
+- Navigation patterns (top navigation on web, bottom on mobile)
+- Screen layouts (single-column on mobile, multi-column on web)
+
+**Future impact:**
+- Mobile design tokens live in same `packages/ui/tokens/` but with `mobile-` prefixed variants where needed (spacing scales up on mobile for touch, down on desktop).
+- Screen counterparts: `packages/web/src/modules/deals/DealDetail.jsx` and `packages/mobile/app/deal/[id].tsx` are separate implementations sharing calculations, validators, and API calls.
+
+---
+
+## ADR-014: Profit drill-down component
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+GPM shown as single number "₹42,600 (18.1%)" — user has no visibility into where the profit came from. Different components (flight vs hotel vs visa) have different margin patterns; understanding this is key to pricing decisions.
+
+**Final decision:** Clicking the GPM number opens a drill-down panel showing:
+
+| Component | Cost | Sell | Profit | Margin |
+|---|---|---|---|---|
+| ✈ Flights | 68,400 | 74,000 | 5,600 | 7.6% |
+| 🏨 Hotels | 1,27,400 | 1,42,000 | 14,600 | 10.3% |
+| 🎟 Attractions | 4,800 | 6,500 | 1,700 | 26.2% |
+| 🚖 Transfers | 3,000 | 4,500 | 1,500 | 33.3% |
+| 🛡 Insurance | 2,200 | 3,500 | 1,300 | 37.1% |
+| ◈ Visa | 8,800 | 9,500 | 700 | 7.4% |
+| 💱 Forex | 0 | 4,000 | 4,000 | Service |
+| Service Fee | — | 8,500 | 8,500 | Add-on |
+| TCS collected | — | — | 5,875 | — |
+| TDS deducted | — | — | (0) | — |
+| FX Gain/Loss | — | — | +825 | Rate diff |
+| **TOTAL** | **2,14,600** | **2,52,000** | **42,600** | **18.1%** |
+
+**Reasoning:**
+- This one screen answers "which components are profitable and which are commodity?"
+- Vishal can consciously price low-margin (flights) and grow high-margin (attractions, insurance, transfers).
+- FX gain/loss (per ADR from earlier) shows here — connecting the currency risk work to real numbers.
+- TCS / TDS visibility is a compliance requirement.
+
+**Future impact:**
+- Requires the finance service (`packages/shared/logic/finance/breakdown.ts`) to expose per-component profit.
+- New collections: `travel_credits` (Phase 6), and per-component `payments` (already planned).
+- The drill-down is triggered from the sticky finance bar profit number.
+
+---
+
+## ADR-015: Extended travel components list
+**Date:** 2026-08-02
+**Status:** Accepted
+
+**Problem:**
+V1 supports: Hotels, Flights, Trains, Land, Visa, Activities. Blueprint asks for more.
+
+**Final decision:** V2 supports these 11 travel components per deal, each with own vendor schema, OCR support, voucher generation, and profit contribution:
+
+| Component | Icon | V1 status | V2 target | OCR sources |
+|---|---|---|---|---|
+| Flights | ✈ | ✅ existing | ✅ enhanced | Ticket PDF, e-ticket, booking confirmation |
+| Trains | 🚆 | ✅ existing (recent) | ✅ enhanced | PNR SMS, ticket screenshot, IRCTC PDF |
+| Cruises | 🚢 | ⚠️ under Activities | ✅ own section | Booking confirmation, itinerary PDF |
+| Transfers | 🚌 | ⚠️ under Land | ✅ own section | Vendor invoice, WhatsApp confirmation |
+| Cabs | 🚖 | ⚠️ under Land | ✅ own section | Uber/Ola receipt, local vendor invoice |
+| Hotels | 🏨 | ✅ existing | ✅ enhanced | Hotel voucher, confirmation email, booking.com PDF |
+| Attractions | 🎟 | ⚠️ under Activities | ✅ own section | Ticket voucher, tour operator confirmation |
+| Insurance | 🛡 | ❌ missing | ✅ new | Policy PDF, cover note |
+| Forex | 💱 | ❌ missing | ✅ new | Forex card slip, forex broker invoice |
+| SIM / eSIM | 📶 | ❌ missing | ✅ new | eSIM QR code, activation email |
+| Extras | 🧳 | ❌ missing | ✅ new | Any other receipt (baggage, priority pass, lounge, spa) |
+
+**Every component supports:**
+- Multiple vendors per deal (e.g., 3 hotels for a multi-city trip)
+- Cost + Selling price + Payments log
+- OCR upload → auto-fill fields
+- Voucher generation (client-facing PDF per vendor)
+- Multi-currency with FX at deal-lock rate
+- Cancellation with per-vendor refund/penalty
+
+**Reasoning:**
+- Splitting "Land" into Transfers + Cabs makes sense (different vendor types, different vouchers).
+- Insurance, Forex, SIM are common travel add-ons with margin — currently untracked = lost profit visibility.
+- Extras catches everything else (baggage, lounge access, priority pass).
+
+**Migration path (V1 → V2):**
+- Existing "Land" vendors → auto-migrated to Transfers (default) or Cabs (user re-tags if needed).
+- Existing "Activities" vendors → auto-migrated to Cruises OR Attractions based on keyword heuristic on name (fallback: Attractions).
+- No data loss. Migration script runs once during Phase 3.
+
+**Future impact:**
+- Data model change: `deal.landVendors[]` and `deal.activityVendors[]` deprecated, replaced by 11 explicit arrays.
+- OCR training: each component type has its own extraction prompt template.
+- Finance drill-down (ADR-014) shows profit per component.
+
+---
+
 ## Decisions Pending
 
 These decisions have been raised but not yet made. To be resolved before their blocking phase begins.
@@ -310,3 +544,4 @@ These decisions have been raised but not yet made. To be resolved before their b
 ## Change History
 
 - **2026-08-01**: Initial ADRs 001-008 created after Phase 0 Day 1 planning approved.
+- **2026-08-02**: ADRs 009-015 added based on Vishal's Deal Detail UX refinements: sticky finance bar, accordion sections, floating AI button, timeline colors, mobile-not-a-resized-desktop, profit drill-down, extended travel components list (11 types).

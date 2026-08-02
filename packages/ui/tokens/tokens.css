@@ -1,0 +1,89 @@
+/**
+ * Voyage-Ed CSS Variables
+ * ────────────────────────────────────────────────────────────
+ * Generated from packages/ui/tokens/index.js
+ * Import into web app: import '@voyage/ui/tokens/tokens.css';
+ *
+ * When tokens/index.js changes, regenerate this via
+ * `pnpm --filter @voyage/ui build-tokens` (added in Phase 0 Day 4).
+ */
+
+:root {
+  /* Brand */
+  --navy: #0d1b3e;
+  --navy-light: #1a3060;
+  --navy-hover: #253a70;
+  --gold: #c9a84c;
+  --gold-dark: #b78d38;
+  --gold-light: #faf1dc;
+  --gold-soft: #f5ead0;
+
+  /* Text */
+  --text-primary: #0f2350;
+  --text-secondary: #33446b;
+  --text-muted: #6b7a99;
+  --text-on-dark: #ffffff;
+  --text-on-dark-muted: rgba(255, 255, 255, 0.75);
+
+  /* Backgrounds */
+  --bg-page: #f9fafc;
+  --bg-card: #ffffff;
+  --bg-subtle: #f4f7fc;
+  --bg-hover: #eef2f9;
+
+  /* Borders */
+  --border: #e8ecf5;
+  --border-strong: #d4dcec;
+
+  /* Semantic (also timeline states — ADR-012) */
+  --success: #059669;
+  --success-bg: #ecfdf5;
+  --warning: #c9942a;
+  --warning-bg: #fef8ec;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #3b82f6;
+  --info-bg: #eff6ff;
+
+  /* Spacing */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-xxxl: 64px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-full: 999px;
+
+  /* Typography */
+  --font-heading: "Playfair Display", Georgia, serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(15, 35, 80, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 35, 80, 0.06);
+  --shadow-lg: 0 12px 32px rgba(15, 35, 80, 0.10);
+  --shadow-xl: 0 24px 60px rgba(15, 35, 80, 0.20);
+  --shadow-gold: 0 8px 24px rgba(201, 168, 76, 0.25);
+
+  /* Motion */
+  --duration-quick: 150ms;
+  --duration-default: 250ms;
+  --duration-slow: 400ms;
+  --ease-default: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --ease-entrance: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.0, 0, 1);
+
+  /* Z-index */
+  --z-sticky: 200;
+  --z-modal: 1000;
+  --z-floating-button: 2000;
+}

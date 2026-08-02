@@ -575,6 +575,65 @@ const start = async () => {
       console.warn("[backup] not enabled:", e.message);
     }
 
+    // ─── FEATURE FLAGS (V2 rollout safety net) ─────────────────────────
+    // Every V2 module ships behind a flag so we can disable without
+    // redeploying if something breaks. See docs/DECISIONS.md ADR-005.
+    try {
+      const { seedInitialFlags, flagsForUser, setFlag, FeatureFlag } =
+        require("./services/feature-flags");
+
+      await seedInitialFlags();
+      console.log("[flags] initial catalogue seeded");
+
+      // GET /api/flags — return current flag state for the logged-in user.
+      // Called by frontend on load to decide which V2 features to show.
+      app.get("/api/flags", authMiddleware, async (req, res) => {
+        try {
+          const role = req.user?.role || "agent";
+          const email = req.user?.email || "";
+          const flags = await flagsForUser(role, email);
+          res.json({ flags });
+        } catch (e) {
+          console.error("[flags] read error:", e.message);
+          res.json({ flags: {} }); // fail-safe: return no flags rather than 500
+        }
+      });
+
+      // PUT /api/flags/:name — toggle a flag. Admin only.
+      app.put("/api/flags/:name", authMiddleware, async (req, res) => {
+        if (req.user?.role !== "admin") {
+          return res.status(403).json({ error: "Admin only" });
+        }
+        try {
+          const { enabled } = req.body || {};
+          if (typeof enabled !== "boolean") {
+            return res.status(400).json({ error: "body.enabled must be boolean" });
+          }
+          const updated = await setFlag(req.params.name, enabled);
+          res.json({ flags: updated });
+        } catch (e) {
+          console.error("[flags] write error:", e.message);
+          res.status(500).json({ error: e.message });
+        }
+      });
+
+      // GET /api/flags/all — full flag catalogue with metadata. Admin only.
+      // Used by settings UI to see descriptions and delete-by dates.
+      app.get("/api/flags/all", authMiddleware, async (req, res) => {
+        if (req.user?.role !== "admin") {
+          return res.status(403).json({ error: "Admin only" });
+        }
+        try {
+          const all = await FeatureFlag.find({}).sort({ name: 1 }).lean();
+          res.json({ flags: all });
+        } catch (e) {
+          res.status(500).json({ error: e.message });
+        }
+      });
+    } catch (e) {
+      console.warn("[flags] not enabled:", e.message);
+    }
+
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT} 🚀`));
 
