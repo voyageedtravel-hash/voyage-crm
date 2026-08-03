@@ -7,7 +7,9 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./finance": "./src/logic/finance/index.js"
+    "./finance": "./src/logic/finance/index.js",
+    "./cruises": "./src/logic/cruises/index.js",
+    "./ai-prompts": "./src/logic/ai-prompts/cruise-ocr.js"
   },
   "scripts": {
     "test": "vitest run",

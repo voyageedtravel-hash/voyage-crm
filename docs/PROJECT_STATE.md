@@ -2,9 +2,9 @@
 
 > **Purpose:** Living document that reflects the current state of the CRM V2 project. Every session starts here.
 
-**Last Updated:** 2026-08-02 (evening)
+**Last Updated:** 2026-08-02 (late evening)
 **Current Phase:** Phase 0 — Preparation
-**Current Task:** Phase 0 Day 2 — Monorepo skeleton + shared logic + feature flags DONE
+**Current Task:** Phase 0 Day 2 — Cruise module (schema + pricing + AI OCR) DONE
 
 ---
 
@@ -48,6 +48,7 @@ Building the V2 foundation: shared business logic package with unit tests, desig
 - [x] Feature flag routes — GET /api/flags, PUT /api/flags/:name, GET /api/flags/all
 - [x] Feature flag frontend hook — useFeatureFlag, useFeatureFlags, toggleFeatureFlag
 - [x] 13 initial V2 feature flags registered (all OFF in production by default)
+- [x] **Cruise module** — schema (11-category cabins, ports, itinerary, deposit schedule), pricing engine (base + port charges + gratuities + add-ons + FX), AI OCR system prompt for cruise screenshots, client service for image → structured vendor. 25 additional tests, all passing (53 total)
 
 ### Pending in Phase 0
 - [ ] Staging environment (Netlify site) — needs Vishal's account access

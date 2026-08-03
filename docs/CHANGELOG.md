@@ -20,7 +20,22 @@ Every entry includes:
 
 ---
 
-## [Unreleased] — V2.0.0-alpha.2 (Phase 0 in progress)
+## [Unreleased] — V2.0.0-alpha.3 (Phase 0 continuation)
+
+### Added
+- **[2026-08-02 late] Cruise module — schema, pricing, AI OCR extraction**
+  - **Files modified:** `packages/shared/src/logic/cruises/index.js` (new), `packages/shared/src/logic/ai-prompts/cruise-ocr.js` (new), `packages/shared/src/services/cruise-ocr-client.js` (new), `packages/shared/tests/cruises.test.js` (new, 25 tests), `packages/shared/src/index.js`, `packages/shared/package.json`, `docs/FEATURE_PARITY.md`
+  - **Reason:** Cruises are a first-class travel component in V2 (ADR-015) with pricing structure fundamentally different from hotels or flights: per-person double-occupancy base fare + mandatory port charges + gratuities per person per night + optional add-ons (beverage/wifi/dining packages). This module delivers three connected pieces:
+    1. Full cruise vendor schema covering ship, voyage, cabin, itinerary, all pricing lines, deposit + balance schedule, cancellation policy, documents. Supports Indian lines (Cordelia INR) and international (Royal Caribbean USD) with automatic currency conversion.
+    2. `cruisePriceBreakdown()` — computes base fare + port charges + gratuities + add-ons + grand total + per-person breakdown for client quotes. Automatically applies exchange rate. Respects explicit costPrice/sellingPrice overrides for special vendor rates.
+    3. AI OCR system prompt + client service that takes a cruise-line booking screenshot, extracts structured JSON via Claude Sonnet 4.6 vision, validates it (confidence check, missing-gratuities check, totals sanity-check against screenshot claim), and produces a preview-ready vendor record. Follows preview→confirm→apply discipline per ADR-011.
+  - **25 unit tests** including real Cordelia 3N Mumbai-Diu (INR ₹60,600 verified), family with 2 adults + 2 children with kids-price differentiation, single-traveller supplement, Royal Caribbean 7N Bahamas in USD @ 86 INR rate, override behaviour when Vishal locks a special vendor rate, and OCR-to-vendor conversion.
+  - **Cumulative test count:** 53 tests (28 finance + 25 cruises), all passing.
+  - **Breaking change:** No (new module, no existing code modified)
+  - **Status:** Production Ready (library only; UI in Phase 3-5)
+  - **Version:** V2.0.0-alpha.3
+
+## [V2.0.0-alpha.2] — 2026-08-02 (Phase 0 Day 2)
 
 ### Added
 - **[2026-08-02] Shared design tokens (JS + CSS)**

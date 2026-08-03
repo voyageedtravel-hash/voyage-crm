@@ -40,7 +40,7 @@ At the start of the V2 project, Web has features; mobile does not exist yet. Mob
 | Deal detail — Client & Travellers section | ✅ | 🔵 Phase 5 | 🔵 Phase 5 | |
 | Deal detail — Flights section | ✅ | 🔵 Phase 5 | 🔵 Phase 5 | See ADR-015 |
 | Deal detail — Trains section | ✅ | 🔵 Phase 5 | 🔵 Phase 5 | See ADR-015 |
-| Deal detail — Cruises section | ⚪ | ⚪ | ⚪ | New in V2, was under Activities |
+| Deal detail — Cruises section | ⚪ | ⚪ | ⚪ | New in V2, was under Activities. Ships with OCR + gratuities + port taxes in Phase 3 (schema exists in @voyage/shared/cruises now) |
 | Deal detail — Hotels section | ✅ | 🔵 Phase 5 | 🔵 Phase 5 | |
 | Deal detail — Transfers section | ⚪ | ⚪ | ⚪ | New in V2, split from Land |
 | Deal detail — Cabs section | ⚪ | ⚪ | ⚪ | New in V2, split from Land |
