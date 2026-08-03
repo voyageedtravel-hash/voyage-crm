@@ -2,20 +2,25 @@
   "name": "@voyage/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared business logic for Voyage-Ed CRM (used by web + mobile + backend)",
+  "description": "Shared business logic for Voyage-Ed CRM",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
     "./finance": "./src/logic/finance/index.js",
     "./cruises": "./src/logic/cruises/index.js",
-    "./ai-prompts": "./src/logic/ai-prompts/cruise-ocr.js"
+    "./insurance": "./src/logic/insurance/index.js",
+    "./transfers": "./src/logic/transfers/index.js",
+    "./cabs": "./src/logic/cabs/index.js",
+    "./attractions": "./src/logic/attractions/index.js",
+    "./extras": "./src/logic/extras/index.js",
+    "./sim": "./src/logic/sim/index.js",
+    "./cancellation": "./src/logic/cancellation/index.js"
   },
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run"
   },
   "devDependencies": {
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.1"
   }
 }

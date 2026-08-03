@@ -126,3 +126,24 @@ For every completed task:
 ### Added
 - Business month feature. Very cool. Made things better!
 ```
+
+
+## [V2.0.0-alpha.4] — 2026-08-03 (Set A complete)
+
+### Added
+- **[2026-08-03] Set A travel component modules — 6 modules, 72 new tests**
+  - **Files added:** `packages/shared/src/logic/{insurance,transfers,cabs,attractions,extras,sim,cancellation}/index.js`, `packages/shared/src/logic/ai-prompts/{insurance-ocr,set-a-ocr}.js`, `packages/shared/tests/{insurance,set-a-modules}.test.js`
+  - **Reason:** Complete Set A of the "immediately doable" travel component modules per Vishal's approved 3-set division. Each module follows the same cruise pattern established in alpha.3: schema + pricing engine + AI OCR system prompt + build-from-OCR helper + comprehensive tests.
+    - **Insurance** (Ch 24): full policy schema with 7 regions, 8 plan tiers, 7 age brackets with multipliers, 15 coverage types, 10 Indian insurers. `insurancePriceBreakdown()` computes premium + add-ons (adventure sports, COVID cover, pre-existing surcharge) + 18% GST for INR policies. Real ICICI Lombard Schengen family test verified.
+    - **Transfers** (Ch 21a): airport/hotel/station transfer schema, 11 transfer types, 10 vehicle categories including luxury. Meet & greet, flight number tracking for airport pickups.
+    - **Cabs** (Ch 21b): local/outstation cab schema, 8 cab types (8hr/80km, 12hr/120km, outstation, sightseeing). Per-day rate + driver bhata + parking + toll computation.
+    - **Attractions** (Ch 25a): theme parks, museums, tours, safaris — 15 attraction types. Adult/child/senior tiered pricing + private guide + transportation charges. Multi-ticket support for group bookings.
+    - **Extras** (Ch 25b): catch-all for baggage, lounge pass, photographer, cake, priority pass, luggage forwarding — 17 predefined types plus 'Other'. Simple unit × quantity pricing.
+    - **SIM/eSIM**: Airalo, Nomad, Matrix, Clay Travel + 6 more. Data/validity/countries covered, QR delivery flow, per-traveller SIM support.
+    - **Cancellation Engine** (Ch 66): extracted from V1 App.js. 4-field mental model (refundToClient, penaltyToClient, vendorCancellationLoss, myProfitOnCancellation) with `computeCancellationImpact()` that combines new + prior cancellations. Includes `decodeCancellationPolicy('F30-P50-N90')` for structured vendor policy codes and `refundPercentForDaysOut()` for automatic penalty computation given days before travel.
+  - **AI OCR:** 6 new system prompts (insurance + 5 in set-a-ocr.js). Each targets the strict "return raw JSON, no math" contract from cruise. Generic `validateGenericOCR()` helper reused across all Set A components.
+  - **Tests:** 20 insurance tests, 27 combined Set A tests. All checking real scenarios (Schengen family ₹4,248 including GST, Bangalore-Mysore-Coorg outstation cab, Universal Studios Singapore SGD-to-INR, Airalo Europe eSIM USD-to-INR, 4-field cancellation math).
+  - **Cumulative test count:** **100 tests across 4 files, all passing.**
+  - **Breaking change:** No (library only, no UI code, existing App.js untouched)
+  - **Status:** Production Ready (library layer; UI wires up Phase 3-5)
+  - **Version:** V2.0.0-alpha.4
