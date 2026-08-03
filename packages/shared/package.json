@@ -15,7 +15,8 @@
     "./attractions": "./src/logic/attractions/index.js",
     "./extras": "./src/logic/extras/index.js",
     "./sim": "./src/logic/sim/index.js",
-    "./cancellation": "./src/logic/cancellation/index.js"
+    "./cancellation": "./src/logic/cancellation/index.js",
+    "./quotation": "./src/logic/quotation/index.js"
   },
   "scripts": {
     "test": "vitest run"

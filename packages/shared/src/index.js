@@ -33,6 +33,10 @@ export { default as sim } from './logic/sim/index.js';
 export * from './logic/cancellation/index.js';
 export { default as cancellation } from './logic/cancellation/index.js';
 
+// Quotation builder (V2 UI)
+export * from './logic/quotation/index.js';
+export { default as quotation } from './logic/quotation/index.js';
+
 // AI OCR prompts
 export {
   CRUISE_OCR_SYSTEM_PROMPT,

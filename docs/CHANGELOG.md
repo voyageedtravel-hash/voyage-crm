@@ -147,3 +147,26 @@ For every completed task:
   - **Breaking change:** No (library only, no UI code, existing App.js untouched)
   - **Status:** Production Ready (library layer; UI wires up Phase 3-5)
   - **Version:** V2.0.0-alpha.4
+
+
+## [V2.0.0-alpha.5] — 2026-08-03 (Quotation Builder)
+
+### Added
+- **[2026-08-03] Quotation module — schema, tier pricing, payment schedule, PDF-ready data**
+  - **Files added:** `packages/shared/src/logic/quotation/index.js`, `packages/shared/tests/quotation.test.js`, `frontend/src/components/v2/QuotationBuilder/index.js`, `mockups/quotation-builder.html`
+  - **Reason:** The quotation is what the client sees BEFORE they book — separate from the internal deal. Vishal's real workflow needs multi-tier pricing (Standard / Deluxe / Premium / Luxury), multi-destination support (Vietnam + Cambodia as one quotation), version tracking (revisions preserve parent), and a clean per-tier inclusion/exclusion menu.
+    - `QUOTATION_TIERS` — 4 standard tiers with Voyage-Ed brand colors mapped in (navy, gold, navy-light, neutral)
+    - `COMMON_INCLUSIONS` / `COMMON_EXCLUSIONS` — 10 items each, prevent retyping every quote
+    - `computeTierPricing()` — per-tier total with adult × count + single supplement + child pricing
+    - `computeCombinedPricing()` — multi-destination roll-up per tier
+    - `materialisePaymentSchedule()` — 25% booking / 25% visa / 50% 30-days-before-travel with real dates
+    - `buildQuotationFromDeal()` — bootstrap quotation from existing deal with 3 tiers pre-populated
+    - `reviseQuotation()` — creates v2/v3 with audit trail to parent
+    - `generateQuotationNumber()` — VE-Q-YYMM-XXXX-VV format matching deal number style
+  - **UI component:** `QuotationBuilder` React component ready to gate behind `newQuotationBuilder` feature flag. Uses V2 design tokens inline (navy + gold, Playfair Display for headings, JetBrains Mono for prices). 3-tier cards with real-time recompute, editable per-tier pricing, selected-tier inclusions/exclusions, payment schedule table, dark navy total banner.
+  - **HTML preview** at `mockups/quotation-builder.html` renders the exact design for approval before wiring into App.js.
+  - **38 unit tests** covering Kirti Vietnam 2-adult scenario (₹2,50,000 Deluxe), family with kids (4 pax across 2 destinations), solo with supplement, multi-destination roll-up, payment schedule dates, versioning with parent trail, null safety.
+  - **Cumulative test count:** **138 tests across 5 files, all passing**
+  - **Breaking change:** No (new module + new UI file, gated behind flag)
+  - **Status:** Production Ready (library + UI component; wire into Deal Detail in Phase 5)
+  - **Version:** V2.0.0-alpha.5
