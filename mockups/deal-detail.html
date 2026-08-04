@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voyage-Ed V2 — Deal Detail</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../frontend/src/voyage-shell.css">
+<link rel="stylesheet" href="../frontend/src/v2/voyage-v2-pages.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { padding-left: 240px; background: #f4f6fb; font-family: 'Inter', sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="v-sidebar">
+  <div class="v-sb-brand">
+    <div class="v-sb-brand-mark">V</div>
+    <div class="v-sb-brand-text">
+      <div class="v-sb-brand-name">Voyage-Ed</div>
+      <div class="v-sb-brand-sub">Travels</div>
+    </div>
+  </div>
+
+  <div class="v-sb-section">Overview</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Dashboard</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">✦</span><span class="v-sb-item-label">AI Insights</span></button>
+  </div>
+
+  <div class="v-sb-section">Sales</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◐</span><span class="v-sb-item-label">Leads</span><span class="v-sb-item-badge">12</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◑</span><span class="v-sb-item-label">Clients</span></button>
+    <button class="v-sb-item active"><span class="v-sb-item-icon">◈</span><span class="v-sb-item-label">Deals</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◒</span><span class="v-sb-item-label">Proposals</span></button>
+  </div>
+
+  <div class="v-sb-section">Operations</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◇</span><span class="v-sb-item-label">Vendors</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◊</span><span class="v-sb-item-label">Visa Filings</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">●</span><span class="v-sb-item-label">Tasks</span><span class="v-sb-item-badge">5</span></button>
+  </div>
+
+  <div class="v-sb-section">Finance</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Accounts</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◕</span><span class="v-sb-item-label">Reports</span></button>
+  </div>
+
+  <div class="v-sb-user">
+    <div class="v-sb-user-avatar">V</div>
+    <div class="v-sb-user-text">
+      <div class="v-sb-user-name">Vishal Sharma</div>
+      <div class="v-sb-user-role">Founder</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="v2-page">
+  <div class="v2-crumb">
+    <a class="v2-crumb-link" href="#">Deals</a> &rsaquo; <a class="v2-crumb-link" href="#">All Deals</a> &rsaquo; <span class="v2-crumb-current">VE-2608-K7QA</span> · Kirti Malhotra · Vietnam
+  </div>
+
+  <!-- Deal Hero -->
+  <div class="v2-deal-hero">
+    <div class="v2-deal-hero-top">
+      <div class="v2-hero-chips">
+        <span class="v2-hero-chip gold">+ VIP Client</span>
+        <span class="v2-hero-chip green">◆ Booked · Confirmed</span>
+        <span class="v2-hero-chip dark">◇ 2 Days to Departure</span>
+      </div>
+      <div class="v2-hero-actions">
+        <button class="v2-hero-btn">◆ WhatsApp</button>
+        <button class="v2-hero-btn">✉ Email</button>
+        <button class="v2-hero-btn gold">📄 Proposal PDF</button>
+      </div>
+    </div>
+    <div class="v2-hero-dealnum">VE-2608-K7QA</div>
+    <h1 class="v2-hero-title">Trip to Vietnam</h1>
+    <div class="v2-hero-subtitle">Kirti Malhotra · 2 pax · Deluxe experience · Anniversary</div>
+    <div class="v2-hero-facts">
+      <div>
+        <div class="v2-hero-fact-label">Destination</div>
+        <div class="v2-hero-fact-value">🇻🇳 Vietnam</div>
+      </div>
+      <div>
+        <div class="v2-hero-fact-label">Travel Dates</div>
+        <div class="v2-hero-fact-value">6 Oct → 13 Oct</div>
+      </div>
+      <div>
+        <div class="v2-hero-fact-label">Duration</div>
+        <div class="v2-hero-fact-value">7 Nights / 8 Days</div>
+      </div>
+      <div>
+        <div class="v2-hero-fact-label">Total Value</div>
+        <div class="v2-hero-fact-value gold">₹2,35,000</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Finance Ribbon (sticky) -->
+  <div class="v2-finance-ribbon">
+    <div>
+      <div class="v2-fin-label">Selling Price</div>
+      <div class="v2-fin-value">₹2,35,000</div>
+      <div class="v2-fin-sub">Client final quote</div>
+    </div>
+    <div>
+      <div class="v2-fin-label">Vendor Cost</div>
+      <div class="v2-fin-value">₹1,92,400</div>
+      <div class="v2-fin-sub">Total to suppliers</div>
+    </div>
+    <div>
+      <div class="v2-fin-label">GPM (Profit)</div>
+      <div class="v2-fin-value gold">₹42,600</div>
+      <div class="v2-fin-sub green">18.1% margin</div>
+    </div>
+    <div>
+      <div class="v2-fin-label">Client Paid</div>
+      <div class="v2-fin-value green">₹1,90,000</div>
+      <div class="v2-fin-sub">80.9% collected</div>
+    </div>
+    <div>
+      <div class="v2-fin-label">Balance Due</div>
+      <div class="v2-fin-value warn">₹45,000</div>
+      <div class="v2-fin-sub warn">Due 4 Oct · 2 days</div>
+    </div>
+  </div>
+
+  <!-- Two column: main + sidebar -->
+  <div class="v2-deal-layout">
+    <div>
+
+      <!-- Client & Travellers -->
+      <div class="v2-acc">
+        <div class="v2-acc-head">
+          <div class="v2-acc-icon blue">▸</div>
+          <div class="v2-acc-title-block">
+            <h3 class="v2-acc-title">Client &amp; Travellers</h3>
+            <div class="v2-acc-meta">Contact details, passport docs, preferences</div>
+          </div>
+          <div class="v2-acc-actions">
+            <button class="v2-acc-btn-sm">📷 Scan Passport</button>
+            <button class="v2-acc-btn-primary">+ Add Traveller</button>
+          </div>
+        </div>
+        <div class="v2-acc-body">
+          <div class="v2-client-grid">
+            <div>
+              <div class="v2-client-field-label">Client Name</div>
+              <div class="v2-client-field-value">Kirti Malhotra</div>
+            </div>
+            <div>
+              <div class="v2-client-field-label">Phone</div>
+              <div class="v2-client-field-value" style="font-family:'JetBrains Mono',monospace">+91 98765 12345</div>
+            </div>
+            <div>
+              <div class="v2-client-field-label">Email</div>
+              <div class="v2-client-field-value">kirti.m@gmail.com</div>
+            </div>
+            <div>
+              <div class="v2-client-field-label">City</div>
+              <div class="v2-client-field-value">New Delhi</div>
+            </div>
+            <div>
+              <div class="v2-client-field-label">Source</div>
+              <div class="v2-client-field-value">Referral · Nikhil A.</div>
+            </div>
+            <div>
+              <div class="v2-client-field-label">Occasion</div>
+              <div class="v2-client-field-value">Anniversary</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Flights -->
+      <div class="v2-acc">
+        <div class="v2-acc-head">
+          <div class="v2-acc-icon">✈</div>
+          <div class="v2-acc-title-block">
+            <h3 class="v2-acc-title">Flights</h3>
+            <div class="v2-acc-meta">5 sectors · Multi-city · Vietnam Airlines + VietJet</div>
+          </div>
+          <div class="v2-acc-actions">
+            <button class="v2-acc-btn-sm">📷 Scan Ticket</button>
+            <button class="v2-acc-btn-primary">+ Add Flight</button>
+          </div>
+        </div>
+        <div class="v2-acc-body">
+
+          <div class="v2-flight-card">
+            <div class="v2-flight-head">
+              <div class="v2-airline-code">VN</div>
+              <div class="v2-flight-info">
+                <div class="v2-flight-airline">Vietnam Airlines <span style="color:#c9a84c;font-size:11px">★</span></div>
+                <div class="v2-flight-meta">Trip Jack · Multi-city · Economy · 20kg baggage</div>
+              </div>
+              <div class="v2-flight-price">
+                <div class="v2-flight-price-val">₹68,400</div>
+                <div class="v2-flight-price-sub">4 sectors total</div>
+              </div>
+            </div>
+
+            <div class="v2-flight-leg">
+              <div>
+                <div class="v2-flight-city">DEL</div>
+                <div class="v2-flight-airport">New Delhi</div>
+                <div class="v2-flight-time">23:35</div>
+                <div class="v2-flight-date">Tue, 6 Oct 2026</div>
+              </div>
+              <div class="v2-flight-duration">
+                <div>5h 30m</div>
+                <div style="border-top:1px dashed #d4dcec;margin-top:8px;width:100px"></div>
+              </div>
+              <div class="v2-flight-right">
+                <div class="v2-flight-city">SGN</div>
+                <div class="v2-flight-airport">Ho Chi Minh City</div>
+                <div class="v2-flight-time">06:05 <span style="color:#c9a84c;font-size:10px">+1</span></div>
+                <div class="v2-flight-date">Wed, 7 Oct 2026</div>
+              </div>
+            </div>
+
+            <div class="v2-flight-leg">
+              <div>
+                <div class="v2-flight-city">SGN</div>
+                <div class="v2-flight-airport">Ho Chi Minh</div>
+                <div class="v2-flight-time">08:00</div>
+                <div class="v2-flight-date">Wed, 7 Oct</div>
+              </div>
+              <div class="v2-flight-duration">
+                <div>1h 20m</div>
+                <div style="border-top:1px dashed #d4dcec;margin-top:8px;width:100px"></div>
+              </div>
+              <div class="v2-flight-right">
+                <div class="v2-flight-city">DAD</div>
+                <div class="v2-flight-airport">Da Nang</div>
+                <div class="v2-flight-time">09:20</div>
+                <div class="v2-flight-date">Wed, 7 Oct</div>
+              </div>
+            </div>
+
+            <div class="v2-pay-bar">
+              <div class="v2-pay-progress">
+                <div class="v2-pay-progress-fill" style="width:100%"></div>
+              </div>
+              <div class="v2-pay-row">
+                <span>Paid: <b>₹68,400</b> / ₹68,400</span>
+                <span class="v2-pay-status paid">✓ Fully Paid</span>
+                <button class="v2-acc-btn-sm">+ Add Payment</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hotels -->
+      <div class="v2-acc">
+        <div class="v2-acc-head">
+          <div class="v2-acc-icon">🏨</div>
+          <div class="v2-acc-title-block">
+            <h3 class="v2-acc-title">Hotels</h3>
+            <div class="v2-acc-meta">2 properties · 6 nights · Breakfast included</div>
+          </div>
+          <div class="v2-acc-actions">
+            <button class="v2-acc-btn-sm">📷 Scan Voucher</button>
+            <button class="v2-acc-btn-primary">+ Add Hotel</button>
+          </div>
+        </div>
+        <div class="v2-acc-body">
+
+          <!-- Radisson Danang -->
+          <div class="v2-hotel-card">
+            <div class="v2-hotel-head">
+              <div class="v2-hotel-code">R</div>
+              <div class="v2-hotel-info">
+                <div class="v2-hotel-name">Radisson Hotel Danang <span class="stars">★★★★★</span></div>
+                <div class="v2-hotel-meta">Deluxe Room · Breakfast · 3 nights</div>
+              </div>
+              <div class="v2-hotel-price">
+                <div class="v2-hotel-price-val">₹54,600</div>
+                <div class="v2-hotel-price-sub">USD 635 @ 86</div>
+              </div>
+            </div>
+
+            <div class="v2-hotel-facts">
+              <div>
+                <div class="v2-hotel-fact-lbl">Check-in</div>
+                <div class="v2-hotel-fact-val">7 Oct 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Check-out</div>
+                <div class="v2-hotel-fact-val">10 Oct 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Confirmation</div>
+                <div class="v2-hotel-fact-val" style="font-family:'JetBrains Mono',monospace">RDS-4471982</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Meal Plan</div>
+                <div class="v2-hotel-fact-val">CP · Breakfast</div>
+              </div>
+            </div>
+
+            <div class="v2-pay-bar">
+              <div class="v2-pay-progress">
+                <div class="v2-pay-progress-fill amber" style="width:65%"></div>
+              </div>
+              <div class="v2-pay-row">
+                <span>Paid: <b>₹35,500</b> / ₹54,600</span>
+                <span class="v2-pay-status due">₹19,100 due</span>
+                <button class="v2-acc-btn-sm">+ Add Payment</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Radisson Blu Phu Quoc -->
+          <div class="v2-hotel-card">
+            <div class="v2-hotel-head">
+              <div class="v2-hotel-code">RB</div>
+              <div class="v2-hotel-info">
+                <div class="v2-hotel-name">Radisson Blu Resort Phu Quoc <span class="stars">★★★★★</span></div>
+                <div class="v2-hotel-meta">Deluxe Room King · Breakfast · 3 nights</div>
+              </div>
+              <div class="v2-hotel-price">
+                <div class="v2-hotel-price-val">₹72,800</div>
+                <div class="v2-hotel-price-sub">USD 847 @ 86</div>
+              </div>
+            </div>
+
+            <div class="v2-hotel-facts">
+              <div>
+                <div class="v2-hotel-fact-lbl">Check-in</div>
+                <div class="v2-hotel-fact-val">10 Oct 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Check-out</div>
+                <div class="v2-hotel-fact-val">13 Oct 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Confirmation</div>
+                <div class="v2-hotel-fact-val" style="font-family:'JetBrains Mono',monospace">RBPQ-8842305</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Meal Plan</div>
+                <div class="v2-hotel-fact-val">CP · Breakfast</div>
+              </div>
+            </div>
+
+            <div class="v2-pay-bar">
+              <div class="v2-pay-progress">
+                <div class="v2-pay-progress-fill amber" style="width:45%"></div>
+              </div>
+              <div class="v2-pay-row">
+                <span>Paid: <b>₹32,760</b> / ₹72,800</span>
+                <span class="v2-pay-status due">₹40,040 due</span>
+                <button class="v2-acc-btn-sm">+ Add Payment</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visa -->
+      <div class="v2-acc">
+        <div class="v2-acc-head">
+          <div class="v2-acc-icon">◇</div>
+          <div class="v2-acc-title-block">
+            <h3 class="v2-acc-title">Visa</h3>
+            <div class="v2-acc-meta">Vietnam e-Visa · Multiple entry · 90 days</div>
+          </div>
+          <div class="v2-acc-actions">
+            <button class="v2-acc-btn-primary">+ Add Visa</button>
+          </div>
+        </div>
+        <div class="v2-acc-body">
+          <div class="v2-hotel-card">
+            <div class="v2-hotel-head">
+              <div class="v2-hotel-code">VE</div>
+              <div class="v2-hotel-info">
+                <div class="v2-hotel-name">Vietnam e-Visa (Official Portal)</div>
+                <div class="v2-hotel-meta">evisa.gov.vn · Multi-entry · 2 travellers</div>
+              </div>
+              <div class="v2-hotel-price">
+                <div class="v2-hotel-price-val">₹8,800</div>
+                <div class="v2-hotel-price-sub">USD 50 × 2</div>
+              </div>
+            </div>
+
+            <div class="v2-hotel-facts">
+              <div>
+                <div class="v2-hotel-fact-lbl">Application Date</div>
+                <div class="v2-hotel-fact-val">18 Sep 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Approved</div>
+                <div class="v2-hotel-fact-val" style="color:#059669">✓ 22 Sep 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Valid Until</div>
+                <div class="v2-hotel-fact-val">21 Dec 2026</div>
+              </div>
+              <div>
+                <div class="v2-hotel-fact-lbl">Entry Type</div>
+                <div class="v2-hotel-fact-val">Multiple</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right sidebar -->
+    <div>
+      <!-- AI Deal Insights (dark card) -->
+      <div class="v2-side-card ai">
+        <div class="v2-side-title-row">
+          <div class="v2-side-icon">✦</div>
+          <h4 class="v2-side-title">AI Deal Insights</h4>
+        </div>
+        <div class="v2-ai-body">
+          This deal is <b>tracking healthy</b> with an 18.1% margin. Two flags:
+        </div>
+        <ul class="v2-ai-list">
+          <li>Client balance <b>₹45k due in 2 days</b> — send reminder</li>
+          <li>Hotel vendors need <b>₹59k</b> before 4 Oct check-in</li>
+        </ul>
+        <div class="v2-ai-body" style="margin-top:14px">
+          Compared to similar Vietnam deals this quarter, this one is <b>₹8,400 above average margin</b>.
+        </div>
+        <button class="v2-ai-cta">+ Ask AI about this deal</button>
+      </div>
+
+      <!-- Payment Schedule -->
+      <div class="v2-side-card">
+        <div class="v2-side-panel-head">
+          <span class="v2-side-panel-title">Payment Schedule</span>
+          <a class="v2-side-link" href="#">View all →</a>
+        </div>
+
+        <div class="v2-schedule-row">
+          <div>
+            <div class="v2-schedule-milestone">Booking Deposit</div>
+            <div class="v2-schedule-date">15 Aug 2026</div>
+          </div>
+          <div class="v2-schedule-amount">
+            <div class="v2-schedule-amount-val">₹90,000</div>
+            <div class="v2-schedule-status paid">Paid</div>
+          </div>
+        </div>
+
+        <div class="v2-schedule-row">
+          <div>
+            <div class="v2-schedule-milestone">Second Instalment</div>
+            <div class="v2-schedule-date">12 Sep 2026</div>
+          </div>
+          <div class="v2-schedule-amount">
+            <div class="v2-schedule-amount-val">₹1,00,000</div>
+            <div class="v2-schedule-status paid">Paid</div>
+          </div>
+        </div>
+
+        <div class="v2-schedule-row">
+          <div>
+            <div class="v2-schedule-milestone">Final Balance</div>
+            <div class="v2-schedule-date">4 Oct 2026 · 2 days</div>
+          </div>
+          <div class="v2-schedule-amount">
+            <div class="v2-schedule-amount-val">₹45,000</div>
+            <div class="v2-schedule-status due">Due</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Documents -->
+      <div class="v2-side-card">
+        <div class="v2-side-panel-head">
+          <span class="v2-side-panel-title">Documents</span>
+          <a class="v2-side-link" href="#">+ Upload</a>
+        </div>
+
+        <div class="v2-doc-row">
+          <div class="v2-doc-icon">📄</div>
+          <div>
+            <div class="v2-doc-name">Proposal_VE-2608-K7QA_v3.pdf</div>
+            <div class="v2-doc-meta">245 KB · 18 Aug 2026</div>
+          </div>
+        </div>
+
+        <div class="v2-doc-row">
+          <div class="v2-doc-icon">🛂</div>
+          <div>
+            <div class="v2-doc-name">Kirti_Passport.jpg</div>
+            <div class="v2-doc-meta">1.2 MB · <span class="verified">Verified ✓</span></div>
+          </div>
+        </div>
+
+        <div class="v2-doc-row">
+          <div class="v2-doc-icon">🛂</div>
+          <div>
+            <div class="v2-doc-name">Rohit_Passport.jpg</div>
+            <div class="v2-doc-meta">1.1 MB · <span class="verified">Verified ✓</span></div>
+          </div>
+        </div>
+
+        <div class="v2-doc-row">
+          <div class="v2-doc-icon">📄</div>
+          <div>
+            <div class="v2-doc-name">Vietnam_eVisa_Approval.pdf</div>
+            <div class="v2-doc-meta">380 KB · 22 Sep 2026</div>
+          </div>
+        </div>
+
+        <div class="v2-doc-row">
+          <div class="v2-doc-icon">📄</div>
+          <div>
+            <div class="v2-doc-name">Radisson_Danang_Voucher.pdf</div>
+            <div class="v2-doc-meta">210 KB · 24 Sep 2026</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity -->
+      <div class="v2-side-card">
+        <div class="v2-side-panel-head">
+          <span class="v2-side-panel-title">Activity</span>
+        </div>
+
+        <div class="v2-activity-item">
+          <div class="v2-activity-dot navy"></div>
+          <div class="v2-activity-body">
+            <div class="v2-activity-title">Final balance reminder sent</div>
+            <div class="v2-activity-meta">Today · 4:30 PM · Vishal</div>
+          </div>
+        </div>
+
+        <div class="v2-activity-item">
+          <div class="v2-activity-dot"></div>
+          <div class="v2-activity-body">
+            <div class="v2-activity-title">Hotel voucher shared</div>
+            <div class="v2-activity-meta">24 Sep · Sahitya</div>
+          </div>
+        </div>
+
+        <div class="v2-activity-item">
+          <div class="v2-activity-dot"></div>
+          <div class="v2-activity-body">
+            <div class="v2-activity-title">Visa approved</div>
+            <div class="v2-activity-meta">22 Sep · Auto</div>
+          </div>
+        </div>
+
+        <div class="v2-activity-item">
+          <div class="v2-activity-dot"></div>
+          <div class="v2-activity-body">
+            <div class="v2-activity-title">Deal marked BOOKED</div>
+            <div class="v2-activity-meta">15 Aug · Vishal</div>
+          </div>
+        </div>
+
+        <div class="v2-activity-item">
+          <div class="v2-activity-dot"></div>
+          <div class="v2-activity-body">
+            <div class="v2-activity-title">Proposal sent (v3)</div>
+            <div class="v2-activity-meta">12 Aug · Vishal</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

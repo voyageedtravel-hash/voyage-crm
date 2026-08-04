@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voyage-Ed V2 — Leads</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../frontend/src/voyage-shell.css">
+<link rel="stylesheet" href="../frontend/src/v2/voyage-v2-pages.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { padding-left: 240px; background: #f4f6fb; font-family: 'Inter', sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="v-sidebar">
+  <div class="v-sb-brand">
+    <div class="v-sb-brand-mark">V</div>
+    <div class="v-sb-brand-text">
+      <div class="v-sb-brand-name">Voyage-Ed</div>
+      <div class="v-sb-brand-sub">Travels</div>
+    </div>
+  </div>
+
+  <div class="v-sb-section">Overview</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Dashboard</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">✦</span><span class="v-sb-item-label">AI Insights</span></button>
+  </div>
+
+  <div class="v-sb-section">Sales</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item active"><span class="v-sb-item-icon">◐</span><span class="v-sb-item-label">Leads</span><span class="v-sb-item-badge">12</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◑</span><span class="v-sb-item-label">Clients</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◈</span><span class="v-sb-item-label">Deals</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◒</span><span class="v-sb-item-label">Proposals</span></button>
+  </div>
+
+  <div class="v-sb-section">Operations</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◇</span><span class="v-sb-item-label">Vendors</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◊</span><span class="v-sb-item-label">Visa Filings</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">●</span><span class="v-sb-item-label">Tasks</span><span class="v-sb-item-badge">5</span></button>
+  </div>
+
+  <div class="v-sb-section">Finance</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Accounts</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◕</span><span class="v-sb-item-label">Reports</span></button>
+  </div>
+
+  <div class="v-sb-user">
+    <div class="v-sb-user-avatar">V</div>
+    <div class="v-sb-user-text">
+      <div class="v-sb-user-name">Vishal Sharma</div>
+      <div class="v-sb-user-role">Founder</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="v2-page">
+  <div class="v2-page-header">
+    <div>
+      <h1 class="v2-page-title">Leads</h1>
+      <p class="v2-page-sub">Manage every enquiry from first contact to booking · Business month view</p>
+    </div>
+    <div class="v2-header-actions">
+      <button class="v2-cta">+ New Lead</button>
+    </div>
+  </div>
+
+  <!-- KPI ribbon -->
+  <div class="v2-leads-kpis">
+    <div class="v2-lead-kpi hot">
+      <div class="v2-lead-kpi-label">Hot Leads</div>
+      <div class="v2-lead-kpi-value">4</div>
+      <div class="v2-lead-kpi-sub">Need follow-up today</div>
+    </div>
+    <div class="v2-lead-kpi warm">
+      <div class="v2-lead-kpi-label">Warm Leads</div>
+      <div class="v2-lead-kpi-value">8</div>
+      <div class="v2-lead-kpi-sub">Follow-up in 2–3 days</div>
+    </div>
+    <div class="v2-lead-kpi cold">
+      <div class="v2-lead-kpi-label">Cold Leads</div>
+      <div class="v2-lead-kpi-value">15</div>
+      <div class="v2-lead-kpi-sub">Not responded to quote</div>
+    </div>
+    <div class="v2-lead-kpi converted">
+      <div class="v2-lead-kpi-label">Converted MTD</div>
+      <div class="v2-lead-kpi-value">7</div>
+      <div class="v2-lead-kpi-sub">₹18.4L total value</div>
+    </div>
+    <div class="v2-lead-kpi rate">
+      <div class="v2-lead-kpi-label">Conversion Rate</div>
+      <div class="v2-lead-kpi-value">24%</div>
+      <div class="v2-lead-kpi-sub">Above 20% target</div>
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="v2-filter-bar">
+    <input type="text" class="v2-filter-search" placeholder="Search name, phone, destination, or note…">
+    <button class="v2-filter-chip active">All <span class="count">27</span></button>
+    <button class="v2-filter-chip">Hot <span class="count">4</span></button>
+    <button class="v2-filter-chip">Warm <span class="count">8</span></button>
+    <button class="v2-filter-chip">Cold <span class="count">15</span></button>
+    <button class="v2-filter-chip">By Source ▾</button>
+    <button class="v2-filter-chip">By Destination ▾</button>
+  </div>
+
+  <!-- Two-column layout -->
+  <div class="v2-leads-layout">
+    <!-- Left: Active Leads list -->
+    <div class="v2-leads-list">
+      <div class="v2-leads-list-head">
+        <div>
+          <h3 class="v2-leads-list-title">Active Leads <span class="v2-leads-count">27</span></h3>
+        </div>
+        <select class="v2-select">
+          <option>Priority: Highest</option>
+          <option>Recent</option>
+          <option>By Value</option>
+        </select>
+      </div>
+
+      <!-- Nikhil - selected -->
+      <div class="v2-lead-card selected">
+        <div class="v2-lead-avatar" style="background:linear-gradient(135deg,#f97316,#ea580c)">NA</div>
+        <div class="v2-lead-main">
+          <div class="v2-lead-namerow">
+            <span class="v2-lead-name">Nikhil Agarwal</span>
+            <span class="v2-chip hot">Hot</span>
+            <span class="v2-chip vip">VIP</span>
+          </div>
+          <div>
+            <span class="v2-lead-phone">+91 98765 43210</span>
+            <span class="v2-lead-source">Instagram</span>
+          </div>
+          <div class="v2-lead-trip">🇲🇻 Maldives · 5N · Overwater villa · 2 pax</div>
+          <div class="v2-lead-note">Anniversary trip in October. Budget flexible, wants premium villa. Wife's food preference vegetarian. Return client — did Bali last year with us.</div>
+        </div>
+        <div class="v2-lead-meta">
+          <div class="v2-lead-value">₹1.85L</div>
+          <div class="v2-lead-time">2h ago</div>
+          <div class="v2-lead-mini-actions">
+            <button class="v2-lead-mini-btn">◇</button>
+            <button class="v2-lead-mini-btn">◐</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Neha -->
+      <div class="v2-lead-card">
+        <div class="v2-lead-avatar" style="background:linear-gradient(135deg,#14b8a6,#0d9488)">NK</div>
+        <div class="v2-lead-main">
+          <div class="v2-lead-namerow">
+            <span class="v2-lead-name">Neha Kapoor</span>
+            <span class="v2-chip warm">Warm</span>
+          </div>
+          <div>
+            <span class="v2-lead-phone">+91 99887 65432</span>
+            <span class="v2-lead-source">Website</span>
+          </div>
+          <div class="v2-lead-trip">🇯🇵 Japan · 8N · Cherry blossom season · Family of 4</div>
+          <div class="v2-lead-note">Quote sent for ₹4.8L family package. Awaiting visa documents. Follow up on 4 Aug.</div>
+        </div>
+        <div class="v2-lead-meta">
+          <div class="v2-lead-value">₹4.80L</div>
+          <div class="v2-lead-time">1d ago</div>
+          <div class="v2-lead-mini-actions">
+            <button class="v2-lead-mini-btn">◇</button>
+            <button class="v2-lead-mini-btn">◐</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Meera -->
+      <div class="v2-lead-card">
+        <div class="v2-lead-avatar" style="background:linear-gradient(135deg,#a855f7,#7e22ce)">MS</div>
+        <div class="v2-lead-main">
+          <div class="v2-lead-namerow">
+            <span class="v2-lead-name">Meera Sethi</span>
+            <span class="v2-chip hot">Hot</span>
+          </div>
+          <div>
+            <span class="v2-lead-phone">+91 98123 45678</span>
+            <span class="v2-lead-source" style="background:#faf1dc;color:#c9a84c">Referral · Kirti M.</span>
+          </div>
+          <div class="v2-lead-trip">🇪🇺 Europe · 12N · France + Switzerland + Italy · 2 pax</div>
+          <div class="v2-lead-note">Referred by Kirti Malhotra. Interested in luxury package, budget ~₹5L pp. Wants quote by tomorrow.</div>
+        </div>
+        <div class="v2-lead-meta">
+          <div class="v2-lead-value">₹10L</div>
+          <div class="v2-lead-time">3h ago</div>
+          <div class="v2-lead-mini-actions">
+            <button class="v2-lead-mini-btn">◇</button>
+            <button class="v2-lead-mini-btn">◐</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rohit -->
+      <div class="v2-lead-card">
+        <div class="v2-lead-avatar" style="background:linear-gradient(135deg,#b45309,#92400e)">RS</div>
+        <div class="v2-lead-main">
+          <div class="v2-lead-namerow">
+            <span class="v2-lead-name">Rohit Sharma</span>
+            <span class="v2-chip cold">Cold</span>
+          </div>
+          <div>
+            <span class="v2-lead-phone">+91 98876 54321</span>
+            <span class="v2-lead-source">WhatsApp</span>
+          </div>
+          <div class="v2-lead-trip">🇦🇪 Dubai · 4N · Family staycation · 3 pax</div>
+        </div>
+        <div class="v2-lead-meta">
+          <div class="v2-lead-value">₹1.32L</div>
+          <div class="v2-lead-time">5d ago</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Selected lead detail -->
+    <div class="v2-lead-detail">
+      <div class="v2-detail-head">
+        <div class="v2-detail-head-top">
+          <span class="v2-detail-head-chip">◆ Hot Lead</span>
+          <div class="v2-detail-head-actions">
+            <button class="v2-detail-icon">◇</button>
+            <button class="v2-detail-icon">☏</button>
+            <button class="v2-detail-icon">✉</button>
+            <button class="v2-detail-icon">⋯</button>
+          </div>
+        </div>
+        <h2 class="v2-detail-name">Nikhil Agarwal</h2>
+        <div class="v2-detail-phone">+91 98765 43210</div>
+        <div class="v2-detail-tags">
+          <span class="v2-detail-tag gold">✦ VIP · 2 past trips</span>
+          <span class="v2-detail-tag">Instagram lead</span>
+          <span class="v2-detail-tag">Anniversary</span>
+        </div>
+      </div>
+
+      <div class="v2-detail-body">
+        <div class="v2-detail-section-title">Trip Details</div>
+        <div class="v2-detail-grid">
+          <div>
+            <div class="v2-detail-field-label">Destination</div>
+            <div class="v2-detail-field-value">🇲🇻 Maldives</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Nights</div>
+            <div class="v2-detail-field-value">5 nights · 6 days</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Travellers</div>
+            <div class="v2-detail-field-value">2 Adults</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Category</div>
+            <div class="v2-detail-field-value">Luxury · Overwater villa</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Preferred Dates</div>
+            <div class="v2-detail-field-value">12 Oct → 17 Oct 2026</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Budget Range</div>
+            <div class="v2-detail-field-value">₹1.8L – ₹2.2L</div>
+          </div>
+        </div>
+
+        <div class="v2-detail-section-title">Preferences (from history)</div>
+        <div class="v2-detail-grid">
+          <div>
+            <div class="v2-detail-field-label">Food</div>
+            <div class="v2-detail-field-value">Vegetarian (wife)</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Airline</div>
+            <div class="v2-detail-field-value">Emirates preferred</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Seat</div>
+            <div class="v2-detail-field-value">Business preferred</div>
+          </div>
+          <div>
+            <div class="v2-detail-field-label">Past Trips</div>
+            <div class="v2-detail-field-value">Bali (2025), Thailand (2024)</div>
+          </div>
+        </div>
+
+        <div class="v2-detail-cta-row">
+          <button class="v2-detail-cta primary">◇ Convert to Deal</button>
+          <button class="v2-detail-cta">◆ Send Proposal</button>
+          <button class="v2-detail-cta">+ Add Note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

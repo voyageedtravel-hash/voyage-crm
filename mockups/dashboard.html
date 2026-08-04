@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voyage-Ed V2 — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../frontend/src/voyage-shell.css">
+<link rel="stylesheet" href="../frontend/src/v2/voyage-v2-pages.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { padding-left: 240px; background: #f4f6fb; font-family: 'Inter', sans-serif; }
+  .chart-svg { width: 100%; height: 220px; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="v-sidebar">
+  <div class="v-sb-brand">
+    <div class="v-sb-brand-mark">V</div>
+    <div class="v-sb-brand-text">
+      <div class="v-sb-brand-name">Voyage-Ed</div>
+      <div class="v-sb-brand-sub">Travels</div>
+    </div>
+  </div>
+
+  <div class="v-sb-section">Overview</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item active"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Dashboard</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">✦</span><span class="v-sb-item-label">AI Insights</span></button>
+  </div>
+
+  <div class="v-sb-section">Sales</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◐</span><span class="v-sb-item-label">Leads</span><span class="v-sb-item-badge">12</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◑</span><span class="v-sb-item-label">Clients</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◈</span><span class="v-sb-item-label">Deals</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◒</span><span class="v-sb-item-label">Proposals</span></button>
+  </div>
+
+  <div class="v-sb-section">Operations</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◇</span><span class="v-sb-item-label">Vendors</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◊</span><span class="v-sb-item-label">Visa Filings</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">●</span><span class="v-sb-item-label">Tasks</span><span class="v-sb-item-badge">5</span></button>
+  </div>
+
+  <div class="v-sb-section">Finance</div>
+  <div class="v-sb-nav">
+    <button class="v-sb-item"><span class="v-sb-item-icon">◆</span><span class="v-sb-item-label">Accounts</span></button>
+    <button class="v-sb-item"><span class="v-sb-item-icon">◕</span><span class="v-sb-item-label">Reports</span></button>
+  </div>
+
+  <div class="v-sb-user">
+    <div class="v-sb-user-avatar">V</div>
+    <div class="v-sb-user-text">
+      <div class="v-sb-user-name">Vishal Sharma</div>
+      <div class="v-sb-user-role">Founder</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main class="v2-page">
+  <div class="v2-page-header">
+    <div>
+      <h1 class="v2-page-title">Good evening, Vishal</h1>
+      <p class="v2-page-sub">Saturday, 1 August 2026 &nbsp;·&nbsp; <span style="color:#c9a84c;font-weight:600">Business Month · 16 Jul → 15 Aug</span></p>
+    </div>
+    <div class="v2-header-actions">
+      <input type="text" class="v2-search" placeholder="Search clients, deals, vendors…">
+      <button class="v2-icon-btn">✦</button>
+      <button class="v2-icon-btn">⊕</button>
+    </div>
+  </div>
+
+  <!-- Business Health Hero -->
+  <div class="v2-health-hero">
+    <div class="v2-health-score">95</div>
+    <div class="v2-health-body">
+      <div class="v2-health-label">Business Health</div>
+      <div class="v2-health-message">Excellent · You're 18% ahead of last month</div>
+      <div class="v2-health-details">3 hot leads need follow-up · 2 payments overdue · Trip to Bali confirmed today</div>
+    </div>
+    <div class="v2-health-metric">
+      <div class="v2-health-metric-value">₹8.25L</div>
+      <div class="v2-health-metric-label">Today's Sales</div>
+    </div>
+    <div class="v2-health-metric">
+      <div class="v2-health-metric-value">₹2.14L</div>
+      <div class="v2-health-metric-label">Collections</div>
+    </div>
+  </div>
+
+  <!-- Today's Snapshot -->
+  <h2 class="v2-section-title">Today's Snapshot</h2>
+  <p class="v2-section-sub">Business month 16 Jul → 15 Aug · Real numbers, live</p>
+
+  <div class="v2-kpi-grid">
+    <div class="v2-kpi-card">
+      <div class="v2-kpi-icon green">◐</div>
+      <div class="v2-kpi-label">Collections</div>
+      <div class="v2-kpi-value">₹2,14,500</div>
+      <div class="v2-kpi-delta up">▲ 18% vs yesterday</div>
+    </div>
+    <div class="v2-kpi-card">
+      <div class="v2-kpi-icon blue">◈</div>
+      <div class="v2-kpi-label">Confirmed Bookings</div>
+      <div class="v2-kpi-value">7</div>
+      <div class="v2-kpi-delta up">▲ 2 vs yesterday</div>
+    </div>
+    <div class="v2-kpi-card">
+      <div class="v2-kpi-icon amber">◇</div>
+      <div class="v2-kpi-label">Vendor Payments</div>
+      <div class="v2-kpi-value">₹1,86,300</div>
+      <div class="v2-kpi-delta down">▼ 4 pending</div>
+    </div>
+    <div class="v2-kpi-card">
+      <div class="v2-kpi-icon gold">◆</div>
+      <div class="v2-kpi-label">Today's Profit</div>
+      <div class="v2-kpi-value">₹28,200</div>
+      <div class="v2-kpi-delta up">▲ 22% MTD</div>
+    </div>
+  </div>
+
+  <!-- Business Month Performance Chart -->
+  <div class="v2-chart-card">
+    <div class="v2-chart-header">
+      <div>
+        <h3 class="v2-chart-title">Business Month Performance</h3>
+        <p class="v2-chart-sub">Sales, collections, and profit trend · 16 Jul → 15 Aug</p>
+      </div>
+      <div class="v2-tabs">
+        <button class="v2-tab active">Sales</button>
+        <button class="v2-tab">Collections</button>
+        <button class="v2-tab">Profit</button>
+      </div>
+    </div>
+    <svg class="chart-svg" viewBox="0 0 800 220" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="chartGrad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="#c9a84c" stop-opacity="0.3"/>
+          <stop offset="1" stop-color="#c9a84c" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <!-- gridlines -->
+      <line x1="0" y1="30" x2="800" y2="30" stroke="#f4f6fb" stroke-width="1"/>
+      <line x1="0" y1="90" x2="800" y2="90" stroke="#f4f6fb" stroke-width="1"/>
+      <line x1="0" y1="150" x2="800" y2="150" stroke="#f4f6fb" stroke-width="1"/>
+      <!-- filled area -->
+      <path d="M 0,170 C 100,165 150,160 200,155 C 260,148 340,120 400,110 C 460,100 540,45 600,55 C 660,60 720,80 800,68 L 800,200 L 0,200 Z" fill="url(#chartGrad)"/>
+      <!-- line -->
+      <path d="M 0,170 C 100,165 150,160 200,155 C 260,148 340,120 400,110 C 460,100 540,45 600,55 C 660,60 720,80 800,68" stroke="#c9a84c" stroke-width="2.5" fill="none"/>
+      <!-- data points -->
+      <circle cx="200" cy="155" r="4" fill="#fff" stroke="#c9a84c" stroke-width="2"/>
+      <circle cx="400" cy="110" r="4" fill="#fff" stroke="#c9a84c" stroke-width="2"/>
+      <circle cx="600" cy="55" r="5" fill="#c9a84c"/>
+      <circle cx="720" cy="80" r="4" fill="#fff" stroke="#c9a84c" stroke-width="2"/>
+    </svg>
+    <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:#6b7a99;padding:0 4px">
+      <span>16 Jul</span>
+      <span>21 Jul</span>
+      <span>26 Jul</span>
+      <span>31 Jul</span>
+      <span>5 Aug</span>
+    </div>
+  </div>
+
+  <!-- Upcoming Departures + Follow-ups Today (two columns) -->
+  <div class="v2-two-col">
+    <div class="v2-panel">
+      <div class="v2-panel-header">
+        <h3 class="v2-panel-title">Upcoming Departures</h3>
+        <a class="v2-view-all" href="#">View all →</a>
+      </div>
+
+      <div class="v2-dep-row">
+        <div class="v2-dep-days">
+          <div class="v2-dep-days-num">2</div>
+          <div class="v2-dep-days-label">Days</div>
+        </div>
+        <div>
+          <div><span class="v2-dep-name">Kirti Malhotra</span><span class="v2-dep-dealnum">VE-2608-K7QA</span></div>
+          <div class="v2-dep-details">🇻🇳 Vietnam · 6 Oct → 13 Oct · 2 pax</div>
+        </div>
+        <div class="v2-dep-value">
+          <div class="v2-dep-amount">₹2,35,000</div>
+          <div class="v2-progress-dots"><span class="v2-dot"></span><span class="v2-dot"></span><span class="v2-dot amber"></span></div>
+          <div class="v2-dep-status pending">₹45k pending</div>
+        </div>
+      </div>
+
+      <div class="v2-dep-row">
+        <div class="v2-dep-days ok">
+          <div class="v2-dep-days-num">5</div>
+          <div class="v2-dep-days-label">Days</div>
+        </div>
+        <div>
+          <div><span class="v2-dep-name">Deepak Jaiswal</span><span class="v2-dep-dealnum">VE-2608-1TEQ</span></div>
+          <div class="v2-dep-details">🇹🇭 Thailand · 6 Aug → 11 Aug · 4 pax</div>
+        </div>
+        <div class="v2-dep-value">
+          <div class="v2-dep-amount">₹1,42,800</div>
+          <div class="v2-progress-dots"><span class="v2-dot"></span><span class="v2-dot"></span><span class="v2-dot"></span></div>
+          <div class="v2-dep-status paid">Fully paid ✓</div>
+        </div>
+      </div>
+
+      <div class="v2-dep-row">
+        <div class="v2-dep-days warn">
+          <div class="v2-dep-days-num">9</div>
+          <div class="v2-dep-days-label">Days</div>
+        </div>
+        <div>
+          <div><span class="v2-dep-name">Pranshu Goyal</span><span class="v2-dep-dealnum">VE-2608-ILP9</span></div>
+          <div class="v2-dep-details">🇮🇩 Bali · 10 Aug → 17 Aug · 2 pax</div>
+        </div>
+        <div class="v2-dep-value">
+          <div class="v2-dep-amount">₹1,84,000</div>
+          <div class="v2-progress-dots"><span class="v2-dot"></span><span class="v2-dot amber"></span><span class="v2-dot amber"></span></div>
+          <div class="v2-dep-status pending">₹92k pending</div>
+        </div>
+      </div>
+
+      <div class="v2-dep-row">
+        <div class="v2-dep-days warn">
+          <div class="v2-dep-days-num">14</div>
+          <div class="v2-dep-days-label">Days</div>
+        </div>
+        <div>
+          <div><span class="v2-dep-name">Ramakant Chauhan</span><span class="v2-dep-dealnum">VE-2608-URA9</span></div>
+          <div class="v2-dep-details">🇺🇸 USA · 15 Aug → 28 Aug · 2 pax</div>
+        </div>
+        <div class="v2-dep-value">
+          <div class="v2-dep-amount">₹6,10,000</div>
+          <div class="v2-progress-dots"><span class="v2-dot"></span><span class="v2-dot"></span><span class="v2-dot amber"></span></div>
+          <div class="v2-dep-status pending">₹1.2L pending</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="v2-panel">
+      <div class="v2-panel-header">
+        <h3 class="v2-panel-title">Follow-ups Today</h3>
+        <a class="v2-view-all" href="#">View all →</a>
+      </div>
+
+      <div class="v2-fu-row">
+        <div class="v2-fu-head">
+          <span class="v2-fu-name">Nikhil Agarwal</span>
+          <span class="v2-chip hot">Hot</span>
+        </div>
+        <div class="v2-fu-details">Maldives 5N · ₹1.85L quoted</div>
+        <div class="v2-fu-actions">
+          <button class="v2-mini-btn">☏ Call</button>
+          <button class="v2-mini-btn">◆ WhatsApp</button>
+          <button class="v2-mini-btn">◇ Convert</button>
+        </div>
+      </div>
+
+      <div class="v2-fu-row">
+        <div class="v2-fu-head">
+          <span class="v2-fu-name">Neha Kapoor</span>
+          <span class="v2-chip warm">Warm</span>
+        </div>
+        <div class="v2-fu-details">Japan 8N · Awaiting visa docs</div>
+        <div class="v2-fu-actions">
+          <button class="v2-mini-btn">☏ Call</button>
+          <button class="v2-mini-btn">◆ WhatsApp</button>
+          <button class="v2-mini-btn">✉ Email</button>
+        </div>
+      </div>
+
+      <div class="v2-fu-row">
+        <div class="v2-fu-head">
+          <span class="v2-fu-name">Rohit Sharma</span>
+          <span class="v2-chip cold">Cold</span>
+        </div>
+        <div class="v2-fu-details">Dubai 4N · Quote sent 5 days ago</div>
+        <div class="v2-fu-actions">
+          <button class="v2-mini-btn">☏ Call</button>
+          <button class="v2-mini-btn">◆ WhatsApp</button>
+        </div>
+      </div>
+
+      <div class="v2-fu-row">
+        <div class="v2-fu-head">
+          <span class="v2-fu-name">Meera Sethi</span>
+          <span class="v2-chip hot">Hot</span>
+        </div>
+        <div class="v2-fu-details">Europe 12N · Interested, needs quote</div>
+        <div class="v2-fu-actions">
+          <button class="v2-mini-btn">☏ Call</button>
+          <button class="v2-mini-btn">◇ Quote</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Destinations -->
+  <div class="v2-panel" style="margin-bottom:32px">
+    <div class="v2-panel-header">
+      <h3 class="v2-panel-title">Top Destinations · Business Month</h3>
+      <a class="v2-view-all" href="#">Analytics →</a>
+    </div>
+    <div class="v2-destinations">
+      <div class="v2-dest-card">
+        <div class="v2-dest-flag">🇻🇳</div>
+        <h4 class="v2-dest-name">Vietnam</h4>
+        <div class="v2-dest-labels">
+          <span>Bookings</span><span>Revenue</span>
+        </div>
+        <div class="v2-dest-stats">
+          <span class="v2-dest-bookings">8</span>
+          <span class="v2-dest-revenue">₹18.4L</span>
+        </div>
+        <div class="v2-kpi-delta up" style="margin-top:4px">▲ 42%</div>
+      </div>
+
+      <div class="v2-dest-card">
+        <div class="v2-dest-flag">🇹🇭</div>
+        <h4 class="v2-dest-name">Thailand</h4>
+        <div class="v2-dest-labels">
+          <span>Bookings</span><span>Revenue</span>
+        </div>
+        <div class="v2-dest-stats">
+          <span class="v2-dest-bookings">6</span>
+          <span class="v2-dest-revenue">₹12.7L</span>
+        </div>
+        <div class="v2-kpi-delta up" style="margin-top:4px">▲ 18%</div>
+      </div>
+
+      <div class="v2-dest-card">
+        <div class="v2-dest-flag">🇮🇩</div>
+        <h4 class="v2-dest-name">Bali</h4>
+        <div class="v2-dest-labels">
+          <span>Bookings</span><span>Revenue</span>
+        </div>
+        <div class="v2-dest-stats">
+          <span class="v2-dest-bookings">4</span>
+          <span class="v2-dest-revenue">₹9.2L</span>
+        </div>
+        <div class="v2-kpi-delta up" style="margin-top:4px">▲ 8%</div>
+      </div>
+
+      <div class="v2-dest-card">
+        <div class="v2-dest-flag">🇦🇪</div>
+        <h4 class="v2-dest-name">Dubai</h4>
+        <div class="v2-dest-labels">
+          <span>Bookings</span><span>Revenue</span>
+        </div>
+        <div class="v2-dest-stats">
+          <span class="v2-dest-bookings">5</span>
+          <span class="v2-dest-revenue">₹11.8L</span>
+        </div>
+        <div class="v2-kpi-delta up" style="margin-top:4px">▲ 28%</div>
+      </div>
+
+      <div class="v2-dest-card">
+        <div class="v2-dest-flag">🇺🇸</div>
+        <h4 class="v2-dest-name">USA</h4>
+        <div class="v2-dest-labels">
+          <span>Bookings</span><span>Revenue</span>
+        </div>
+        <div class="v2-dest-stats">
+          <span class="v2-dest-bookings">2</span>
+          <span class="v2-dest-revenue">₹14.6L</span>
+        </div>
+        <div class="v2-kpi-delta up" style="margin-top:4px">▲ 100%</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>
