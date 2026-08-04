@@ -1,0 +1,479 @@
+/* ────────────────────────────────────────────────────────────
+   Voyage-Ed CRM V2 Theme Layer
+   ────────────────────────────────────────────────────────────
+   Purpose: Visual overhaul of the existing V1 CRM without touching
+   App.js logic. This file applies globally to every screen —
+   Dashboard, Leads, Deals, Accounts, Reports — and upgrades them
+   to the approved V2 luxury look (navy + gold + floating cards).
+
+   Rollback: Remove the @import line in index.css. Everything reverts.
+
+   Design tokens sourced from packages/ui/tokens/ (single source of
+   truth for web + future mobile Expo).
+   ──────────────────────────────────────────────────────────── */
+
+/* ─── 1. Fonts ─────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ─── 2. Design tokens as CSS variables ─────────────────── */
+
+:root {
+  /* Brand */
+  --v-navy: #0d1b3e;
+  --v-navy-light: #1a3060;
+  --v-navy-hover: #253a70;
+  --v-gold: #c9a84c;
+  --v-gold-dark: #b78d38;
+  --v-gold-light: #faf1dc;
+  --v-gold-soft: #f5ead0;
+
+  /* Text */
+  --v-text: #0f2350;
+  --v-text-secondary: #33446b;
+  --v-text-muted: #6b7a99;
+  --v-text-on-dark: #ffffff;
+
+  /* Backgrounds */
+  --v-bg-page: #f4f6fb;
+  --v-bg-card: #ffffff;
+  --v-bg-subtle: #f9fafc;
+  --v-bg-hover: #eef2f9;
+
+  /* Borders */
+  --v-border: #e8ecf5;
+  --v-border-strong: #d4dcec;
+
+  /* Semantic */
+  --v-success: #059669;
+  --v-success-bg: #ecfdf5;
+  --v-warning: #c9942a;
+  --v-warning-bg: #fef8ec;
+  --v-danger: #dc2626;
+  --v-danger-bg: #fef2f2;
+  --v-info: #3b82f6;
+  --v-info-bg: #eff6ff;
+
+  /* Radius */
+  --v-radius-sm: 6px;
+  --v-radius-md: 12px;
+  --v-radius-lg: 18px;
+  --v-radius-xl: 24px;
+  --v-radius-full: 999px;
+
+  /* Shadows — signature floating card effect */
+  --v-shadow-sm: 0 1px 2px rgba(15, 35, 80, 0.04);
+  --v-shadow-md: 0 4px 12px rgba(15, 35, 80, 0.06);
+  --v-shadow-lg: 0 12px 32px rgba(15, 35, 80, 0.10);
+  --v-shadow-xl: 0 24px 60px rgba(15, 35, 80, 0.18);
+  --v-shadow-gold: 0 8px 24px rgba(201, 168, 76, 0.25);
+
+  /* Motion */
+  --v-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --v-quick: 150ms;
+  --v-normal: 250ms;
+}
+
+/* ─── 3. Base body + typography ────────────────────────── */
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+  background: var(--v-bg-page) !important;
+  color: var(--v-text) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings get Playfair Display for luxury feel */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  color: var(--v-navy) !important;
+  letter-spacing: -0.3px !important;
+  font-weight: 600 !important;
+}
+
+h1 { font-size: 28px !important; }
+h2 { font-size: 22px !important; }
+h3 { font-size: 18px !important; }
+h4 { font-size: 15px !important; }
+
+/* Monetary values — everywhere that shows ₹ */
+[class*="amount"], [class*="price"], [class*="total"],
+.v-money, td[class*="money"] {
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace !important;
+  letter-spacing: -0.3px !important;
+}
+
+/* ─── 4. Card overhaul (floating premium look) ─────────── */
+
+.card {
+  background: var(--v-bg-card) !important;
+  border: 1px solid var(--v-border) !important;
+  border-radius: var(--v-radius-lg) !important;
+  padding: 24px !important;
+  box-shadow: var(--v-shadow-md) !important;
+  transition: box-shadow var(--v-normal) var(--v-ease),
+              transform var(--v-normal) var(--v-ease) !important;
+}
+
+.card:hover {
+  box-shadow: var(--v-shadow-lg) !important;
+  transform: translateY(-1px);
+}
+
+/* ─── 5. Button overhaul ──────────────────────────────── */
+
+.btn {
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 600 !important;
+  border-radius: var(--v-radius-md) !important;
+  transition: all var(--v-normal) var(--v-ease) !important;
+  letter-spacing: 0.2px !important;
+  cursor: pointer;
+}
+
+/* Primary — navy solid instead of orange gradient */
+.btn-ind {
+  background: var(--v-navy) !important;
+  color: var(--v-text-on-dark) !important;
+  padding: 10px 20px !important;
+  font-size: 13px !important;
+  border: none !important;
+  box-shadow: var(--v-shadow-sm) !important;
+}
+.btn-ind:hover {
+  background: var(--v-navy-hover) !important;
+  box-shadow: var(--v-shadow-md) !important;
+  transform: translateY(-1px);
+}
+
+/* Small buttons — subtle white with border */
+.btn-sm {
+  background: var(--v-bg-card) !important;
+  border: 1px solid var(--v-border-strong) !important;
+  color: var(--v-text-secondary) !important;
+  padding: 8px 14px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+.btn-sm:hover {
+  background: var(--v-bg-hover) !important;
+  border-color: var(--v-gold) !important;
+  color: var(--v-navy) !important;
+}
+
+/* Danger — red outline (unchanged spirit, cleaner shape) */
+.btn-danger {
+  background: transparent !important;
+  border: 1px solid var(--v-danger) !important;
+  color: var(--v-danger) !important;
+  padding: 6px 14px !important;
+  font-size: 12px !important;
+  border-radius: var(--v-radius-md) !important;
+}
+.btn-danger:hover {
+  background: var(--v-danger-bg) !important;
+}
+
+/* Dashed — for "Add X" empty states */
+.btn-dashed {
+  background: transparent !important;
+  border: 1.5px dashed var(--v-border-strong) !important;
+  color: var(--v-navy) !important;
+  padding: 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: var(--v-radius-md) !important;
+}
+.btn-dashed:hover {
+  border-color: var(--v-gold) !important;
+  background: var(--v-gold-light) !important;
+}
+
+/* Special: gold gradient CTA — apply .btn-gold class where needed */
+.btn-gold, button.gold-cta {
+  background: linear-gradient(135deg, var(--v-gold) 0%, var(--v-gold-dark) 100%) !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 10px 22px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-radius: var(--v-radius-md) !important;
+  box-shadow: var(--v-shadow-gold) !important;
+  cursor: pointer;
+  transition: all var(--v-normal) var(--v-ease);
+}
+.btn-gold:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(201, 168, 76, 0.35) !important;
+}
+
+/* ─── 6. Table overhaul ───────────────────────────────── */
+
+table.info {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  border-radius: var(--v-radius-md) !important;
+  overflow: hidden !important;
+  box-shadow: var(--v-shadow-sm) !important;
+  background: #fff !important;
+  border: 1px solid var(--v-border) !important;
+}
+
+table.info th {
+  background: var(--v-bg-subtle) !important;
+  color: var(--v-text-muted) !important;
+  padding: 12px 14px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1.5px !important;
+  text-align: left !important;
+  border-bottom: 1px solid var(--v-border) !important;
+}
+
+table.info td {
+  padding: 14px !important;
+  text-align: left !important;
+  border: none !important;
+  border-bottom: 1px solid var(--v-border) !important;
+  color: var(--v-text-secondary) !important;
+  font-size: 13px !important;
+  background: #fff !important;
+}
+
+table.info tr:last-child td {
+  border-bottom: none !important;
+}
+
+table.info tr:hover td {
+  background: var(--v-bg-hover) !important;
+}
+
+/* ─── 7. Input / select / textarea ─────────────────────── */
+
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="tel"],
+input[type="date"],
+input[type="password"],
+input[type="search"],
+select,
+textarea {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+  padding: 10px 12px !important;
+  border: 1px solid var(--v-border-strong) !important;
+  border-radius: var(--v-radius-md) !important;
+  color: var(--v-text) !important;
+  background: #fff !important;
+  transition: border-color var(--v-quick) var(--v-ease),
+              box-shadow var(--v-quick) var(--v-ease) !important;
+  outline: none !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--v-gold) !important;
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.15) !important;
+}
+
+/* Number inputs get monospace for pricing feel */
+input[type="number"] {
+  font-family: 'JetBrains Mono', monospace !important;
+  letter-spacing: -0.2px !important;
+}
+
+label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: var(--v-text-secondary) !important;
+  letter-spacing: 0.3px !important;
+}
+
+/* ─── 8. Body / page structure ─────────────────────────── */
+
+.body {
+  padding: 32px !important;
+  max-width: 1600px !important;
+  margin: 0 auto !important;
+}
+
+/* Top bar (V1 has ".bar") gets deeper navy */
+.bar {
+  background: linear-gradient(180deg, var(--v-navy) 0%, var(--v-navy-light) 100%) !important;
+  color: var(--v-text-on-dark) !important;
+  padding: 20px 32px !important;
+  border-bottom: 3px solid var(--v-gold) !important;
+  box-shadow: var(--v-shadow-md);
+}
+
+.bar * {
+  color: var(--v-text-on-dark);
+}
+
+.bar h1, .bar h2 {
+  color: var(--v-text-on-dark) !important;
+}
+
+.bar .btn-sm {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.bar .btn-sm:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: var(--v-gold) !important;
+  color: #fff !important;
+}
+
+/* ─── 9. KPI cards / stat blocks (auto-detect by structure) ─── */
+
+/* Anything with big-number styling — V1 uses inline styles which we
+   can't restyle by attribute, but we can add class from user side. */
+
+.v-stat-card {
+  background: #fff;
+  border-radius: var(--v-radius-lg);
+  padding: 20px 24px;
+  border: 1px solid var(--v-border);
+  box-shadow: var(--v-shadow-md);
+  border-left: 4px solid var(--v-gold);
+}
+
+.v-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--v-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+}
+
+.v-stat-value {
+  font-family: 'Playfair Display', serif;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--v-navy);
+  line-height: 1;
+}
+
+.v-stat-sub {
+  font-size: 12px;
+  color: var(--v-text-muted);
+  margin-top: 4px;
+}
+
+/* ─── 10. Modal / dialog polish ────────────────────────── */
+
+[role="dialog"],
+[class*="modal-content"],
+[class*="Modal"] {
+  border-radius: var(--v-radius-lg) !important;
+  box-shadow: var(--v-shadow-xl) !important;
+  border: 1px solid var(--v-border) !important;
+}
+
+/* ─── 11. Chips / badges ──────────────────────────────── */
+
+[class*="chip"],
+[class*="badge"],
+[class*="tag"] {
+  border-radius: var(--v-radius-full) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 1px !important;
+  text-transform: uppercase !important;
+  padding: 4px 12px !important;
+}
+
+/* ─── 12. Toast / notifications ────────────────────────── */
+
+[class*="toast"],
+.ve-toast {
+  border-radius: var(--v-radius-md) !important;
+  box-shadow: var(--v-shadow-lg) !important;
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 500 !important;
+}
+
+/* ─── 13. Scroll polish ────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--v-border-strong);
+  border-radius: var(--v-radius-full);
+  border: 2px solid var(--v-bg-page);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--v-gold);
+}
+
+/* ─── 14. Deal detail hero section (if wrapping div uses inline bg) ─── */
+
+/* Add class .v-deal-hero to any hero navy section for perfect styling */
+.v-deal-hero {
+  background: linear-gradient(135deg, var(--v-navy) 0%, var(--v-navy-light) 100%);
+  color: var(--v-text-on-dark);
+  border-radius: var(--v-radius-lg);
+  padding: 32px;
+  box-shadow: var(--v-shadow-lg);
+  margin-bottom: 24px;
+}
+
+.v-deal-hero h1,
+.v-deal-hero h2 {
+  color: var(--v-text-on-dark) !important;
+}
+
+/* ─── 15. Focus polish for accessibility ──────────────── */
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--v-gold);
+  outline-offset: 2px;
+}
+
+/* ─── 16. Print (existing V1 print styles preserved) ───── */
+
+@media print {
+  body {
+    background: #fff !important;
+  }
+  .bar {
+    background: #fff !important;
+    color: #000 !important;
+    border-bottom: 2px solid #000 !important;
+  }
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+}
+
+/* ─── 17. Responsive niceties ─────────────────────────── */
+
+@media (max-width: 768px) {
+  .body {
+    padding: 16px !important;
+  }
+  .card {
+    padding: 16px !important;
+    border-radius: var(--v-radius-md) !important;
+  }
+  h1 { font-size: 22px !important; }
+  h2 { font-size: 18px !important; }
+  .btn-ind, .btn-gold {
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+  }
+}
