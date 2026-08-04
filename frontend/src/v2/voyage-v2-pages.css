@@ -1923,3 +1923,271 @@
   .v2-hero-facts { grid-template-columns: repeat(2, 1fr); gap: 20px; }
   .v2-finance-ribbon { grid-template-columns: repeat(2, 1fr); gap: 16px; }
 }
+
+/* ─── UPDATES: match approved mockups more precisely ───── */
+
+/* Lead card selected — thicker gold border, more contrast */
+.v2-lead-card.selected {
+  border-left: 4px solid #c9a84c;
+  background: #faf7f0;
+  padding-left: 16px;
+}
+
+/* Lead avatar - each gets specific gradient */
+.v2-lead-avatar {
+  box-shadow: 0 4px 12px rgba(15, 35, 80, 0.15);
+}
+
+/* VIP chip in lead card — dark navy with gold text */
+.v2-chip.vip {
+  background: #0d1b3e;
+  color: #c9a84c;
+  padding: 3px 12px;
+  font-weight: 700;
+}
+
+/* HOT LEAD chip in detail panel head - gold with navy text */
+.v2-detail-head-chip {
+  background: #c9a84c;
+  color: #0d1b3e;
+  padding: 6px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.3px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Detail head icons - slightly larger with better spacing */
+.v2-detail-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.v2-detail-icon {
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  transition: all 150ms ease;
+}
+
+.v2-detail-icon:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* Convert to Deal CTA - big gold button */
+.v2-detail-cta.primary {
+  background: linear-gradient(135deg, #c9a84c 0%, #b78d38 100%);
+  color: #0d1b3e;
+  border-color: #c9a84c;
+  font-weight: 700;
+  padding: 12px 14px;
+  box-shadow: 0 4px 12px rgba(201, 168, 76, 0.25);
+}
+
+.v2-detail-cta.primary:hover {
+  background: linear-gradient(135deg, #b78d38 0%, #a37d2f 100%);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(201, 168, 76, 0.35);
+}
+
+.v2-detail-cta {
+  padding: 11px 14px;
+  font-size: 12px;
+}
+
+/* ─── DEAL DETAIL updates ───────────────────────────────── */
+
+/* Save Draft / Cancel Deal / Send WhatsApp / Generate PDF row inside Client accordion */
+.v2-client-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e8ecf5;
+  flex-wrap: wrap;
+}
+
+.v2-client-actions .v2-acc-btn-sm {
+  padding: 10px 18px;
+  font-size: 12px;
+}
+
+.v2-client-actions .v2-acc-btn-sm.danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.v2-client-actions .v2-acc-btn-sm.danger:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+.v2-client-actions .space {
+  flex: 1;
+}
+
+.v2-client-actions .v2-acc-btn-primary {
+  background: linear-gradient(135deg, #c9a84c 0%, #b78d38 100%);
+  color: #0d1b3e;
+  padding: 10px 18px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(201, 168, 76, 0.25);
+}
+
+.v2-client-actions .v2-acc-btn-primary:hover {
+  background: linear-gradient(135deg, #b78d38 0%, #a37d2f 100%);
+  color: #fff;
+}
+
+/* Payment progress bar fully paid = full green */
+.v2-pay-progress-fill.paid {
+  background: #059669;
+  width: 100% !important;
+}
+
+/* AI Deal Insights — Ask AI button gold outline */
+.v2-ai-cta {
+  padding: 11px 14px;
+  background: transparent;
+  border: 1.5px solid #c9a84c;
+  border-radius: 999px;
+  color: #c9a84c;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 12px;
+  transition: all 200ms ease;
+}
+
+.v2-ai-cta:hover {
+  background: rgba(201, 168, 76, 0.15);
+}
+
+/* Payment schedule status pills */
+.v2-schedule-status {
+  padding: 3px 10px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-top: 2px;
+}
+
+.v2-schedule-status.paid {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.v2-schedule-status.due {
+  background: #fef8ec;
+  color: #c9942a;
+}
+
+/* Documents icons — colored backgrounds */
+.v2-doc-icon.pdf {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.v2-doc-icon.passport {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.v2-doc-icon.voucher {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+/* Activity dot navy = today's/latest event */
+.v2-activity-dot.navy {
+  background: #0d1b3e;
+  border: 2px solid #0d1b3e;
+}
+
+/* Client & Travellers dark navy icon square */
+.v2-acc-icon.navy {
+  background: #0d1b3e;
+  color: #c9a84c;
+}
+
+/* Flight card - Vietnam Airlines subtle gold border on right */
+.v2-flight-card {
+  position: relative;
+}
+
+.v2-flight-airline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v2-flight-airline .gold-star {
+  color: #c9a84c;
+  font-size: 12px;
+}
+
+/* Progress dots more visible */
+.v2-progress-dots {
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.v2-dot {
+  width: 8px;
+  height: 8px;
+}
+
+/* Payment bar row layout */
+.v2-pay-row {
+  padding-top: 4px;
+}
+
+/* Add subtle animation on hover for deal accordion */
+.v2-acc {
+  transition: box-shadow 200ms ease;
+}
+
+.v2-acc:hover {
+  box-shadow: 0 8px 24px rgba(15, 35, 80, 0.08);
+}
+
+/* Deal hero — chip fine-tune */
+.v2-hero-chip.gold {
+  background: #c9a84c;
+  color: #0d1b3e;
+  font-weight: 700;
+}
+
+.v2-hero-chip.green {
+  background: #059669;
+  color: #fff;
+}
+
+/* Proposal PDF button in deal hero */
+.v2-hero-btn.gold {
+  background: linear-gradient(135deg, #c9a84c 0%, #b78d38 100%);
+  border: none;
+  color: #0d1b3e;
+  font-weight: 700;
+  padding: 10px 18px;
+  box-shadow: 0 4px 12px rgba(201, 168, 76, 0.25);
+}
+
+.v2-hero-btn.gold:hover {
+  background: linear-gradient(135deg, #b78d38 0%, #a37d2f 100%);
+  color: #fff;
+}
