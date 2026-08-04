@@ -1,0 +1,290 @@
+/* ────────────────────────────────────────────────────────────
+   Voyage-Ed V2 App Shell CSS
+   ────────────────────────────────────────────────────────────
+   Adds the fixed left sidebar + shifts main content right.
+   Works with existing App.js unchanged — the sidebar is mounted
+   separately from index.js and reads/writes the same `screen`
+   state via a small event bridge (see voyage-shell.js).
+
+   ROLLBACK: Remove sidebar mount from index.js. Everything reverts.
+   ──────────────────────────────────────────────────────────── */
+
+/* ─── 1. Sidebar container ─────────────────────────────── */
+
+.v-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 240px;
+  background: linear-gradient(180deg, #0d1b3e 0%, #0a1530 100%);
+  color: #fff;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+  overflow-y: auto;
+  box-shadow: 4px 0 24px rgba(15, 35, 80, 0.15);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Push everything else right when sidebar is on */
+body.v-has-sidebar {
+  padding-left: 240px;
+  transition: padding var(--v-normal, 250ms) var(--v-ease, ease);
+}
+
+body.v-has-sidebar > .bar,
+body.v-has-sidebar > * > .bar {
+  /* Compensate for any full-width bars if they use fixed positioning */
+}
+
+/* ─── 2. Sidebar brand block ──────────────────────────── */
+
+.v-sb-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px 24px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 20px;
+}
+
+.v-sb-brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #fff;
+  color: #0d1b3e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 22px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.v-sb-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.v-sb-brand-name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.v-sb-brand-sub {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 2.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ─── 3. Section labels ───────────────────────────────── */
+
+.v-sb-section {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  padding: 12px 24px 8px 24px;
+  margin-top: 8px;
+}
+
+.v-sb-section:first-of-type {
+  margin-top: 0;
+}
+
+/* ─── 4. Nav items ────────────────────────────────────── */
+
+.v-sb-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px;
+}
+
+.v-sb-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 2px 0;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 150ms ease;
+  width: 100%;
+  outline: none;
+}
+
+.v-sb-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.v-sb-item.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-left: 3px solid #c9a84c;
+  padding-left: 11px; /* compensate for border */
+}
+
+.v-sb-item-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #c9a84c;
+  font-size: 14px;
+}
+
+.v-sb-item-label {
+  flex: 1;
+}
+
+.v-sb-item-badge {
+  background: #c9a84c;
+  color: #0d1b3e;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 22px;
+  text-align: center;
+}
+
+/* ─── 5. User block (bottom) ──────────────────────────── */
+
+.v-sb-user {
+  margin-top: auto;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.v-sb-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #c9a84c 0%, #b78d38 100%);
+  color: #0d1b3e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.v-sb-user-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.v-sb-user-name {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.v-sb-user-role {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* ─── 6. Header + body adjustments when sidebar active ─ */
+
+body.v-has-sidebar .bar {
+  /* V1 bar becomes lighter — sidebar has the branding now */
+  background: #fff !important;
+  color: var(--v-navy) !important;
+  border-bottom: 1px solid var(--v-border) !important;
+  box-shadow: 0 1px 2px rgba(15, 35, 80, 0.04);
+  padding: 16px 32px !important;
+}
+
+body.v-has-sidebar .bar * {
+  color: var(--v-navy);
+}
+
+body.v-has-sidebar .bar h1,
+body.v-has-sidebar .bar h2 {
+  color: var(--v-navy) !important;
+  font-size: 20px !important;
+}
+
+body.v-has-sidebar .bar .btn-sm {
+  background: var(--v-bg-card) !important;
+  border-color: var(--v-border-strong) !important;
+  color: var(--v-text-secondary) !important;
+}
+
+body.v-has-sidebar .bar .btn-sm:hover {
+  background: var(--v-bg-hover) !important;
+  border-color: var(--v-gold) !important;
+  color: var(--v-navy) !important;
+}
+
+body.v-has-sidebar .body {
+  padding: 32px 40px !important;
+}
+
+/* ─── 7. Layout toggle button ─────────────────────────── */
+
+.v-layout-toggle {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--v-navy);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(15, 35, 80, 0.25);
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  transition: all 200ms ease;
+}
+
+.v-layout-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(15, 35, 80, 0.35);
+}
+
+/* ─── 8. Mobile handling ──────────────────────────────── */
+
+@media (max-width: 900px) {
+  .v-sidebar {
+    transform: translateX(-100%);
+    transition: transform 250ms ease;
+  }
+  body.v-sidebar-open .v-sidebar {
+    transform: translateX(0);
+  }
+  body.v-has-sidebar {
+    padding-left: 0;
+  }
+}

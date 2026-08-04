@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voyage-Ed CRM V2 Theme Preview</title>
+<link rel="stylesheet" href="../frontend/src/voyage-theme.css">
+<style>
+  /* Include just enough of App.js's inline styles that shape layout */
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 32px;
+  }
+  .bar h1 { margin: 0; }
+  .bar-left, .bar-right { display: flex; align-items: center; gap: 16px; }
+  .body { padding: 32px; max-width: 1600px; margin: 0 auto; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .space { flex: 1; }
+  hr { border: none; border-top: 1px solid var(--v-border); margin: 20px 0; }
+
+  .demo-label {
+    background: var(--v-navy);
+    color: #fff;
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<!-- SCREEN 1: Dashboard -->
+<div class="demo-label">Screen 1 · Dashboard (existing V1 markup with new theme)</div>
+
+<div class="bar">
+  <div class="bar-left">
+    <h1>Voyage-Ed CRM</h1>
+    <span style="opacity:.7;font-size:12px">Business Month · 16 Jul → 15 Aug</span>
+  </div>
+  <div class="bar-right">
+    <button class="btn btn-sm">🔍 Search</button>
+    <button class="btn btn-sm">💰 Accounts</button>
+    <button class="btn btn-sm">⬇️ Backup</button>
+    <button class="btn btn-ind">+ New Deal</button>
+  </div>
+</div>
+
+<div class="body">
+  <h2 style="margin-bottom:8px">Good evening, Vishal</h2>
+  <p style="color:var(--v-text-muted);margin:0 0 24px 0;font-size:13px">Saturday, 3 August 2026 · Real numbers, live</p>
+
+  <div class="grid-4">
+    <div class="v-stat-card">
+      <div class="v-stat-label">COLLECTIONS</div>
+      <div class="v-stat-value">₹2,14,500</div>
+      <div class="v-stat-sub" style="color:var(--v-success)">▲ 18% vs yesterday</div>
+    </div>
+    <div class="v-stat-card">
+      <div class="v-stat-label">CONFIRMED BOOKINGS</div>
+      <div class="v-stat-value">7</div>
+      <div class="v-stat-sub" style="color:var(--v-success)">▲ 2 vs yesterday</div>
+    </div>
+    <div class="v-stat-card">
+      <div class="v-stat-label">VENDOR PAYMENTS</div>
+      <div class="v-stat-value">₹1,86,300</div>
+      <div class="v-stat-sub" style="color:var(--v-danger)">▼ 4 pending</div>
+    </div>
+    <div class="v-stat-card">
+      <div class="v-stat-label">TODAY'S PROFIT</div>
+      <div class="v-stat-value">₹28,200</div>
+      <div class="v-stat-sub" style="color:var(--v-success)">▲ 22% MTD</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Upcoming Departures</h3>
+    <table class="info">
+      <thead>
+        <tr>
+          <th>Client</th>
+          <th>Deal Number</th>
+          <th>Destination</th>
+          <th>Dates</th>
+          <th style="text-align:right">Value</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Kirti Malhotra</strong></td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--v-text-muted)">VE-2608-K7QA</td>
+          <td>🇻🇳 Vietnam · 2 pax</td>
+          <td>6 Oct → 13 Oct</td>
+          <td style="text-align:right;font-family:'JetBrains Mono',monospace">₹2,35,000</td>
+          <td><span style="color:var(--v-warning);font-weight:600">₹45k pending</span></td>
+        </tr>
+        <tr>
+          <td><strong>Deepak Jaiswal</strong></td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--v-text-muted)">VE-2608-1TEQ</td>
+          <td>🇹🇭 Thailand · 4 pax</td>
+          <td>6 Aug → 11 Aug</td>
+          <td style="text-align:right;font-family:'JetBrains Mono',monospace">₹1,42,800</td>
+          <td><span style="color:var(--v-success);font-weight:600">✓ Fully paid</span></td>
+        </tr>
+        <tr>
+          <td><strong>Pranshu Goyal</strong></td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--v-text-muted)">VE-2608-ILP9</td>
+          <td>🇮🇩 Bali · 2 pax</td>
+          <td>10 Aug → 17 Aug</td>
+          <td style="text-align:right;font-family:'JetBrains Mono',monospace">₹1,84,000</td>
+          <td><span style="color:var(--v-warning);font-weight:600">₹92k pending</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- SCREEN 2: Deal Detail -->
+<div class="demo-label">Screen 2 · Deal Detail (Kirti Vietnam)</div>
+
+<div class="bar">
+  <div class="bar-left">
+    <button class="btn btn-sm">← Dashboard</button>
+    <h2 style="margin:0 0 0 12px">Trip to Vietnam</h2>
+  </div>
+  <div class="bar-right">
+    <button class="btn btn-sm">📱 WhatsApp</button>
+    <button class="btn btn-sm">✉ Email</button>
+    <button class="btn btn-gold">📄 Generate Proposal PDF</button>
+  </div>
+</div>
+
+<div class="body">
+
+  <div class="v-deal-hero">
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <span class="v-stat-label" style="background:var(--v-gold);color:#fff;padding:6px 14px;border-radius:999px">✦ VIP CLIENT</span>
+      <span class="v-stat-label" style="background:var(--v-success);color:#fff;padding:6px 14px;border-radius:999px">✓ BOOKED · CONFIRMED</span>
+      <span class="v-stat-label" style="background:rgba(255,255,255,.15);color:#fff;padding:6px 14px;border-radius:999px">64 DAYS TO DEPARTURE</span>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;opacity:.75;margin-bottom:4px">VE-2608-K7QA</div>
+    <h1 style="color:#fff !important;font-size:36px !important;margin:0 0 8px 0">Trip to Vietnam</h1>
+    <p style="opacity:.85;font-size:15px;margin:0 0 24px 0">Kirti Malhotra · 2 pax · Deluxe experience · Anniversary</p>
+
+    <div class="grid-4">
+      <div>
+        <div class="v-stat-label" style="color:rgba(255,255,255,.6)">DESTINATION</div>
+        <div style="font-size:18px;font-weight:600;margin-top:4px">🇻🇳 Vietnam</div>
+      </div>
+      <div>
+        <div class="v-stat-label" style="color:rgba(255,255,255,.6)">TRAVEL DATES</div>
+        <div style="font-size:18px;font-weight:600;margin-top:4px">6 Oct → 13 Oct</div>
+      </div>
+      <div>
+        <div class="v-stat-label" style="color:rgba(255,255,255,.6)">DURATION</div>
+        <div style="font-size:18px;font-weight:600;margin-top:4px">7 Nights / 8 Days</div>
+      </div>
+      <div>
+        <div class="v-stat-label" style="color:rgba(255,255,255,.6)">TOTAL VALUE</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;margin-top:4px;color:var(--v-gold)">₹2,35,000</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Finance ribbon -->
+  <div class="card" style="margin-bottom:24px">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:24px">
+      <div>
+        <div class="v-stat-label">SELLING PRICE</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--v-navy);margin-top:6px">₹2,35,000</div>
+        <div class="v-stat-sub">Client final quote</div>
+      </div>
+      <div>
+        <div class="v-stat-label">VENDOR COST</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--v-navy);margin-top:6px">₹1,92,400</div>
+        <div class="v-stat-sub">Total to suppliers</div>
+      </div>
+      <div>
+        <div class="v-stat-label">GPM (PROFIT)</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--v-gold);margin-top:6px">₹42,600</div>
+        <div class="v-stat-sub" style="color:var(--v-success)">18.1% margin</div>
+      </div>
+      <div>
+        <div class="v-stat-label">CLIENT PAID</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--v-success);margin-top:6px">₹1,90,000</div>
+        <div class="v-stat-sub">80.9% collected</div>
+      </div>
+      <div>
+        <div class="v-stat-label">BALANCE DUE</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;color:var(--v-warning);margin-top:6px">₹45,000</div>
+        <div class="v-stat-sub" style="color:var(--v-warning)">Due 4 Oct · 2 days</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client & Travellers section -->
+  <div class="card">
+    <div class="row" style="margin-bottom:20px">
+      <h3 style="margin:0">Client & Travellers</h3>
+      <span style="color:var(--v-text-muted);font-size:12px;margin-left:12px">Contact details, passport docs, preferences</span>
+      <span class="space"></span>
+      <button class="btn btn-sm">📷 Scan Passport</button>
+      <button class="btn btn-ind" style="padding:8px 16px">+ Add Traveller</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px 32px">
+      <div>
+        <label>CLIENT NAME</label>
+        <div style="font-size:15px;font-weight:500;margin-top:4px">Kirti Malhotra</div>
+      </div>
+      <div>
+        <label>PHONE</label>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:15px;margin-top:4px">+91 98765 12345</div>
+      </div>
+      <div>
+        <label>EMAIL</label>
+        <div style="font-size:15px;margin-top:4px">kirti.m@gmail.com</div>
+      </div>
+      <div>
+        <label>CITY</label>
+        <div style="font-size:15px;margin-top:4px">New Delhi</div>
+      </div>
+      <div>
+        <label>SOURCE</label>
+        <div style="font-size:15px;margin-top:4px">Referral · Nikhil A.</div>
+      </div>
+      <div>
+        <label>OCCASION</label>
+        <div style="font-size:15px;margin-top:4px">Anniversary</div>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="row">
+      <button class="btn btn-sm">💾 Save Draft</button>
+      <button class="btn btn-danger">✕ Cancel Deal</button>
+      <span class="space"></span>
+      <button class="btn btn-sm">📱 Send via WhatsApp</button>
+      <button class="btn btn-gold">📄 Generate Proposal PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 3: Buttons + inputs sample -->
+<div class="demo-label">Screen 3 · Form + Button Styles</div>
+
+<div class="body">
+  <div class="card" style="max-width:800px">
+    <h3 style="margin-top:0">Add Flight Vendor</h3>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;margin-top:20px">
+      <div>
+        <label>VENDOR NAME</label>
+        <input type="text" value="Vietnam Airlines" style="width:100%;margin-top:6px">
+      </div>
+      <div>
+        <label>SECTOR</label>
+        <input type="text" value="DEL → SGN → DAD" style="width:100%;margin-top:6px">
+      </div>
+      <div>
+        <label>COST PRICE (₹)</label>
+        <input type="number" value="68400" style="width:100%;margin-top:6px">
+      </div>
+      <div>
+        <label>SELLING PRICE (₹)</label>
+        <input type="number" value="74000" style="width:100%;margin-top:6px">
+      </div>
+      <div>
+        <label>CURRENCY</label>
+        <select style="width:100%;margin-top:6px">
+          <option>INR</option>
+          <option>USD</option>
+          <option>EUR</option>
+        </select>
+      </div>
+      <div>
+        <label>DEPARTURE DATE</label>
+        <input type="date" value="2026-10-06" style="width:100%;margin-top:6px">
+      </div>
+    </div>
+
+    <hr>
+
+    <button class="btn-dashed">+ Add another sector</button>
+
+    <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+      <button class="btn btn-sm">Cancel</button>
+      <button class="btn btn-ind">Save Flight</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
