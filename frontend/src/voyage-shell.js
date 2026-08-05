@@ -121,7 +121,13 @@ function Sidebar() {
     if (v2PagesOn) {
       const v2Routable = { dashboard: 'dashboard', leads: 'leads', deals: 'deals' };
       if (v2Routable[key]) {
-        window.dispatchEvent(new CustomEvent('voyage:nav', { detail: { key: v2Routable[key] } }));
+        // Primary path: direct imperative call, no event/listener race possible.
+        if (typeof window.__voyagePagesNav === 'function') {
+          window.__voyagePagesNav(v2Routable[key]);
+        } else {
+          // Fallback in case V2Pages hasn't attached __voyagePagesNav yet.
+          window.dispatchEvent(new CustomEvent('voyage:nav', { detail: { key: v2Routable[key] } }));
+        }
         return;
       }
       // Sections not yet built in V2 pages

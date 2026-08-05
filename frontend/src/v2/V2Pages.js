@@ -1145,17 +1145,27 @@ export default function V2Pages() {
   const [selectedDeal, setSelectedDeal] = useState(null);
   const { items, loading, error } = useLeads();
 
-  // Listen to sidebar clicks (from voyage-shell.js) via custom events
-  useEffect(() => {
-    const handler = (e) => {
-      const key = e.detail?.key;
-      if (key === 'dashboard') { setRoute('dashboard'); setSelectedDeal(null); }
-      if (key === 'leads') { setRoute('leads'); setSelectedDeal(null); }
-      if (key === 'deals') { setRoute('leads'); setSelectedDeal(null); }
-    };
-    window.addEventListener('voyage:nav', handler);
-    return () => window.removeEventListener('voyage:nav', handler);
+  const navigate = useCallback((key) => {
+    if (key === 'dashboard') { setRoute('dashboard'); setSelectedDeal(null); }
+    if (key === 'leads') { setRoute('leads'); setSelectedDeal(null); }
+    if (key === 'deals') { setRoute('leads'); setSelectedDeal(null); }
   }, []);
+
+  // Two independent paths to receive sidebar navigation, so a timing quirk
+  // in one can't silently break navigation:
+  //   1) CustomEvent — works if the listener happened to be attached in time
+  //   2) Direct imperative call via window.__voyagePagesNav — no event
+  //      dispatch/listener race possible, always available once this
+  //      component has rendered once.
+  useEffect(() => {
+    const handler = (e) => navigate(e.detail?.key);
+    window.addEventListener('voyage:nav', handler);
+    window.__voyagePagesNav = navigate;
+    return () => {
+      window.removeEventListener('voyage:nav', handler);
+      if (window.__voyagePagesNav === navigate) delete window.__voyagePagesNav;
+    };
+  }, [navigate]);
 
   const openDeal = useCallback((deal) => {
     setSelectedDeal(deal);
