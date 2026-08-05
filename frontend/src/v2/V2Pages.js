@@ -165,6 +165,7 @@ const isCancelledStage = (d) => stageOf(d) === 'Cancelled' || stageOf(d) === 'Lo
 const dealVendors = (d) => [
   ...(d.hotelVendors || []),
   ...(d.flightVendors || []),
+  ...(d.trainVendors || []),
   ...(d.landVendors || []),
   ...(d.visaVendors || []),
 ];
@@ -216,14 +217,20 @@ const IconSparkle = () => <span style={{ display: 'inline-block' }}>✦</span>;
 function DashboardV2({ leads, onDealClick }) {
   // Compute KPIs from real data
   const stats = useMemo(() => {
-    let collections = 0, bookings = 0, profit = 0, vendorPmts = 0;
-    leads.forEach((l) => {
-      if (isBookedStage(l)) bookings++;
+    // Match V1's business logic exactly: vendor cost, profit, and collections
+    // are only meaningful once a deal is actually Booked/Completed. Many
+    // leads have vendor pricing filled in during quoting (before booking),
+    // so summing across ALL leads wildly inflates "Vendor Payments" —
+    // V1's own dashboard rollup filters allDeals.filter(isBookedStage) for
+    // exactly this reason.
+    const booked = leads.filter(isBookedStage);
+    let collections = 0, profit = 0, vendorPmts = 0;
+    booked.forEach((l) => {
       collections += paidINR(l);
       vendorPmts += costINR(l);
       profit += profitINR(l);
     });
-    return { collections, bookings, profit, vendorPmts };
+    return { collections, bookings: booked.length, profit, vendorPmts };
   }, [leads]);
 
   // Upcoming departures — booked deals, most recently updated first
