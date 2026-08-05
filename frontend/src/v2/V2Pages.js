@@ -161,12 +161,8 @@ const dealValueINR = (lead) => {
 
 /* ─── SVG icons ──────────────────────────────────────── */
 
-const IconDiamond = () => <span style={{ display: 'inline-block' }}>◆</span>;
+// eslint-disable-next-line no-unused-vars
 const IconSparkle = () => <span style={{ display: 'inline-block' }}>✦</span>;
-const IconCall = () => <span style={{ display: 'inline-block' }}>☏</span>;
-const IconWhatsApp = () => <span style={{ display: 'inline-block' }}>◆</span>;
-const IconMail = () => <span style={{ display: 'inline-block' }}>✉</span>;
-const IconMore = () => <span style={{ display: 'inline-block' }}>⋯</span>;
 
 /* ─── DASHBOARD ──────────────────────────────────────── */
 
@@ -309,7 +305,7 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-panel">
           <div className="v2-panel-header">
             <h3 className="v2-panel-title">Upcoming Departures</h3>
-            <a className="v2-view-all" href="#" onClick={(e) => e.preventDefault()}>View all →</a>
+            <button type="button" className="v2-view-all" onClick={(e) => e.preventDefault()} style={{background:"none",border:"none",cursor:"pointer",padding:0,font:"inherit"}}>View all →</button>
           </div>
 
           {upcomingDepartures.length === 0 ? (
@@ -352,7 +348,7 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-panel">
           <div className="v2-panel-header">
             <h3 className="v2-panel-title">Follow-ups Today</h3>
-            <a className="v2-view-all" href="#" onClick={(e) => e.preventDefault()}>View all →</a>
+            <button type="button" className="v2-view-all" onClick={(e) => e.preventDefault()} style={{background:"none",border:"none",cursor:"pointer",padding:0,font:"inherit"}}>View all →</button>
           </div>
 
           {followUps.length === 0 ? (
@@ -387,7 +383,7 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-panel" style={{ marginBottom: 32 }}>
           <div className="v2-panel-header">
             <h3 className="v2-panel-title">Top Destinations</h3>
-            <a className="v2-view-all" href="#" onClick={(e) => e.preventDefault()}>Analytics →</a>
+            <button type="button" className="v2-view-all" onClick={(e) => e.preventDefault()} style={{background:"none",border:"none",cursor:"pointer",padding:0,font:"inherit"}}>Analytics →</button>
           </div>
           <div className="v2-destinations">
             {topDests.map((d, i) => (
@@ -694,13 +690,14 @@ function DealDetailV2({ deal, onBack }) {
   return (
     <main className="v2-page">
       <div className="v2-crumb">
-        <a
+        <button
+          type="button"
           className="v2-crumb-link"
-          href="#"
-          onClick={(e) => { e.preventDefault(); onBack(); }}
+          onClick={onBack}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit', color: 'inherit' }}
         >
           ← Deals
-        </a>{' '}
+        </button>{' '}
         &rsaquo; <span className="v2-crumb-current">{deal.dealNumber || 'DEAL'}</span> · {clientName(deal)} · {destination(deal)}
       </div>
 
