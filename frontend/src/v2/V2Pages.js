@@ -43,6 +43,7 @@ const timeAgo = (dateStr) => {
   return 'just now';
 };
 
+// eslint-disable-next-line no-unused-vars
 const daysUntil = (dateStr) => {
   if (!dateStr) return null;
   const then = new Date(dateStr).getTime();
@@ -130,34 +131,80 @@ function useLeads() {
   return { items, loading, error };
 }
 
-/* ─── Categorization helpers ─────────────────────────── */
+/* ─── Data model helpers — MATCH App.js exactly ─────────
+   Real deal shape (flat, not nested under .client or .summary):
+     clientName, contactNo, email, destination, travelDates,
+     adults, children, infants, leadSource, priority, remarks,
+     status, stage, dealNumber, followUpDate,
+     hotelVendors[], flightVendors[], landVendors[], visaVendors[],
+     clientPayments[], travellers[], tiers[], useTiers
+   Vendor line item: { costPrice, sellingPrice, currency, exchangeRate, payments[] }
+   ──────────────────────────────────────────────────────── */
 
+const n = (v) => Number(v) || 0;
+const toINR = (amount, currency, rate) => (currency === 'INR' ? n(amount) : n(amount) * n(rate));
+const sumBy = (arr, key) => (arr || []).reduce((s, i) => s + n(i[key]), 0);
+
+const DEAL_STAGES = ['New Lead', 'Contacted', 'Quoted', 'Negotiation', 'Booked', 'Completed', 'Cancelled', 'Lost'];
+
+const stageOf = (d) => {
+  if (!d) return 'New Lead';
+  if (d.stage && DEAL_STAGES.includes(d.stage)) return d.stage;
+  if (d.stage === 'Travelled') return 'Completed';
+  const s = d.status || '';
+  if (s === 'Booked') return 'Booked';
+  if (s === 'Completed') return 'Completed';
+  if (s === 'Cancelled') return 'Cancelled';
+  if (s === 'Quoted') return 'Quoted';
+  if (s === 'In Progress') return 'Contacted';
+  return 'New Lead';
+};
+const isBookedStage = (d) => { const s = stageOf(d); return s === 'Booked' || s === 'Completed'; };
+const isCancelledStage = (d) => stageOf(d) === 'Cancelled' || stageOf(d) === 'Lost';
+
+const dealVendors = (d) => [
+  ...(d.hotelVendors || []),
+  ...(d.flightVendors || []),
+  ...(d.landVendors || []),
+  ...(d.visaVendors || []),
+];
+
+const bookedTierOf = (d) => {
+  if (!d || !d.useTiers || !Array.isArray(d.tiers)) return null;
+  return d.tiers.find((t) => t && t.booked && n(t.totalPrice) > 0) || null;
+};
+
+// Selling price: booked-tier total if tiers are in use, else sum of vendor selling prices (converted to INR)
+const sellINR = (d) => {
+  const tier = bookedTierOf(d);
+  if (tier) return n(tier.totalPrice);
+  return dealVendors(d).reduce((s, v) => s + toINR(v.sellingPrice, v.currency, v.exchangeRate), 0);
+};
+const costINR = (d) => dealVendors(d).reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+const paidINR = (d) => sumBy(d.clientPayments, 'amount');
+const profitINR = (d) => sellINR(d) - costINR(d);
+// eslint-disable-next-line no-unused-vars
+const balanceINR = (d) => sellINR(d) - paidINR(d);
+
+// Categorize for pipeline chips: booked/cancelled first, then hot/warm/cold by priority + age
 const categorize = (lead) => {
-  const status = String(lead.status || '').toLowerCase();
-  if (['booked', 'confirmed', 'travelling', 'travelled'].some((s) => status.includes(s))) return 'booked';
-  if (status.includes('hot')) return 'hot';
-  if (status.includes('warm')) return 'warm';
-  if (status.includes('cold')) return 'cold';
-  if (status.includes('cancel')) return 'cancelled';
-  // Fallback by age
+  if (isBookedStage(lead)) return 'booked';
+  if (isCancelledStage(lead)) return 'cancelled';
+  const priority = String(lead.priority || '').toLowerCase();
+  if (priority === 'high' || priority === 'urgent') return 'hot';
+  if (priority === 'low') return 'cold';
+  // Fallback by recency (Mongo ObjectId embeds creation timestamp, but createdAt is more reliable)
   const created = lead.createdAt ? new Date(lead.createdAt).getTime() : 0;
-  const ageDays = created ? (Date.now() - created) / (86400000) : 0;
+  const ageDays = created ? (Date.now() - created) / 86400000 : 999;
   if (ageDays < 2) return 'hot';
   if (ageDays < 5) return 'warm';
   return 'cold';
 };
 
-const clientName = (lead) => lead.client?.name || lead.clientName || 'Unknown';
-const destination = (lead) => lead.client?.destination || lead.destination || '';
-const dealValueINR = (lead) => {
-  const sell =
-    lead.summary?.sellingPriceINR ||
-    lead.finance?.sellingPriceINR ||
-    lead.sellingPriceINR ||
-    lead.dealData?.summary?.sellingPriceINR ||
-    0;
-  return Number(sell) || 0;
-};
+const clientName = (lead) => lead.clientName || 'Unknown';
+const destination = (lead) => lead.destination || '';
+const dealValueINR = (lead) => sellINR(lead);
+const paxOf = (lead) => n(lead.adults) + n(lead.children) + n(lead.infants);
 
 /* ─── SVG icons ──────────────────────────────────────── */
 
@@ -171,38 +218,35 @@ function DashboardV2({ leads, onDealClick }) {
   const stats = useMemo(() => {
     let collections = 0, bookings = 0, profit = 0, vendorPmts = 0;
     leads.forEach((l) => {
-      const cat = categorize(l);
-      if (cat === 'booked') bookings++;
-      const paid = Number(l.summary?.clientPaidINR || l.summary?.paidINR || 0);
-      const cost = Number(l.summary?.vendorCostINR || l.summary?.costINR || 0);
-      const sell = Number(l.summary?.sellingPriceINR || 0);
-      collections += paid;
-      vendorPmts += cost;
-      profit += (sell - cost);
+      if (isBookedStage(l)) bookings++;
+      collections += paidINR(l);
+      vendorPmts += costINR(l);
+      profit += profitINR(l);
     });
     return { collections, bookings, profit, vendorPmts };
   }, [leads]);
 
-  // Upcoming departures — booked deals sorted by travel start date
+  // Upcoming departures — booked deals, most recently updated first
+  // (travelDates is free-text in this CRM, not a structured date, so we
+  // can't compute exact days-to-departure — show the text as-is)
   const upcomingDepartures = useMemo(() => {
     return leads
-      .filter((l) => categorize(l) === 'booked')
-      .map((l) => ({
-        ...l,
-        travelStart: l.client?.travelStartDate || l.travelStartDate || l.dealData?.travelStartDate,
-        daysToDep: daysUntil(l.client?.travelStartDate || l.travelStartDate || l.dealData?.travelStartDate),
-      }))
-      .filter((l) => l.daysToDep !== null && l.daysToDep >= 0)
-      .sort((a, b) => a.daysToDep - b.daysToDep)
+      .filter((l) => isBookedStage(l))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
       .slice(0, 4);
   }, [leads]);
 
-  // Follow-ups today — hot/warm leads
+  // Follow-ups today — hot/warm leads with a follow-up date, or just recent hot/warm
   const followUps = useMemo(() => {
     return leads
       .filter((l) => {
         const c = categorize(l);
         return c === 'hot' || c === 'warm' || c === 'cold';
+      })
+      .sort((a, b) => {
+        const fa = a.followUpDate ? new Date(a.followUpDate).getTime() : Infinity;
+        const fb = b.followUpDate ? new Date(b.followUpDate).getTime() : Infinity;
+        return fa - fb;
       })
       .slice(0, 4);
   }, [leads]);
@@ -225,11 +269,6 @@ function DashboardV2({ leads, onDealClick }) {
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const userName = 'Vishal'; // could be pulled from user context
-
-  const dayDots = (daysToDep) => {
-    const status = daysToDep <= 3 ? 'danger' : daysToDep <= 10 ? 'warn' : 'ok';
-    return status;
-  };
 
   return (
     <main className="v2-page">
@@ -314,15 +353,15 @@ function DashboardV2({ leads, onDealClick }) {
             </div>
           ) : (
             upcomingDepartures.map((l, i) => {
-              const paid = Number(l.summary?.clientPaidINR || 0);
-              const total = dealValueINR(l);
+              const paid = paidINR(l);
+              const total = sellINR(l);
               const pending = total - paid;
-              const status = dayDots(l.daysToDep);
+              const statusClass = pending <= 0 ? 'ok' : pending < total * 0.3 ? 'warn' : '';
               return (
                 <div key={l._id || i} className="v2-dep-row" onClick={() => onDealClick(l)} style={{ cursor: 'pointer' }}>
-                  <div className={`v2-dep-days ${status === 'warn' ? 'warn' : status === 'ok' ? 'ok' : ''}`}>
-                    <div className="v2-dep-days-num">{l.daysToDep}</div>
-                    <div className="v2-dep-days-label">Days</div>
+                  <div className={`v2-dep-days ${statusClass}`}>
+                    <div className="v2-dep-days-num" style={{ fontSize: 15 }}>{stageOf(l) === 'Completed' ? '✓' : '◆'}</div>
+                    <div className="v2-dep-days-label">{stageOf(l)}</div>
                   </div>
                   <div>
                     <div>
@@ -330,7 +369,7 @@ function DashboardV2({ leads, onDealClick }) {
                       {l.dealNumber && <span className="v2-dep-dealnum">{l.dealNumber}</span>}
                     </div>
                     <div className="v2-dep-details">
-                      {flagOf(destination(l))} {destination(l) || '—'} · {l.client?.travelStartDate || 'Dates TBD'}
+                      {flagOf(destination(l))} {destination(l) || '—'} · {l.travelDates || 'Dates TBD'}
                     </div>
                   </div>
                   <div className="v2-dep-value">
@@ -359,7 +398,7 @@ function DashboardV2({ leads, onDealClick }) {
             followUps.map((l, i) => {
               const cat = categorize(l);
               return (
-                <div key={l._id || i} className="v2-fu-row">
+                <div key={l._id || i} className="v2-fu-row" onClick={() => onDealClick(l)} style={{ cursor: 'pointer' }}>
                   <div className="v2-fu-head">
                     <span className="v2-fu-name">{clientName(l)}</span>
                     <span className={`v2-chip ${cat}`}>{cat.toUpperCase()}</span>
@@ -368,8 +407,8 @@ function DashboardV2({ leads, onDealClick }) {
                     {flagOf(destination(l))} {destination(l) || 'Enquiry'} · {fmtINR(dealValueINR(l))}
                   </div>
                   <div className="v2-fu-actions">
-                    <button className="v2-mini-btn">☏ Call</button>
-                    <button className="v2-mini-btn">◆ WhatsApp</button>
+                    <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 to call/WhatsApp — write actions coming to V2 soon', 'warning'); }}>☏ Call</button>
+                    <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 to call/WhatsApp — write actions coming to V2 soon', 'warning'); }}>◆ WhatsApp</button>
                   </div>
                 </div>
               );
@@ -445,7 +484,7 @@ function LeadsV2({ leads, onDealClick }) {
       list = list.filter((l) =>
         clientName(l).toLowerCase().includes(q) ||
         destination(l).toLowerCase().includes(q) ||
-        String(l.client?.phone || '').includes(search)
+        String(l.contactNo || '').includes(search)
       );
     }
     return list;
@@ -539,8 +578,8 @@ function LeadsV2({ leads, onDealClick }) {
             filtered.map((l) => {
               const cat = categorize(l);
               const isSelected = selected && selected._id === l._id;
-              const source = l.client?.source || l.source || 'Direct';
-              const note = l.client?.notes || l.notes || l.dealData?.notes || '';
+              const source = l.leadSource || 'Direct';
+              const note = l.remarks || '';
               return (
                 <div
                   key={l._id}
@@ -556,20 +595,20 @@ function LeadsV2({ leads, onDealClick }) {
                       <span className={`v2-chip ${cat}`}>{cat.toUpperCase()}</span>
                     </div>
                     <div>
-                      {l.client?.phone && <span className="v2-lead-phone">{l.client.phone}</span>}
+                      {l.contactNo && <span className="v2-lead-phone">{l.contactNo}</span>}
                       <span className="v2-lead-source">{source}</span>
                     </div>
                     <div className="v2-lead-trip">
-                      {flagOf(destination(l))} {destination(l) || 'Enquiry'} · {l.client?.nights ? `${l.client.nights}N` : ''} · {l.client?.travellers || l.client?.pax || ''} pax
+                      {flagOf(destination(l))} {destination(l) || 'Enquiry'} · {l.travelDates || 'Dates flexible'} · {paxOf(l) || ''} pax
                     </div>
                     {note && <div className="v2-lead-note">{note}</div>}
                   </div>
                   <div className="v2-lead-meta">
                     <div className="v2-lead-value">{fmtINR(dealValueINR(l))}</div>
-                    <div className="v2-lead-time">{timeAgo(l.createdAt || l._id)}</div>
+                    <div className="v2-lead-time">{timeAgo(l.createdAt || l.updatedAt)}</div>
                     <div className="v2-lead-mini-actions">
-                      <button className="v2-lead-mini-btn" title="WhatsApp">◆</button>
-                      <button className="v2-lead-mini-btn" title="Call">☏</button>
+                      <button className="v2-lead-mini-btn" title="WhatsApp" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 for WhatsApp/Call — coming to V2 soon', 'warning'); }}>◆</button>
+                      <button className="v2-lead-mini-btn" title="Call" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 for WhatsApp/Call — coming to V2 soon', 'warning'); }}>☏</button>
                     </div>
                   </div>
                 </div>
@@ -592,13 +631,13 @@ function LeadsV2({ leads, onDealClick }) {
                 </div>
               </div>
               <h2 className="v2-detail-name">{clientName(selected)}</h2>
-              {selected.client?.phone && (
-                <div className="v2-detail-phone">{selected.client.phone}</div>
+              {selected.contactNo && (
+                <div className="v2-detail-phone">{selected.contactNo}</div>
               )}
               <div className="v2-detail-tags">
-                <span className="v2-detail-tag">{selected.client?.source || 'Enquiry'}</span>
-                {selected.client?.occasion && (
-                  <span className="v2-detail-tag">{selected.client.occasion}</span>
+                <span className="v2-detail-tag">{selected.leadSource || 'Enquiry'}</span>
+                {selected.modeOfQuery && (
+                  <span className="v2-detail-tag">{selected.modeOfQuery}</span>
                 )}
               </div>
             </div>
@@ -613,31 +652,31 @@ function LeadsV2({ leads, onDealClick }) {
                   </div>
                 </div>
                 <div>
-                  <div className="v2-detail-field-label">Nights</div>
-                  <div className="v2-detail-field-value">
-                    {selected.client?.nights ? `${selected.client.nights} nights` : '—'}
-                  </div>
-                </div>
-                <div>
                   <div className="v2-detail-field-label">Travellers</div>
                   <div className="v2-detail-field-value">
-                    {selected.client?.travellers || selected.client?.pax || '—'}
+                    {paxOf(selected) || '—'} pax
                   </div>
                 </div>
                 <div>
-                  <div className="v2-detail-field-label">Budget</div>
+                  <div className="v2-detail-field-label">Budget / Quote</div>
                   <div className="v2-detail-field-value">{fmtINR(dealValueINR(selected))}</div>
                 </div>
                 <div>
                   <div className="v2-detail-field-label">Travel Dates</div>
                   <div className="v2-detail-field-value">
-                    {selected.client?.travelStartDate || 'Flexible'}
+                    {selected.travelDates || 'Flexible'}
                   </div>
                 </div>
                 <div>
                   <div className="v2-detail-field-label">Email</div>
                   <div className="v2-detail-field-value" style={{ fontSize: 12 }}>
-                    {selected.client?.email || '—'}
+                    {selected.email || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="v2-detail-field-label">Stage</div>
+                  <div className="v2-detail-field-value">
+                    {stageOf(selected)}
                   </div>
                 </div>
               </div>
@@ -649,8 +688,8 @@ function LeadsV2({ leads, onDealClick }) {
                 >
                   ◇ Open in Deal View
                 </button>
-                <button className="v2-detail-cta">◆ Send Proposal</button>
-                <button className="v2-detail-cta">+ Note</button>
+                <button className="v2-detail-cta" onClick={() => window.veToast && window.veToast('Send Proposal from V1 for now — write actions coming to V2 soon', 'warning')}>◆ Send Proposal</button>
+                <button className="v2-detail-cta" onClick={() => window.veToast && window.veToast('Add notes from V1 for now — write actions coming to V2 soon', 'warning')}>+ Note</button>
               </div>
             </div>
           </div>
@@ -667,25 +706,21 @@ function LeadsV2({ leads, onDealClick }) {
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
 function DealDetailV2({ deal, onBack }) {
-  const s = deal.summary || {};
-  const client = deal.client || {};
-  const sell = Number(s.sellingPriceINR || 0);
-  const cost = Number(s.vendorCostINR || 0);
-  const paid = Number(s.clientPaidINR || 0);
+  const sell = sellINR(deal);
+  const cost = costINR(deal);
+  const paid = paidINR(deal);
   const profit = sell - cost;
   const marginPct = sell > 0 ? Math.round((profit / sell) * 1000) / 10 : 0;
   const balance = sell - paid;
   const collectionPct = sell > 0 ? Math.round((paid / sell) * 1000) / 10 : 0;
 
-  const daysToDep = daysUntil(client.travelStartDate);
-  const isVIP = client.vip || (deal.tags || []).includes('VIP');
-  const status = String(deal.status || '').toLowerCase();
-  const isBooked = ['booked', 'confirmed', 'travelling'].some((s) => status.includes(s));
+  const isVIP = (deal.priority === 'High' || deal.priority === 'Urgent');
+  const isBooked = isBookedStage(deal);
 
-  const flights = deal.dealData?.flights || deal.flights || [];
-  const hotels = deal.dealData?.hotels || deal.hotels || [];
-  const visas = deal.dealData?.visas || deal.visas || [];
-  const payments = deal.dealData?.payments || deal.payments || [];
+  const flights = deal.flightVendors || [];
+  const hotels = deal.hotelVendors || [];
+  const visas = deal.visaVendors || [];
+  const payments = deal.clientPayments || [];
 
   return (
     <main className="v2-page">
@@ -705,15 +740,13 @@ function DealDetailV2({ deal, onBack }) {
         <div className="v2-deal-hero-top">
           <div className="v2-hero-chips">
             {isVIP && <span className="v2-hero-chip gold">+ VIP Client</span>}
-            {isBooked && <span className="v2-hero-chip green">◆ {String(deal.status || 'Booked').toUpperCase()}</span>}
-            {daysToDep !== null && daysToDep >= 0 && daysToDep <= 30 && (
-              <span className="v2-hero-chip dark">◇ {daysToDep} Days to Departure</span>
-            )}
+            {isBooked && <span className="v2-hero-chip green">◆ {stageOf(deal).toUpperCase()}</span>}
+            {!isBooked && <span className="v2-hero-chip dark">◇ {stageOf(deal).toUpperCase()}</span>}
           </div>
           <div className="v2-hero-actions">
-            <button className="v2-hero-btn">◆ WhatsApp</button>
-            <button className="v2-hero-btn">✉ Email</button>
-            <button className="v2-hero-btn gold">📄 Proposal PDF</button>
+            <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('WhatsApp from V1 for now — coming to V2 soon', 'warning')}>◆ WhatsApp</button>
+            <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('Email from V1 for now — coming to V2 soon', 'warning')}>✉ Email</button>
+            <button className="v2-hero-btn gold" onClick={() => window.veToast && window.veToast('Generate proposal PDF from V1 for now — coming to V2 soon', 'warning')}>📄 Proposal PDF</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -721,8 +754,7 @@ function DealDetailV2({ deal, onBack }) {
           {destination(deal) ? `Trip to ${destination(deal)}` : 'Deal'}
         </h1>
         <div className="v2-hero-subtitle">
-          {clientName(deal)} · {client.travellers || client.pax || 'N/A'} pax
-          {client.occasion ? ` · ${client.occasion}` : ''}
+          {clientName(deal)} · {paxOf(deal) || 'N/A'} pax
         </div>
         <div className="v2-hero-facts">
           <div>
@@ -732,14 +764,13 @@ function DealDetailV2({ deal, onBack }) {
           <div>
             <div className="v2-hero-fact-label">Travel Dates</div>
             <div className="v2-hero-fact-value">
-              {client.travelStartDate || '—'}
-              {client.travelEndDate ? ` → ${client.travelEndDate}` : ''}
+              {deal.travelDates || '—'}
             </div>
           </div>
           <div>
-            <div className="v2-hero-fact-label">Duration</div>
+            <div className="v2-hero-fact-label">Stage</div>
             <div className="v2-hero-fact-value">
-              {client.nights ? `${client.nights} Nights` : '—'}
+              {stageOf(deal)}
             </div>
           </div>
           <div>
@@ -775,7 +806,7 @@ function DealDetailV2({ deal, onBack }) {
           <div className="v2-fin-label">Balance Due</div>
           <div className="v2-fin-value warn">{fmtINRFull(balance)}</div>
           <div className="v2-fin-sub warn">
-            {daysToDep !== null ? `Due in ${daysToDep} days` : 'To be collected'}
+            {balance > 0 ? 'Payment pending' : 'Fully collected'}
           </div>
         </div>
       </div>
@@ -800,33 +831,33 @@ function DealDetailV2({ deal, onBack }) {
                 <div>
                   <div className="v2-client-field-label">Phone</div>
                   <div className="v2-client-field-value" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    {client.phone || '—'}
+                    {deal.contactNo || '—'}
                   </div>
                 </div>
                 <div>
                   <div className="v2-client-field-label">Email</div>
-                  <div className="v2-client-field-value">{client.email || '—'}</div>
+                  <div className="v2-client-field-value">{deal.email || '—'}</div>
                 </div>
                 <div>
-                  <div className="v2-client-field-label">City</div>
-                  <div className="v2-client-field-value">{client.city || '—'}</div>
+                  <div className="v2-client-field-label">Mode of Query</div>
+                  <div className="v2-client-field-value">{deal.modeOfQuery || '—'}</div>
                 </div>
                 <div>
-                  <div className="v2-client-field-label">Source</div>
-                  <div className="v2-client-field-value">{client.source || '—'}</div>
+                  <div className="v2-client-field-label">Lead Source</div>
+                  <div className="v2-client-field-value">{deal.leadSource || '—'}</div>
                 </div>
                 <div>
-                  <div className="v2-client-field-label">Occasion</div>
-                  <div className="v2-client-field-value">{client.occasion || '—'}</div>
+                  <div className="v2-client-field-label">Priority</div>
+                  <div className="v2-client-field-value">{deal.priority || '—'}</div>
                 </div>
               </div>
 
               <div className="v2-client-actions">
-                <button className="v2-acc-btn-sm">💾 Save Draft</button>
-                <button className="v2-acc-btn-sm danger">🗑 Cancel Deal</button>
+                <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('Editing is in V1 for now — write actions coming to V2 soon', 'warning')}>💾 Save Draft</button>
+                <button className="v2-acc-btn-sm danger" onClick={() => window.veToast && window.veToast('Cancel deals from V1 for now — write actions coming to V2 soon', 'warning')}>🗑 Cancel Deal</button>
                 <span className="space"></span>
-                <button className="v2-acc-btn-sm">◆ Send via WhatsApp</button>
-                <button className="v2-acc-btn-primary">📄 Generate Proposal PDF</button>
+                <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('WhatsApp from V1 for now — coming to V2 soon', 'warning')}>◆ Send via WhatsApp</button>
+                <button className="v2-acc-btn-primary" onClick={() => window.veToast && window.veToast('Generate proposal PDF from V1 for now — coming to V2 soon', 'warning')}>📄 Generate Proposal PDF</button>
               </div>
             </div>
           </div>
@@ -844,41 +875,60 @@ function DealDetailV2({ deal, onBack }) {
                 </div>
               </div>
               <div className="v2-acc-body">
-                {flights.slice(0, 3).map((f, i) => (
-                  <div key={i} className="v2-flight-card">
-                    <div className="v2-flight-head">
-                      <div className="v2-airline-code">{(f.airline || 'XX').slice(0, 2).toUpperCase()}</div>
-                      <div className="v2-flight-info">
-                        <div className="v2-flight-airline">{f.airline || 'Airline'}</div>
-                        <div className="v2-flight-meta">
-                          {f.classType || 'Economy'} · {f.baggage || 'Standard baggage'}
+                {flights.map((f, i) => {
+                  const allSectors = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
+                  const fSell = toINR(f.sellingPrice, f.currency, f.exchangeRate);
+                  const fPaid = sumBy(f.payments, 'amount');
+                  return (
+                    <div key={f.id || i} className="v2-flight-card">
+                      <div className="v2-flight-head">
+                        <div className="v2-airline-code">{(f.name || allSectors[0]?.airlineCode || 'XX').slice(0, 2).toUpperCase()}</div>
+                        <div className="v2-flight-info">
+                          <div className="v2-flight-airline">{f.name || allSectors[0]?.airlineName || 'Airline'}</div>
+                          <div className="v2-flight-meta">
+                            {f.flightType === 'return' ? 'Round trip' : 'One way'} · {allSectors.length} sector{allSectors.length !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                        <div className="v2-flight-price">
+                          <div className="v2-flight-price-val">{fmtINRFull(fSell)}</div>
+                          <div className="v2-flight-price-sub">{allSectors.length} sector{allSectors.length !== 1 ? 's' : ''} total</div>
                         </div>
                       </div>
-                      <div className="v2-flight-price">
-                        <div className="v2-flight-price-val">{fmtINRFull(f.sellingPriceINR || f.priceINR || 0)}</div>
-                        <div className="v2-flight-price-sub">Total</div>
-                      </div>
+                      {allSectors.map((sec, si) => (
+                        <div className="v2-flight-leg" key={si}>
+                          <div>
+                            <div className="v2-flight-city">{(sec.from || '—').toUpperCase()}</div>
+                            <div className="v2-flight-airport">{sec.fromName || ''}</div>
+                            <div className="v2-flight-time">{sec.depTime || '—'}</div>
+                            <div className="v2-flight-date">{sec.date || ''}</div>
+                          </div>
+                          <div className="v2-flight-duration">
+                            <div style={{ borderTop: '1px dashed #d4dcec', marginTop: 8, width: 100 }}></div>
+                          </div>
+                          <div className="v2-flight-right">
+                            <div className="v2-flight-city">{(sec.to || '—').toUpperCase()}</div>
+                            <div className="v2-flight-airport">{sec.toName || ''}</div>
+                            <div className="v2-flight-time">{sec.arrTime || '—'}</div>
+                            <div className="v2-flight-date">{sec.date || ''}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {fSell > 0 && (
+                        <div className="v2-pay-bar">
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${fPaid >= fSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (fPaid / fSell) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid: <b>{fmtINRFull(fPaid)}</b> / {fmtINRFull(fSell)}</span>
+                            <span className={`v2-pay-status ${fPaid >= fSell ? 'paid' : 'due'}`}>
+                              {fPaid >= fSell ? '✓ Fully Paid' : `${fmtINRFull(fSell - fPaid)} due`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="v2-flight-leg">
-                      <div>
-                        <div className="v2-flight-city">{(f.fromCode || 'XXX').toUpperCase()}</div>
-                        <div className="v2-flight-airport">{f.from || 'Origin'}</div>
-                        <div className="v2-flight-time">{f.departTime || '—'}</div>
-                        <div className="v2-flight-date">{f.departDate || ''}</div>
-                      </div>
-                      <div className="v2-flight-duration">
-                        <div>{f.duration || '—'}</div>
-                        <div style={{ borderTop: '1px dashed #d4dcec', marginTop: 8, width: 100 }}></div>
-                      </div>
-                      <div className="v2-flight-right">
-                        <div className="v2-flight-city">{(f.toCode || 'XXX').toUpperCase()}</div>
-                        <div className="v2-flight-airport">{f.to || 'Destination'}</div>
-                        <div className="v2-flight-time">{f.arriveTime || '—'}</div>
-                        <div className="v2-flight-date">{f.arriveDate || ''}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -896,46 +946,97 @@ function DealDetailV2({ deal, onBack }) {
                 </div>
               </div>
               <div className="v2-acc-body">
-                {hotels.map((h, i) => (
-                  <div key={i} className="v2-hotel-card">
-                    <div className="v2-hotel-head">
-                      <div className="v2-hotel-code">{(h.name || 'H').slice(0, 2).toUpperCase()}</div>
-                      <div className="v2-hotel-info">
-                        <div className="v2-hotel-name">
-                          {h.name || 'Hotel'}
-                          {h.stars && <span className="stars">{'★'.repeat(Number(h.stars) || 3)}</span>}
+                {hotels.map((h, i) => {
+                  const hSell = toINR(h.sellingPrice, h.currency, h.exchangeRate);
+                  const hPaid = sumBy(h.payments, 'amount');
+                  return (
+                    <div key={h.id || i} className="v2-hotel-card">
+                      <div className="v2-hotel-head">
+                        <div className="v2-hotel-code">{(h.hotelName || 'H').slice(0, 2).toUpperCase()}</div>
+                        <div className="v2-hotel-info">
+                          <div className="v2-hotel-name">
+                            {h.hotelName || 'Hotel'}
+                            {h.starRating && <span className="stars">{'★'.repeat(Number(h.starRating) || 3)}</span>}
+                          </div>
+                          <div className="v2-hotel-meta">
+                            {h.roomCategory || 'Standard'} · {h.city || ''} {h.nights ? `· ${h.nights} nights` : ''}
+                          </div>
                         </div>
-                        <div className="v2-hotel-meta">
-                          {h.roomType || 'Standard'} · {h.nights ? `${h.nights} nights` : ''}
+                        <div className="v2-hotel-price">
+                          <div className="v2-hotel-price-val">{fmtINRFull(hSell)}</div>
+                          <div className="v2-hotel-price-sub">{h.currency !== 'INR' ? `${h.currency} ${h.costPrice || 0}` : 'Total'}</div>
                         </div>
                       </div>
-                      <div className="v2-hotel-price">
-                        <div className="v2-hotel-price-val">{fmtINRFull(h.sellingPriceINR || h.priceINR || 0)}</div>
-                        <div className="v2-hotel-price-sub">Total</div>
+                      <div className="v2-hotel-facts">
+                        <div>
+                          <div className="v2-hotel-fact-lbl">Check-in</div>
+                          <div className="v2-hotel-fact-val">{h.checkIn || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="v2-hotel-fact-lbl">Check-out</div>
+                          <div className="v2-hotel-fact-val">{h.checkOut || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="v2-hotel-fact-lbl">Confirmation</div>
+                          <div className="v2-hotel-fact-val" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            {h.confirmationNo || '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="v2-hotel-fact-lbl">Country</div>
+                          <div className="v2-hotel-fact-val">{h.country || '—'}</div>
+                        </div>
                       </div>
+                      {hSell > 0 && (
+                        <div className="v2-pay-bar">
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${hPaid >= hSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (hPaid / hSell) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid: <b>{fmtINRFull(hPaid)}</b> / {fmtINRFull(hSell)}</span>
+                            <span className={`v2-pay-status ${hPaid >= hSell ? 'paid' : 'due'}`}>
+                              {hPaid >= hSell ? '✓ Fully Paid' : `${fmtINRFull(hSell - hPaid)} due`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="v2-hotel-facts">
-                      <div>
-                        <div className="v2-hotel-fact-lbl">Check-in</div>
-                        <div className="v2-hotel-fact-val">{h.checkIn || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="v2-hotel-fact-lbl">Check-out</div>
-                        <div className="v2-hotel-fact-val">{h.checkOut || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="v2-hotel-fact-lbl">Confirmation</div>
-                        <div className="v2-hotel-fact-val" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                          {h.confirmation || h.bookingRef || '—'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="v2-hotel-fact-lbl">Meal Plan</div>
-                        <div className="v2-hotel-fact-val">{h.mealPlan || 'CP'}</div>
-                      </div>
-                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Visa */}
+          {visas.length > 0 && (
+            <div className="v2-acc">
+              <div className="v2-acc-head">
+                <div className="v2-acc-icon">◇</div>
+                <div className="v2-acc-title-block">
+                  <h3 className="v2-acc-title">Visa</h3>
+                  <div className="v2-acc-meta">
+                    {visas.length} {visas.length === 1 ? 'application' : 'applications'}
                   </div>
-                ))}
+                </div>
+              </div>
+              <div className="v2-acc-body">
+                {visas.map((v, i) => {
+                  const vSell = toINR(v.sellingPrice, v.currency, v.exchangeRate);
+                  return (
+                    <div key={v.id || i} className="v2-hotel-card">
+                      <div className="v2-hotel-head">
+                        <div className="v2-hotel-code">VE</div>
+                        <div className="v2-hotel-info">
+                          <div className="v2-hotel-name">{v.name || 'Visa Application'}</div>
+                          <div className="v2-hotel-meta">{v.visaStatus || 'Not Applied'}</div>
+                        </div>
+                        <div className="v2-hotel-price">
+                          <div className="v2-hotel-price-val">{fmtINRFull(vSell)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -955,14 +1056,16 @@ function DealDetailV2({ deal, onBack }) {
               <h4 className="v2-side-title">AI Deal Insights</h4>
             </div>
             <div className="v2-ai-body">
-              This deal has {profit > 0 ? <><b>{marginPct}% margin</b> and is {marginPct >= 15 ? 'tracking healthy' : 'tight — review pricing'}</> : 'no profit set — review cost/selling prices'}.
+              {sell > 0
+                ? <>This deal has <b>{marginPct}% margin</b> and is {marginPct >= 15 ? 'tracking healthy' : 'tight — review pricing'}.</>
+                : 'No selling price set yet — add vendor pricing to see margin insights.'}
             </div>
-            {balance > 0 && daysToDep !== null && daysToDep <= 15 && (
+            {balance > 0 && (
               <ul className="v2-ai-list">
-                <li>Client balance <b>{fmtINR(balance)}</b> due in {daysToDep} days</li>
+                <li>Client balance <b>{fmtINR(balance)}</b> still pending</li>
               </ul>
             )}
-            <button className="v2-ai-cta">+ Ask AI about this deal</button>
+            <button className="v2-ai-cta" onClick={() => window.veToast && window.veToast('AI Deal Insights coming to V2 soon — use the AI Assistant in V1 for now', 'warning')}>+ Ask AI about this deal</button>
           </div>
 
           <div className="v2-side-card">
@@ -977,11 +1080,11 @@ function DealDetailV2({ deal, onBack }) {
               payments.slice(0, 5).map((p, i) => (
                 <div key={i} className="v2-schedule-row">
                   <div>
-                    <div className="v2-schedule-milestone">{p.note || p.method || 'Payment'}</div>
+                    <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
                     <div className="v2-schedule-date">{p.date || ''}</div>
                   </div>
                   <div className="v2-schedule-amount">
-                    <div className="v2-schedule-amount-val">{fmtINR(p.amountINR || p.amount || 0)}</div>
+                    <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
                     <div className="v2-schedule-status paid">Paid</div>
                   </div>
                 </div>

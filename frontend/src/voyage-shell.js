@@ -60,6 +60,11 @@ function Sidebar() {
   const [activeKey, setActiveKey] = useState('dashboard');
 
   const detectActiveScreen = useCallback(() => {
+    // When V2 Pages overlay is on, the sidebar's active state is driven by
+    // handleNavClick + the 'voyage:nav' events, not by reading V1's DOM
+    // (which sits hidden underneath the overlay).
+    if (localStorage.getItem('voyage:v2pages') === 'on') return;
+
     // Look at document title / URL / visible h1 to guess screen
     const h1 = document.querySelector('h1');
     const h1Text = h1 ? h1.textContent : '';
@@ -109,6 +114,29 @@ function Sidebar() {
    */
   const handleNavClick = useCallback((key) => {
     setActiveKey(key);
+
+    // When V2 Pages overlay is active, route within it via a custom event
+    // instead of hunting for V1 DOM buttons hidden underneath the overlay.
+    const v2PagesOn = localStorage.getItem('voyage:v2pages') === 'on';
+    if (v2PagesOn) {
+      const v2Routable = { dashboard: 'dashboard', leads: 'leads', deals: 'deals' };
+      if (v2Routable[key]) {
+        window.dispatchEvent(new CustomEvent('voyage:nav', { detail: { key: v2Routable[key] } }));
+        return;
+      }
+      // Sections not yet built in V2 pages
+      const comingSoon = {
+        clients: 'Clients — coming to V2 Pages soon',
+        proposals: 'Proposals — coming to V2 Pages soon',
+        vendors: 'Vendors master — coming to V2 Pages soon',
+        visa: 'Visa filings — coming to V2 Pages soon',
+        tasks: 'Tasks — coming to V2 Pages soon',
+        accounts: 'Accounts — turn off V2 Pages to use V1 Accounts for now',
+        reports: 'Reports — turn off V2 Pages to use V1 Reports for now',
+      };
+      window.veToast && window.veToast(comingSoon[key] || 'Coming soon', 'info');
+      return;
+    }
 
     const clickMap = {
       dashboard: () => {
