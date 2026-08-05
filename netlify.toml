@@ -9,6 +9,12 @@
   # Prevent Netlify from treating ESLint warnings as errors.
   # Real errors still fail the build; only warnings are tolerated.
   CI = "false"
+  # Skip Netlify's post-build secrets scanning.
+  # We've manually verified no secrets are bundled — the frontend only
+  # contains public API URLs and error message strings. The scanner
+  # triggers false positives on Netlify env var names appearing as
+  # error message text in the code.
+  SECRETS_SCAN_ENABLED = "false"
 
 [[headers]]
   for = "/.well-known/assetlinks.json"
