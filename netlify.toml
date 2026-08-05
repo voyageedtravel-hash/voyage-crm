@@ -4,7 +4,7 @@
   command = "yarn install --frozen-lockfile && yarn build"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
   YARN_VERSION = "1.22.22"
   # Prevent Netlify from treating ESLint warnings as errors.
   # Real errors still fail the build; only warnings are tolerated.
