@@ -233,6 +233,33 @@ function Sidebar() {
           <div className="v-sb-user-name">Vishal Sharma</div>
           <div className="v-sb-user-role">Founder</div>
         </div>
+        <button
+          type="button"
+          title="Logout"
+          onClick={() => {
+            if (window.confirm('Log out of Voyage-Ed CRM?')) {
+              localStorage.removeItem('token');
+              localStorage.removeItem('ve_user');
+              window.location.reload();
+            }
+          }}
+          style={{
+            marginLeft: 'auto',
+            width: 30,
+            height: 30,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8,
+            color: 'rgba(255,255,255,0.75)',
+            cursor: 'pointer',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          ⏻
+        </button>
       </div>
     </aside>
   );

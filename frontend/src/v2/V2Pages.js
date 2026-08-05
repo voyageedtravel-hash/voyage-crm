@@ -102,33 +102,43 @@ const flagOf = (dest) => {
 
 /* ─── Data fetch hook ─────────────────────────────────── */
 
+const apiBase = () =>
+  window.location.hostname.includes('localhost')
+    ? 'http://localhost:5000'
+    : (window.__VOYAGE_API__ || 'https://voyage-crm.onrender.com');
+
+const authHeaders = () => {
+  const token = localStorage.getItem('token') || '';
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 function useLeads() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
-    const token = localStorage.getItem('token') || '';
-    // Auto-detect API base — same domain in prod, backend URL in dev
-    const apiBase = window.location.hostname.includes('localhost')
-      ? 'http://localhost:5000'
-      : (window.__VOYAGE_API__ || 'https://voyage-crm.onrender.com');
-
-    fetch(`${apiBase}/api/leads?limit=500`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${apiBase()}/api/leads?limit=500`, { headers: authHeaders() })
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((data) => {
+        if (cancelled) return;
         setItems(Array.isArray(data) ? data : (data.leads || []));
         setLoading(false);
       })
       .catch((e) => {
+        if (cancelled) return;
         setError(String(e));
         setLoading(false);
       });
-  }, []);
+    return () => { cancelled = true; };
+  }, [reloadTick]);
 
-  return { items, loading, error };
+  const refetch = useCallback(() => setReloadTick((t) => t + 1), []);
+
+  return { items, loading, error, refetch };
 }
 
 /* ─── Data model helpers — MATCH App.js exactly ─────────
@@ -453,20 +463,134 @@ function DashboardV2({ leads, onDealClick }) {
   );
 }
 
+/* ─── NEW LEAD MODAL — real POST to /api/leads ────────── */
+
+function NewLeadModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({
+    clientName: '', contactNo: '', email: '', destination: '',
+    travelDates: '', adults: '2', children: '0', leadSource: '', remarks: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.clientName.trim()) { setErr('Client name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await fetch(`${apiBase()}/api/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          ...form,
+          stage: 'New Lead',
+          status: 'Not Actioned',
+          priority: 'Normal',
+          modeOfQuery: 'Call',
+        }),
+      });
+      if (!res.ok) throw new Error('Server error ' + res.status);
+      const created = await res.json();
+      window.veToast && window.veToast('Lead created ✓', 'success');
+      onCreated(created);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: '#fff', borderRadius: 18, width: 480, maxWidth: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '22px 26px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>+ New Lead</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ padding: '22px 26px', display: 'grid', gap: 14 }}>
+          {err && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 10, fontSize: 12 }}>{err}</div>}
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Client Name *</div>
+            <input value={form.clientName} onChange={set('clientName')} placeholder="Full name" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Phone</div>
+              <input value={form.contactNo} onChange={set('contactNo')} placeholder="+91 …" style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Email</div>
+              <input value={form.email} onChange={set('email')} placeholder="Optional" style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Destination</div>
+            <input value={form.destination} onChange={set('destination')} placeholder="e.g. Vietnam, Bali, Dubai…" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Travel Dates</div>
+              <input value={form.travelDates} onChange={set('travelDates')} placeholder="Flexible / dates" style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Lead Source</div>
+              <input value={form.leadSource} onChange={set('leadSource')} placeholder="Instagram, Referral…" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Adults</div>
+              <input type="number" min="1" value={form.adults} onChange={set('adults')} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Children</div>
+              <input type="number" min="0" value={form.children} onChange={set('children')} style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Notes</div>
+            <textarea value={form.remarks} onChange={set('remarks')} rows={3} placeholder="Anything worth remembering…" style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+          </div>
+        </div>
+        <div style={{ padding: '18px 26px', borderTop: '1px solid #e8ecf5', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} className="v2-detail-cta" style={{ padding: '11px 20px' }}>Cancel</button>
+          <button onClick={submit} disabled={saving} className="v2-detail-cta primary" style={{ padding: '11px 20px', opacity: saving ? 0.6 : 1 }}>
+            {saving ? 'Saving…' : '✓ Create Lead'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '10px 14px', border: '1px solid #e8ecf5', borderRadius: 10,
+  fontSize: 13, fontFamily: 'inherit', color: '#0d1b3e', outline: 'none', boxSizing: 'border-box',
+};
+
 /* ─── LEADS PAGE ─────────────────────────────────────── */
 
-function LeadsV2({ leads, onDealClick }) {
+function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
+  const [showNewLead, setShowNewLead] = useState(false);
 
-  // Only non-booked leads shown here
-  const activeLeads = useMemo(() => {
+  const isDealsMode = mode === 'booked';
+
+  // Active mode: hot/warm/cold enquiries not yet converted.
+  // Deals mode: everything already Booked/Completed — the "old/past deals" view.
+  const scopedLeads = useMemo(() => {
+    if (isDealsMode) return leads.filter((l) => isBookedStage(l));
     return leads.filter((l) => {
       const c = categorize(l);
       return c === 'hot' || c === 'warm' || c === 'cold';
     });
-  }, [leads]);
+  }, [leads, isDealsMode]);
 
   const counts = useMemo(() => {
     const c = { hot: 0, warm: 0, cold: 0, converted: 0 };
@@ -480,12 +604,25 @@ function LeadsV2({ leads, onDealClick }) {
       .reduce((s, l) => s + dealValueINR(l), 0);
     const totalLeads = leads.length;
     const convRate = totalLeads > 0 ? Math.round((c.converted / totalLeads) * 100) : 0;
-    return { ...c, convertedValue, convRate };
+
+    // Deals-mode specific totals
+    const bookedDeals = leads.filter((l) => isBookedStage(l));
+    const totalValue = bookedDeals.reduce((s, l) => s + sellINR(l), 0);
+    const totalCollected = bookedDeals.reduce((s, l) => s + paidINR(l), 0);
+    const totalBalance = bookedDeals.reduce((s, l) => s + balanceINR(l), 0);
+    const fullyPaidCount = bookedDeals.filter((l) => balanceINR(l) <= 0).length;
+
+    return { ...c, convertedValue, convRate, totalValue, totalCollected, totalBalance, fullyPaidCount, dealsCount: bookedDeals.length };
   }, [leads]);
 
   const filtered = useMemo(() => {
-    let list = activeLeads;
-    if (filter !== 'all') list = list.filter((l) => categorize(l) === filter);
+    let list = scopedLeads;
+    if (isDealsMode) {
+      if (filter === 'paid') list = list.filter((l) => balanceINR(l) <= 0);
+      if (filter === 'due') list = list.filter((l) => balanceINR(l) > 0);
+    } else if (filter !== 'all') {
+      list = list.filter((l) => categorize(l) === filter);
+    }
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((l) =>
@@ -495,72 +632,128 @@ function LeadsV2({ leads, onDealClick }) {
       );
     }
     return list;
-  }, [activeLeads, filter, search]);
+  }, [scopedLeads, filter, search, isDealsMode]);
 
   const selected = filtered.find((l) => l._id === selectedId) || filtered[0] || null;
 
   return (
     <main className="v2-page">
+      {showNewLead && (
+        <NewLeadModal
+          onClose={() => setShowNewLead(false)}
+          onCreated={(created) => {
+            setShowNewLead(false);
+            onLeadCreated && onLeadCreated();
+            if (created && created._id) setSelectedId(created._id);
+          }}
+        />
+      )}
+
       <div className="v2-page-header">
         <div>
-          <h1 className="v2-page-title">Leads</h1>
-          <p className="v2-page-sub">Manage every enquiry from first contact to booking</p>
+          <h1 className="v2-page-title">{isDealsMode ? 'Deals' : 'Leads'}</h1>
+          <p className="v2-page-sub">
+            {isDealsMode ? 'Every confirmed booking — past and upcoming' : 'Manage every enquiry from first contact to booking'}
+          </p>
         </div>
-        <div className="v2-header-actions">
-          <button className="v2-cta">+ New Lead</button>
-        </div>
+        {!isDealsMode && (
+          <div className="v2-header-actions">
+            <button className="v2-cta" onClick={() => setShowNewLead(true)}>+ New Lead</button>
+          </div>
+        )}
       </div>
 
       {/* KPI ribbon */}
-      <div className="v2-leads-kpis">
-        <div className="v2-lead-kpi hot">
-          <div className="v2-lead-kpi-label">Hot Leads</div>
-          <div className="v2-lead-kpi-value">{counts.hot}</div>
-          <div className="v2-lead-kpi-sub">Need follow-up today</div>
+      {isDealsMode ? (
+        <div className="v2-leads-kpis">
+          <div className="v2-lead-kpi converted">
+            <div className="v2-lead-kpi-label">Total Deals</div>
+            <div className="v2-lead-kpi-value">{counts.dealsCount}</div>
+            <div className="v2-lead-kpi-sub">Booked or completed</div>
+          </div>
+          <div className="v2-lead-kpi rate">
+            <div className="v2-lead-kpi-label">Total Value</div>
+            <div className="v2-lead-kpi-value" style={{ fontSize: 24 }}>{fmtINR(counts.totalValue)}</div>
+            <div className="v2-lead-kpi-sub">Across all deals</div>
+          </div>
+          <div className="v2-lead-kpi hot" style={{ borderLeftColor: '#059669' }}>
+            <div className="v2-lead-kpi-label">Collected</div>
+            <div className="v2-lead-kpi-value" style={{ fontSize: 24 }}>{fmtINR(counts.totalCollected)}</div>
+            <div className="v2-lead-kpi-sub">{counts.fullyPaidCount} fully paid</div>
+          </div>
+          <div className="v2-lead-kpi warm">
+            <div className="v2-lead-kpi-label">Balance Due</div>
+            <div className="v2-lead-kpi-value" style={{ fontSize: 24 }}>{fmtINR(counts.totalBalance)}</div>
+            <div className="v2-lead-kpi-sub">Still to collect</div>
+          </div>
         </div>
-        <div className="v2-lead-kpi warm">
-          <div className="v2-lead-kpi-label">Warm Leads</div>
-          <div className="v2-lead-kpi-value">{counts.warm}</div>
-          <div className="v2-lead-kpi-sub">Follow-up in 2-3 days</div>
+      ) : (
+        <div className="v2-leads-kpis">
+          <div className="v2-lead-kpi hot">
+            <div className="v2-lead-kpi-label">Hot Leads</div>
+            <div className="v2-lead-kpi-value">{counts.hot}</div>
+            <div className="v2-lead-kpi-sub">Need follow-up today</div>
+          </div>
+          <div className="v2-lead-kpi warm">
+            <div className="v2-lead-kpi-label">Warm Leads</div>
+            <div className="v2-lead-kpi-value">{counts.warm}</div>
+            <div className="v2-lead-kpi-sub">Follow-up in 2-3 days</div>
+          </div>
+          <div className="v2-lead-kpi cold">
+            <div className="v2-lead-kpi-label">Cold Leads</div>
+            <div className="v2-lead-kpi-value">{counts.cold}</div>
+            <div className="v2-lead-kpi-sub">Not responded to quote</div>
+          </div>
+          <div className="v2-lead-kpi converted">
+            <div className="v2-lead-kpi-label">Converted MTD</div>
+            <div className="v2-lead-kpi-value">{counts.converted}</div>
+            <div className="v2-lead-kpi-sub">{fmtINR(counts.convertedValue)} total value</div>
+          </div>
+          <div className="v2-lead-kpi rate">
+            <div className="v2-lead-kpi-label">Conversion Rate</div>
+            <div className="v2-lead-kpi-value">{counts.convRate}%</div>
+            <div className="v2-lead-kpi-sub">{counts.convRate >= 20 ? 'Above 20% target' : 'Below target'}</div>
+          </div>
         </div>
-        <div className="v2-lead-kpi cold">
-          <div className="v2-lead-kpi-label">Cold Leads</div>
-          <div className="v2-lead-kpi-value">{counts.cold}</div>
-          <div className="v2-lead-kpi-sub">Not responded to quote</div>
-        </div>
-        <div className="v2-lead-kpi converted">
-          <div className="v2-lead-kpi-label">Converted MTD</div>
-          <div className="v2-lead-kpi-value">{counts.converted}</div>
-          <div className="v2-lead-kpi-sub">{fmtINR(counts.convertedValue)} total value</div>
-        </div>
-        <div className="v2-lead-kpi rate">
-          <div className="v2-lead-kpi-label">Conversion Rate</div>
-          <div className="v2-lead-kpi-value">{counts.convRate}%</div>
-          <div className="v2-lead-kpi-sub">{counts.convRate >= 20 ? 'Above 20% target' : 'Below target'}</div>
-        </div>
-      </div>
+      )}
 
       {/* Filter bar */}
       <div className="v2-filter-bar">
         <input
           type="text"
           className="v2-filter-search"
-          placeholder="Search name, phone, destination, or note…"
+          placeholder={isDealsMode ? 'Search client, destination…' : 'Search name, phone, destination, or note…'}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button className={`v2-filter-chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
-          All <span className="count">{activeLeads.length}</span>
-        </button>
-        <button className={`v2-filter-chip ${filter === 'hot' ? 'active' : ''}`} onClick={() => setFilter('hot')}>
-          Hot <span className="count">{counts.hot}</span>
-        </button>
-        <button className={`v2-filter-chip ${filter === 'warm' ? 'active' : ''}`} onClick={() => setFilter('warm')}>
-          Warm <span className="count">{counts.warm}</span>
-        </button>
-        <button className={`v2-filter-chip ${filter === 'cold' ? 'active' : ''}`} onClick={() => setFilter('cold')}>
-          Cold <span className="count">{counts.cold}</span>
-        </button>
+        {isDealsMode ? (
+          <>
+            <button className={`v2-filter-chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+              All <span className="count">{scopedLeads.length}</span>
+            </button>
+            <button className={`v2-filter-chip ${filter === 'due' ? 'active' : ''}`} onClick={() => setFilter('due')}>
+              Balance Due <span className="count">{counts.dealsCount - counts.fullyPaidCount}</span>
+            </button>
+            <button className={`v2-filter-chip ${filter === 'paid' ? 'active' : ''}`} onClick={() => setFilter('paid')}>
+              Fully Paid <span className="count">{counts.fullyPaidCount}</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button className={`v2-filter-chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+              All <span className="count">{scopedLeads.length}</span>
+            </button>
+            <button className={`v2-filter-chip ${filter === 'hot' ? 'active' : ''}`} onClick={() => setFilter('hot')}>
+              Hot <span className="count">{counts.hot}</span>
+            </button>
+            <button className={`v2-filter-chip ${filter === 'warm' ? 'active' : ''}`} onClick={() => setFilter('warm')}>
+              Warm <span className="count">{counts.warm}</span>
+            </button>
+            <button className={`v2-filter-chip ${filter === 'cold' ? 'active' : ''}`} onClick={() => setFilter('cold')}>
+              Cold <span className="count">{counts.cold}</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* Two column layout */}
@@ -568,7 +761,7 @@ function LeadsV2({ leads, onDealClick }) {
         <div className="v2-leads-list">
           <div className="v2-leads-list-head">
             <h3 className="v2-leads-list-title">
-              Active Leads <span className="v2-leads-count">{filtered.length}</span>
+              {isDealsMode ? 'All Deals' : 'Active Leads'} <span className="v2-leads-count">{filtered.length}</span>
             </h3>
             <select className="v2-select">
               <option>Priority: Highest</option>
@@ -1141,14 +1334,14 @@ function DealDetailV2({ deal, onBack }) {
 /* ─── ROUTER ─────────────────────────────────────────── */
 
 export default function V2Pages() {
-  const [route, setRoute] = useState('dashboard'); // 'dashboard' | 'leads' | 'deal'
+  const [route, setRoute] = useState('dashboard'); // 'dashboard' | 'leads' | 'deals' | 'deal'
   const [selectedDeal, setSelectedDeal] = useState(null);
-  const { items, loading, error } = useLeads();
+  const { items, loading, error, refetch } = useLeads();
 
   const navigate = useCallback((key) => {
     if (key === 'dashboard') { setRoute('dashboard'); setSelectedDeal(null); }
     if (key === 'leads') { setRoute('leads'); setSelectedDeal(null); }
-    if (key === 'deals') { setRoute('leads'); setSelectedDeal(null); }
+    if (key === 'deals') { setRoute('deals'); setSelectedDeal(null); }
   }, []);
 
   // Two independent paths to receive sidebar navigation, so a timing quirk
@@ -1169,12 +1362,16 @@ export default function V2Pages() {
 
   const openDeal = useCallback((deal) => {
     setSelectedDeal(deal);
-    setRoute('deal');
+    setRoute((prev) => {
+      // Remember where we came from so "back" returns to the right list.
+      window.__voyagePagesPrevRoute = prev === 'deal' ? (window.__voyagePagesPrevRoute || 'leads') : prev;
+      return 'deal';
+    });
     window.scrollTo(0, 0);
   }, []);
 
   const goBack = useCallback(() => {
-    setRoute('leads');
+    setRoute(window.__voyagePagesPrevRoute || 'leads');
     setSelectedDeal(null);
   }, []);
 
@@ -1206,8 +1403,11 @@ export default function V2Pages() {
   if (route === 'deal' && selectedDeal) {
     return <DealDetailV2 deal={selectedDeal} onBack={goBack} />;
   }
+  if (route === 'deals') {
+    return <LeadsV2 leads={items} onDealClick={openDeal} mode="booked" onLeadCreated={refetch} />;
+  }
   if (route === 'leads') {
-    return <LeadsV2 leads={items} onDealClick={openDeal} />;
+    return <LeadsV2 leads={items} onDealClick={openDeal} mode="active" onLeadCreated={refetch} />;
   }
   return <DashboardV2 leads={items} onDealClick={openDeal} />;
 }
