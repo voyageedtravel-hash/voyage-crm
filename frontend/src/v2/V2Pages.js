@@ -156,6 +156,7 @@ const toINR = (amount, currency, rate) => (currency === 'INR' ? n(amount) : n(am
 const sumBy = (arr, key) => (arr || []).reduce((s, i) => s + n(i[key]), 0);
 
 const DEAL_STAGES = ['New Lead', 'Contacted', 'Quoted', 'Negotiation', 'Booked', 'Completed', 'Cancelled', 'Lost'];
+const LEAD_SOURCES = ['WhatsApp', 'Instagram', 'Website', 'Referral', 'Walk-in', 'Call', 'Facebook', 'Google', 'Other'];
 
 const stageOf = (d) => {
   if (!d) return 'New Lead';
@@ -538,7 +539,10 @@ function NewLeadModal({ onClose, onCreated }) {
             </div>
             <div>
               <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Lead Source</div>
-              <input value={form.leadSource} onChange={set('leadSource')} placeholder="Instagram, Referral…" style={inputStyle} />
+              <select value={form.leadSource} onChange={set('leadSource')} style={inputStyle}>
+                <option value="">Select source…</option>
+                {LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -903,9 +907,305 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
   );
 }
 
+/* ─── QUICK-ADD MODALS — Flight / Hotel / Visa ──────────
+   Simplified single-sector/single-line forms (not the full OCR-scan,
+   multi-sector, room-tier builder V1 has) so a new deal can be built
+   out fully inside V2 without switching back to V1. ──────────────── */
+
+const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'THB', 'JPY', 'MYR'];
+
+function CurrencyCostRow({ form, setForm }) {
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Currency</div>
+          <select value={form.currency} onChange={set('currency')} style={inputStyle}>
+            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Cost Price</div>
+          <input type="number" value={form.costPrice} onChange={set('costPrice')} placeholder="0" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Selling Price</div>
+          <input type="number" value={form.sellingPrice} onChange={set('sellingPrice')} placeholder="0" style={inputStyle} />
+        </div>
+      </div>
+      {form.currency !== 'INR' && (
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Exchange Rate (1 {form.currency} = ? INR)</div>
+          <input type="number" value={form.exchangeRate} onChange={set('exchangeRate')} placeholder="e.g. 86" style={inputStyle} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function ModalShell({ title, onClose, onSubmit, saving, err, children }) {
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: '#fff', borderRadius: 18, width: 480, maxWidth: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '22px 26px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ padding: '22px 26px', display: 'grid', gap: 14 }}>
+          {err && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 10, fontSize: 12 }}>{err}</div>}
+          {children}
+        </div>
+        <div style={{ padding: '18px 26px', borderTop: '1px solid #e8ecf5', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} className="v2-detail-cta" style={{ padding: '11px 20px' }}>Cancel</button>
+          <button onClick={onSubmit} disabled={saving} className="v2-detail-cta primary" style={{ padding: '11px 20px', opacity: saving ? 0.6 : 1 }}>
+            {saving ? 'Saving…' : '✓ Add'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function patchDeal(dealId, patch) {
+  const res = await fetch(`${apiBase()}/api/leads/${dealId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('Server error ' + res.status);
+  return res.json();
+}
+
+function AddFlightModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.name.trim()) { setErr('Airline name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newVendor = {
+        id: 'fl_' + Date.now(),
+        name: form.name,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        flightType: 'oneway',
+        sectors: [{
+          from: form.from, fromName: form.fromName, to: form.to, toName: form.toName,
+          date: form.date, depTime: form.depTime, arrTime: form.arrTime,
+        }],
+        returnSectors: [],
+        payments: [],
+      };
+      const updated = await patchDeal(deal._id, { flightVendors: [...(deal.flightVendors || []), newVendor] });
+      window.veToast && window.veToast('Flight added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Add Flight" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
+        <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam Airlines" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (code)</div>
+          <input value={form.from} onChange={set('from')} placeholder="DEL" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (code)</div>
+          <input value={form.to} onChange={set('to')} placeholder="SGN" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (city)</div>
+          <input value={form.fromName} onChange={set('fromName')} placeholder="New Delhi" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (city)</div>
+          <input value={form.toName} onChange={set('toName')} placeholder="Ho Chi Minh City" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input value={form.date} onChange={set('date')} placeholder="6 Oct 2026" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Dep Time</div>
+          <input value={form.depTime} onChange={set('depTime')} placeholder="23:35" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Arr Time</div>
+          <input value={form.arrTime} onChange={set('arrTime')} placeholder="06:05" style={inputStyle} />
+        </div>
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
+function AddHotelModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.hotelName.trim()) { setErr('Hotel name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newVendor = {
+        id: 'ht_' + Date.now(),
+        hotelName: form.hotelName,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        country: form.country, city: form.city,
+        starRating: form.starRating, roomCategory: form.roomCategory,
+        checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
+        payments: [],
+      };
+      const updated = await patchDeal(deal._id, { hotelVendors: [...(deal.hotelVendors || []), newVendor] });
+      window.veToast && window.veToast('Hotel added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Add Hotel" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Name *</div>
+        <input value={form.hotelName} onChange={set('hotelName')} placeholder="e.g. Radisson Hotel Danang" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>City</div>
+          <input value={form.city} onChange={set('city')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Country</div>
+          <input value={form.country} onChange={set('country')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Stars</div>
+          <select value={form.starRating} onChange={set('starRating')} style={inputStyle}>
+            {[3, 4, 5].map((s) => <option key={s} value={s}>{s} ★</option>)}
+          </select>
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Room Category</div>
+        <input value={form.roomCategory} onChange={set('roomCategory')} placeholder="Deluxe Room" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Check-in</div>
+          <input value={form.checkIn} onChange={set('checkIn')} placeholder="7 Oct 2026" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Check-out</div>
+          <input value={form.checkOut} onChange={set('checkOut')} placeholder="10 Oct 2026" style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Confirmation No.</div>
+        <input value={form.confirmationNo} onChange={set('confirmationNo')} style={inputStyle} />
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
+function AddVisaModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '', visaStatus: 'Not Applied',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.name.trim()) { setErr('Visa name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newVendor = {
+        id: 'vs_' + Date.now(),
+        name: form.name,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        visaStatus: form.visaStatus,
+        payments: [],
+      };
+      const updated = await patchDeal(deal._id, { visaVendors: [...(deal.visaVendors || []), newVendor] });
+      window.veToast && window.veToast('Visa added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Add Visa" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Visa Type / Name *</div>
+        <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam e-Visa" style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Status</div>
+        <select value={form.visaStatus} onChange={set('visaStatus')} style={inputStyle}>
+          {['Not Applied', 'Applied', 'Approved', 'Rejected'].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
-function DealDetailV2({ deal, onBack }) {
+function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
+  const [deal, setDeal] = useState(initialDeal);
+  const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa'
+
+  useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
+
+  const handleSaved = (updated) => {
+    setDeal(updated);
+    setModal(null);
+    onDealUpdated && onDealUpdated(updated);
+  };
+
   const sell = sellINR(deal);
   const cost = costINR(deal);
   const paid = paidINR(deal);
@@ -1063,17 +1363,20 @@ function DealDetailV2({ deal, onBack }) {
           </div>
 
           {/* Flights */}
-          {flights.length > 0 && (
-            <div className="v2-acc">
-              <div className="v2-acc-head">
-                <div className="v2-acc-icon">✈</div>
-                <div className="v2-acc-title-block">
-                  <h3 className="v2-acc-title">Flights</h3>
-                  <div className="v2-acc-meta">
-                    {flights.length} {flights.length === 1 ? 'flight' : 'flights'}
-                  </div>
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">✈</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Flights</h3>
+                <div className="v2-acc-meta">
+                  {flights.length > 0 ? `${flights.length} ${flights.length === 1 ? 'flight' : 'flights'}` : 'None added yet'}
                 </div>
               </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('flight')}>+ Add Flight</button>
+              </div>
+            </div>
+            {flights.length > 0 && (
               <div className="v2-acc-body">
                 {flights.map((f, i) => {
                   const allSectors = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
@@ -1130,21 +1433,24 @@ function DealDetailV2({ deal, onBack }) {
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Hotels */}
-          {hotels.length > 0 && (
-            <div className="v2-acc">
-              <div className="v2-acc-head">
-                <div className="v2-acc-icon">🏨</div>
-                <div className="v2-acc-title-block">
-                  <h3 className="v2-acc-title">Hotels</h3>
-                  <div className="v2-acc-meta">
-                    {hotels.length} {hotels.length === 1 ? 'property' : 'properties'}
-                  </div>
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">🏨</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Hotels</h3>
+                <div className="v2-acc-meta">
+                  {hotels.length > 0 ? `${hotels.length} ${hotels.length === 1 ? 'property' : 'properties'}` : 'None added yet'}
                 </div>
               </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('hotel')}>+ Add Hotel</button>
+              </div>
+            </div>
+            {hotels.length > 0 && (
               <div className="v2-acc-body">
                 {hotels.map((h, i) => {
                   const hSell = toINR(h.sellingPrice, h.currency, h.exchangeRate);
@@ -1204,21 +1510,24 @@ function DealDetailV2({ deal, onBack }) {
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Visa */}
-          {visas.length > 0 && (
-            <div className="v2-acc">
-              <div className="v2-acc-head">
-                <div className="v2-acc-icon">◇</div>
-                <div className="v2-acc-title-block">
-                  <h3 className="v2-acc-title">Visa</h3>
-                  <div className="v2-acc-meta">
-                    {visas.length} {visas.length === 1 ? 'application' : 'applications'}
-                  </div>
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">◇</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Visa</h3>
+                <div className="v2-acc-meta">
+                  {visas.length > 0 ? `${visas.length} ${visas.length === 1 ? 'application' : 'applications'}` : 'None added yet'}
                 </div>
               </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('visa')}>+ Add Visa</button>
+              </div>
+            </div>
+            {visas.length > 0 && (
               <div className="v2-acc-body">
                 {visas.map((v, i) => {
                   const vSell = toINR(v.sellingPrice, v.currency, v.exchangeRate);
@@ -1238,14 +1547,12 @@ function DealDetailV2({ deal, onBack }) {
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {flights.length === 0 && hotels.length === 0 && visas.length === 0 && (
-            <div className="v2-acc" style={{ padding: 40, textAlign: 'center', color: '#6b7a99' }}>
-              No components added yet. Add flights, hotels, and visas in V1 view.
-            </div>
-          )}
+          {modal === 'flight' && <AddFlightModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'hotel' && <AddHotelModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'visa' && <AddVisaModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
 
         {/* Right sidebar */}
@@ -1401,7 +1708,13 @@ export default function V2Pages() {
   }
 
   if (route === 'deal' && selectedDeal) {
-    return <DealDetailV2 deal={selectedDeal} onBack={goBack} />;
+    return (
+      <DealDetailV2
+        deal={selectedDeal}
+        onBack={goBack}
+        onDealUpdated={(updated) => { setSelectedDeal(updated); refetch(); }}
+      />
+    );
   }
   if (route === 'deals') {
     return <LeadsV2 leads={items} onDealClick={openDeal} mode="booked" onLeadCreated={refetch} />;
