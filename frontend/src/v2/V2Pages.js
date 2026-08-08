@@ -218,6 +218,17 @@ const destination = (lead) => lead.destination || '';
 const dealValueINR = (lead) => sellINR(lead);
 const paxOf = (lead) => n(lead.adults) + n(lead.children) + n(lead.infants);
 
+const waLinkFor = (phone, msg) => {
+  const digits = (phone || '').replace(/[^\d]/g, '');
+  if (!digits) return null;
+  const withCountry = digits.length === 10 ? '91' + digits : digits;
+  return `https://wa.me/${withCountry}${msg ? '?text=' + encodeURIComponent(msg) : ''}`;
+};
+const telLinkFor = (phone) => {
+  const digits = (phone || '').replace(/[^\d]/g, '');
+  return digits ? `tel:+${digits.length === 10 ? '91' + digits : digits}` : null;
+};
+
 /* ─── SVG icons ──────────────────────────────────────── */
 
 // eslint-disable-next-line no-unused-vars
@@ -425,8 +436,16 @@ function DashboardV2({ leads, onDealClick }) {
                     {flagOf(destination(l))} {destination(l) || 'Enquiry'} · {fmtINR(dealValueINR(l))}
                   </div>
                   <div className="v2-fu-actions">
-                    <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 to call/WhatsApp — write actions coming to V2 soon', 'warning'); }}>☏ Call</button>
-                    <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 to call/WhatsApp — write actions coming to V2 soon', 'warning'); }}>◆ WhatsApp</button>
+                    {telLinkFor(l.contactNo) ? (
+                      <a href={telLinkFor(l.contactNo)} className="v2-mini-btn" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none' }}>☏ Call</a>
+                    ) : (
+                      <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('No phone number on file', 'warning'); }}>☏ Call</button>
+                    )}
+                    {waLinkFor(l.contactNo) ? (
+                      <a href={waLinkFor(l.contactNo, `Hi ${clientName(l)}, following up on your ${destination(l) || 'trip'} enquiry with Voyage-Ed.`)} target="_blank" rel="noreferrer" className="v2-mini-btn" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none' }}>◆ WhatsApp</a>
+                    ) : (
+                      <button className="v2-mini-btn" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('No phone number on file', 'warning'); }}>◆ WhatsApp</button>
+                    )}
                   </div>
                 </div>
               );
@@ -811,8 +830,16 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
                     <div className="v2-lead-value">{fmtINR(dealValueINR(l))}</div>
                     <div className="v2-lead-time">{timeAgo(l.createdAt || l.updatedAt)}</div>
                     <div className="v2-lead-mini-actions">
-                      <button className="v2-lead-mini-btn" title="WhatsApp" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 for WhatsApp/Call — coming to V2 soon', 'warning'); }}>◆</button>
-                      <button className="v2-lead-mini-btn" title="Call" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('Open in V1 for WhatsApp/Call — coming to V2 soon', 'warning'); }}>☏</button>
+                      {waLinkFor(l.contactNo) ? (
+                        <a href={waLinkFor(l.contactNo, `Hi ${clientName(l)}, following up on your ${destination(l) || 'trip'} enquiry with Voyage-Ed.`)} target="_blank" rel="noreferrer" className="v2-lead-mini-btn" title="WhatsApp" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none', display: 'inline-flex' }}>◆</a>
+                      ) : (
+                        <button className="v2-lead-mini-btn" title="WhatsApp" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('No phone number on file', 'warning'); }}>◆</button>
+                      )}
+                      {telLinkFor(l.contactNo) ? (
+                        <a href={telLinkFor(l.contactNo)} className="v2-lead-mini-btn" title="Call" onClick={(e) => e.stopPropagation()} style={{ textDecoration: 'none', display: 'inline-flex' }}>☏</a>
+                      ) : (
+                        <button className="v2-lead-mini-btn" title="Call" onClick={(e) => { e.stopPropagation(); window.veToast && window.veToast('No phone number on file', 'warning'); }}>☏</button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -892,8 +919,25 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
                 >
                   ◇ Open in Deal View
                 </button>
-                <button className="v2-detail-cta" onClick={() => window.veToast && window.veToast('Send Proposal from V1 for now — write actions coming to V2 soon', 'warning')}>◆ Send Proposal</button>
-                <button className="v2-detail-cta" onClick={() => window.veToast && window.veToast('Add notes from V1 for now — write actions coming to V2 soon', 'warning')}>+ Note</button>
+                <button
+                  className="v2-detail-cta"
+                  onClick={() => window.veToast && window.veToast('Proposal generation stays in V1 for now', 'warning')}
+                >◆ Send Proposal</button>
+                <button
+                  className="v2-detail-cta"
+                  onClick={async () => {
+                    const note = window.prompt('Add a note for ' + clientName(selected) + ':', '');
+                    if (!note || !note.trim()) return;
+                    try {
+                      const combined = selected.remarks ? `${selected.remarks}\n${note.trim()}` : note.trim();
+                      await patchDeal(selected._id, { remarks: combined });
+                      window.veToast && window.veToast('Note added ✓', 'success');
+                      onLeadCreated && onLeadCreated();
+                    } catch (e) {
+                      window.veToast && window.veToast('Could not save note — try again', 'warning');
+                    }
+                  }}
+                >+ Note</button>
               </div>
             </div>
           </div>
@@ -1192,11 +1236,67 @@ function AddVisaModal({ deal, onClose, onSaved }) {
   );
 }
 
+function AddPaymentModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({ amount: '', mode: 'Bank Transfer', date: '', note: '' });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.amount || Number(form.amount) <= 0) { setErr('Enter a valid amount'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newPayment = {
+        amount: Number(form.amount),
+        mode: form.mode,
+        date: form.date || new Date().toISOString().slice(0, 10),
+        note: form.note,
+      };
+      const updated = await patchDeal(deal._id, { clientPayments: [...(deal.clientPayments || []), newPayment] });
+      window.veToast && window.veToast('Payment recorded ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Record Client Payment" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Received (₹) *</div>
+        <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Mode</div>
+          <select value={form.mode} onChange={set('mode')} style={inputStyle}>
+            {['Bank Transfer', 'UPI', 'Cash', 'Card', 'Cheque'].map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input type="date" value={form.date} onChange={set('date')} style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
+        <input value={form.note} onChange={set('note')} placeholder="e.g. Booking deposit" style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
 function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
-  const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa'
+  const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment'
+  const [editingClient, setEditingClient] = useState(false);
+  const [clientForm, setClientForm] = useState(null);
+  const [savingClient, setSavingClient] = useState(false);
+  const [busy, setBusy] = useState(false); // stage-change / delete in flight
 
   useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
 
@@ -1204,6 +1304,74 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
     setDeal(updated);
     setModal(null);
     onDealUpdated && onDealUpdated(updated);
+  };
+
+  const startEditClient = () => {
+    setClientForm({
+      clientName: deal.clientName || '',
+      contactNo: deal.contactNo || '',
+      email: deal.email || '',
+      destination: deal.destination || '',
+      travelDates: deal.travelDates || '',
+      modeOfQuery: deal.modeOfQuery || '',
+      leadSource: deal.leadSource || '',
+      priority: deal.priority || 'Normal',
+    });
+    setEditingClient(true);
+  };
+
+  const saveClientEdit = async () => {
+    setSavingClient(true);
+    try {
+      const updated = await patchDeal(deal._id, clientForm);
+      window.veToast && window.veToast('Saved ✓', 'success');
+      setEditingClient(false);
+      handleSaved(updated);
+    } catch (e) {
+      window.veToast && window.veToast('Could not save — try again', 'warning');
+    } finally {
+      setSavingClient(false);
+    }
+  };
+
+  const changeStage = async (newStage, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(true);
+    try {
+      const updated = await patchDeal(deal._id, { stage: newStage, status: newStage });
+      window.veToast && window.veToast(`Deal marked ${newStage} ✓`, 'success');
+      handleSaved(updated);
+    } catch (e) {
+      window.veToast && window.veToast('Could not update — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteVendor = async (arrayKey, vendorId, label) => {
+    if (!window.confirm(`Remove this ${label}?`)) return;
+    setBusy(true);
+    try {
+      const filtered = (deal[arrayKey] || []).filter((v) => v.id !== vendorId);
+      const updated = await patchDeal(deal._id, { [arrayKey]: filtered });
+      window.veToast && window.veToast(`${label} removed`, 'success');
+      handleSaved(updated);
+    } catch (e) {
+      window.veToast && window.veToast('Could not remove — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const waLink = () => {
+    const phone = (deal.contactNo || '').replace(/[^\d]/g, '');
+    const msg = encodeURIComponent(`Hi ${clientName(deal)}, following up on your ${destination(deal) || 'trip'} booking with Voyage-Ed.`);
+    return phone ? `https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${msg}` : null;
+  };
+  const mailLink = () => {
+    if (!deal.email) return null;
+    const subject = encodeURIComponent(`Voyage-Ed — ${deal.dealNumber || 'Your Trip'}`);
+    return `mailto:${deal.email}?subject=${subject}`;
   };
 
   const sell = sellINR(deal);
@@ -1244,9 +1412,17 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
             {!isBooked && <span className="v2-hero-chip dark">◇ {stageOf(deal).toUpperCase()}</span>}
           </div>
           <div className="v2-hero-actions">
-            <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('WhatsApp from V1 for now — coming to V2 soon', 'warning')}>◆ WhatsApp</button>
-            <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('Email from V1 for now — coming to V2 soon', 'warning')}>✉ Email</button>
-            <button className="v2-hero-btn gold" onClick={() => window.veToast && window.veToast('Generate proposal PDF from V1 for now — coming to V2 soon', 'warning')}>📄 Proposal PDF</button>
+            {waLink() ? (
+              <a href={waLink()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>◆ WhatsApp</a>
+            ) : (
+              <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No phone number on file', 'warning')}>◆ WhatsApp</button>
+            )}
+            {mailLink() ? (
+              <a href={mailLink()} className="v2-hero-btn" style={{ textDecoration: 'none' }}>✉ Email</a>
+            ) : (
+              <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
+            )}
+            <button className="v2-hero-btn gold" onClick={() => window.veToast && window.veToast('Proposal PDF generation stays in V1 for now', 'warning')}>📄 Proposal PDF</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -1321,43 +1497,114 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                 <h3 className="v2-acc-title">Client &amp; Travellers</h3>
                 <div className="v2-acc-meta">Contact details, passport docs, preferences</div>
               </div>
+              {!editingClient && (
+                <div className="v2-acc-actions">
+                  <button className="v2-acc-btn-sm" onClick={startEditClient}>✎ Edit</button>
+                </div>
+              )}
             </div>
             <div className="v2-acc-body">
-              <div className="v2-client-grid">
-                <div>
-                  <div className="v2-client-field-label">Client Name</div>
-                  <div className="v2-client-field-value">{clientName(deal)}</div>
-                </div>
-                <div>
-                  <div className="v2-client-field-label">Phone</div>
-                  <div className="v2-client-field-value" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                    {deal.contactNo || '—'}
+              {editingClient ? (
+                <div className="v2-client-grid">
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Client Name</div>
+                    <input value={clientForm.clientName} onChange={(e) => setClientForm((f) => ({ ...f, clientName: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Phone</div>
+                    <input value={clientForm.contactNo} onChange={(e) => setClientForm((f) => ({ ...f, contactNo: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Email</div>
+                    <input value={clientForm.email} onChange={(e) => setClientForm((f) => ({ ...f, email: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Destination</div>
+                    <input value={clientForm.destination} onChange={(e) => setClientForm((f) => ({ ...f, destination: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Travel Dates</div>
+                    <input value={clientForm.travelDates} onChange={(e) => setClientForm((f) => ({ ...f, travelDates: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Lead Source</div>
+                    <select value={clientForm.leadSource} onChange={(e) => setClientForm((f) => ({ ...f, leadSource: e.target.value }))} style={inputStyle}>
+                      <option value="">Select…</option>
+                      {LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Priority</div>
+                    <select value={clientForm.priority} onChange={(e) => setClientForm((f) => ({ ...f, priority: e.target.value }))} style={inputStyle}>
+                      {['Low', 'Normal', 'High', 'Urgent'].map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
                   </div>
                 </div>
-                <div>
-                  <div className="v2-client-field-label">Email</div>
-                  <div className="v2-client-field-value">{deal.email || '—'}</div>
+              ) : (
+                <div className="v2-client-grid">
+                  <div>
+                    <div className="v2-client-field-label">Client Name</div>
+                    <div className="v2-client-field-value">{clientName(deal)}</div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label">Phone</div>
+                    <div className="v2-client-field-value" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                      {deal.contactNo || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label">Email</div>
+                    <div className="v2-client-field-value">{deal.email || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label">Mode of Query</div>
+                    <div className="v2-client-field-value">{deal.modeOfQuery || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label">Lead Source</div>
+                    <div className="v2-client-field-value">{deal.leadSource || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label">Priority</div>
+                    <div className="v2-client-field-value">{deal.priority || '—'}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="v2-client-field-label">Mode of Query</div>
-                  <div className="v2-client-field-value">{deal.modeOfQuery || '—'}</div>
-                </div>
-                <div>
-                  <div className="v2-client-field-label">Lead Source</div>
-                  <div className="v2-client-field-value">{deal.leadSource || '—'}</div>
-                </div>
-                <div>
-                  <div className="v2-client-field-label">Priority</div>
-                  <div className="v2-client-field-value">{deal.priority || '—'}</div>
-                </div>
-              </div>
+              )}
 
               <div className="v2-client-actions">
-                <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('Editing is in V1 for now — write actions coming to V2 soon', 'warning')}>💾 Save Draft</button>
-                <button className="v2-acc-btn-sm danger" onClick={() => window.veToast && window.veToast('Cancel deals from V1 for now — write actions coming to V2 soon', 'warning')}>🗑 Cancel Deal</button>
-                <span className="space"></span>
-                <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('WhatsApp from V1 for now — coming to V2 soon', 'warning')}>◆ Send via WhatsApp</button>
-                <button className="v2-acc-btn-primary" onClick={() => window.veToast && window.veToast('Generate proposal PDF from V1 for now — coming to V2 soon', 'warning')}>📄 Generate Proposal PDF</button>
+                {editingClient ? (
+                  <>
+                    <button className="v2-acc-btn-sm" onClick={() => setEditingClient(false)}>Cancel</button>
+                    <button className="v2-acc-btn-primary" onClick={saveClientEdit} disabled={savingClient}>
+                      {savingClient ? 'Saving…' : '✓ Save Changes'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {!isBookedStage(deal) && (
+                      <button className="v2-acc-btn-sm" disabled={busy} onClick={() => changeStage('Booked', `Mark ${clientName(deal)}'s deal as Booked?`)}>
+                        ◆ Convert to Deal
+                      </button>
+                    )}
+                    {stageOf(deal) !== 'Cancelled' && (
+                      <button className="v2-acc-btn-sm danger" disabled={busy} onClick={() => changeStage('Cancelled', `Cancel this deal? This can be reversed later in V1 if needed.`)}>
+                        🗑 Cancel Deal
+                      </button>
+                    )}
+                    <span className="space"></span>
+                    {waLink() ? (
+                      <a href={waLink()} target="_blank" rel="noreferrer" className="v2-acc-btn-sm" style={{ textDecoration: 'none', display: 'inline-block' }}>◆ WhatsApp</a>
+                    ) : (
+                      <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('No phone number on file', 'warning')}>◆ WhatsApp</button>
+                    )}
+                    {mailLink() ? (
+                      <a href={mailLink()} className="v2-acc-btn-sm" style={{ textDecoration: 'none', display: 'inline-block' }}>✉ Email</a>
+                    ) : (
+                      <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
+                    )}
+                    <button className="v2-acc-btn-primary" onClick={() => window.veToast && window.veToast('Proposal PDF generation stays in V1 for now', 'warning')}>📄 Proposal PDF</button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1396,6 +1643,12 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-flight-price-val">{fmtINRFull(fSell)}</div>
                           <div className="v2-flight-price-sub">{allSectors.length} sector{allSectors.length !== 1 ? 's' : ''} total</div>
                         </div>
+                        <button
+                          onClick={() => deleteVendor('flightVendors', f.id, 'flight')}
+                          disabled={busy}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✕</button>
                       </div>
                       {allSectors.map((sec, si) => (
                         <div className="v2-flight-leg" key={si}>
@@ -1472,6 +1725,12 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-hotel-price-val">{fmtINRFull(hSell)}</div>
                           <div className="v2-hotel-price-sub">{h.currency !== 'INR' ? `${h.currency} ${h.costPrice || 0}` : 'Total'}</div>
                         </div>
+                        <button
+                          onClick={() => deleteVendor('hotelVendors', h.id, 'hotel')}
+                          disabled={busy}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✕</button>
                       </div>
                       <div className="v2-hotel-facts">
                         <div>
@@ -1542,6 +1801,12 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                         <div className="v2-hotel-price">
                           <div className="v2-hotel-price-val">{fmtINRFull(vSell)}</div>
                         </div>
+                        <button
+                          onClick={() => deleteVendor('visaVendors', v.id, 'visa')}
+                          disabled={busy}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✕</button>
                       </div>
                     </div>
                   );
@@ -1553,6 +1818,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           {modal === 'flight' && <AddFlightModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'hotel' && <AddHotelModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'visa' && <AddVisaModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
 
         {/* Right sidebar */}
@@ -1578,6 +1844,10 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
               <span className="v2-side-panel-title">Payment Schedule</span>
+              <button
+                onClick={() => setModal('payment')}
+                style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+              >+ Add</button>
             </div>
             {payments.length === 0 ? (
               <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>
