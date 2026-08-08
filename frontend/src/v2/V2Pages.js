@@ -1037,6 +1037,7 @@ const AIX_SYS = {
   train: 'You extract train booking details for a travel agency CRM (domestic Indian trains like IRCTC/Rajdhani/Vande Bharat or international rail like Eurostar/Shinkansen/Trenitalia). Output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"isInternational":boolean,"tripType":"one-way|return|multi-city","segments":[...],"returnSegments":[...]}. Each segment = {"trainNo":string,"trainName":string,"from":"station code","fromStation":"full station name","to":"station code","toStation":"full station name","date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","classOfTravel":"1A|2A|3A|SL|CC|EC|2S|Sleeper|First Class|Business|Standard|Other","coach":string,"pnr":string}. RULES: (1) Distinguish tripType: "return" if journey goes A→B and later comes back B→A — outbound legs in segments, homebound in returnSegments; "one-way" if single direction; "multi-city" for 3+ cities. (2) For Indian trains: use IRCTC station codes (NDLS, MMCT, HWH, MAS, etc.) and Indian classes (1A/2A/3A/SL/CC/EC/2S). Set isInternational=false. (3) For international: use rail station codes if visible, common classes First/Business/Standard. Set isInternational=true. (4) PNR is 10 digits for IRCTC. Missing fields = empty string or null. Never invent a PNR — leave empty if unclear.',
   ticket: 'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed. (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
   passport: 'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ when available — it is the most reliable source.',
+  land: 'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
 };
 
 const fileToDataURI = (file) => new Promise((resolve, reject) => {
@@ -1524,6 +1525,101 @@ function AddHotelModal({ deal, onClose, onSaved }) {
   );
 }
 
+function AddLandModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    confirmationNo: '', itinerary: '',
+  });
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('land', files);
+      if (!j.itinerary) throw new Error('No itinerary details found in this file');
+      setForm((f) => ({
+        ...f,
+        name: j.vendorName || f.name,
+        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
+        itinerary: j.itinerary,
+      }));
+      setAiSummary('✓ Itinerary extracted — review the day-wise plan below before saving.');
+      window.veToast && window.veToast('Itinerary extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer scan');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setErr('Vendor / package name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newVendor = {
+        id: 'ld_' + Date.now(),
+        name: form.name,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        itinerary: form.itinerary,
+        confirmationNo: form.confirmationNo,
+        payments: [],
+      };
+      const updated = await patchDeal(deal._id, { landVendors: [...(deal.landVendors || []), newVendor] });
+      window.veToast && window.veToast('Land package added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Add Land Package / Itinerary" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading itinerary…' : 'Scan a DMC quote / itinerary PDF or screenshot — AI writes the day-wise plan'}
+          </span>
+          <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Package Name *</div>
+        <input value={form.name} onChange={set('name')} placeholder="e.g. ABC DMC — Bali 5N Land Package" style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Confirmation No.</div>
+        <input value={form.confirmationNo} onChange={set('confirmationNo')} style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Day-wise Itinerary</div>
+        <textarea
+          value={form.itinerary}
+          onChange={set('itinerary')}
+          rows={8}
+          placeholder={'Day 1: Arrival, transfer to hotel\nDay 2: City tour...'}
+          style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+        />
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
 function AddVisaModal({ deal, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '', visaStatus: 'Not Applied',
@@ -1880,6 +1976,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const visas = deal.visaVendors || [];
   const payments = deal.clientPayments || [];
   const travellers = deal.travellers || [];
+  const landPackages = deal.landVendors || [];
 
   return (
     <main className="v2-page">
@@ -2417,7 +2514,70 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
             )}
           </div>
 
+          {/* Land Package / Itinerary */}
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">🗺</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Land Package / Itinerary</h3>
+                <div className="v2-acc-meta">
+                  {landPackages.length > 0 ? `${landPackages.length} ${landPackages.length === 1 ? 'package' : 'packages'}` : 'None added yet'}
+                </div>
+              </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('land')}>+ Add Land Package</button>
+              </div>
+            </div>
+            {landPackages.length > 0 && (
+              <div className="v2-acc-body">
+                {landPackages.map((l, i) => {
+                  const lSell = toINR(l.sellingPrice, l.currency, l.exchangeRate);
+                  const lPaid = sumBy(l.payments, 'amount');
+                  return (
+                    <div key={l.id || i} className="v2-hotel-card">
+                      <div className="v2-hotel-head">
+                        <div className="v2-hotel-code">{(l.name || 'LD').slice(0, 2).toUpperCase()}</div>
+                        <div className="v2-hotel-info">
+                          <div className="v2-hotel-name">{l.name || 'Land Package'}</div>
+                          <div className="v2-hotel-meta">{l.confirmationNo ? `Confirmation: ${l.confirmationNo}` : 'DMC / Land Vendor'}</div>
+                        </div>
+                        <div className="v2-hotel-price">
+                          <div className="v2-hotel-price-val">{fmtINRFull(lSell)}</div>
+                        </div>
+                        <button
+                          onClick={() => deleteVendor('landVendors', l.id, 'land package')}
+                          disabled={busy}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✕</button>
+                      </div>
+                      {l.itinerary && (
+                        <div style={{ background: '#f9fafc', borderRadius: 8, padding: '12px 14px', fontSize: 12.5, color: '#33446b', whiteSpace: 'pre-line', lineHeight: 1.6, marginTop: 12 }}>
+                          {l.itinerary}
+                        </div>
+                      )}
+                      {lSell > 0 && (
+                        <div className="v2-pay-bar">
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${lPaid >= lSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (lPaid / lSell) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid: <b>{fmtINRFull(lPaid)}</b> / {fmtINRFull(lSell)}</span>
+                            <span className={`v2-pay-status ${lPaid >= lSell ? 'paid' : 'due'}`}>
+                              {lPaid >= lSell ? '✓ Fully Paid' : `${fmtINRFull(lSell - lPaid)} due`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {modal === 'flight' && <AddFlightModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'land' && <AddLandModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'ticket' && <ScanTicketModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'train' && <AddTrainModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'traveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
