@@ -119,7 +119,11 @@ function Sidebar() {
     // instead of hunting for V1 DOM buttons hidden underneath the overlay.
     const v2PagesOn = localStorage.getItem('voyage:v2pages') === 'on';
     if (v2PagesOn) {
-      const v2Routable = { dashboard: 'dashboard', leads: 'leads', deals: 'deals' };
+      const v2Routable = {
+        dashboard: 'dashboard', leads: 'leads', deals: 'deals',
+        clients: 'clients', proposals: 'proposals', vendors: 'vendors',
+        visa: 'visa', tasks: 'tasks',
+      };
       if (v2Routable[key]) {
         // Primary path: direct imperative call, no event/listener race possible.
         if (typeof window.__voyagePagesNav === 'function') {
@@ -130,13 +134,9 @@ function Sidebar() {
         }
         return;
       }
-      // Sections not yet built in V2 pages
+      // Accounts/Reports stay V1-only — financial ledger + analytics engine,
+      // out of scope for V2 in this pass.
       const comingSoon = {
-        clients: 'Clients — coming to V2 Pages soon',
-        proposals: 'Proposals — coming to V2 Pages soon',
-        vendors: 'Vendors master — coming to V2 Pages soon',
-        visa: 'Visa filings — coming to V2 Pages soon',
-        tasks: 'Tasks — coming to V2 Pages soon',
         accounts: 'Accounts — turn off V2 Pages to use V1 Accounts for now',
         reports: 'Reports — turn off V2 Pages to use V1 Reports for now',
       };

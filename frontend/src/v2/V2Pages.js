@@ -141,6 +141,25 @@ function useLeads() {
   return { items, loading, error, refetch };
 }
 
+function useTasks() {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${apiBase()}/api/tasks`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((data) => { if (!cancelled) { setTasks(Array.isArray(data) ? data : []); setLoading(false); } })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [reloadTick]);
+
+  const refetch = useCallback(() => setReloadTick((t) => t + 1), []);
+  return { tasks, loading, refetch };
+}
+
 /* ─── Data model helpers — MATCH App.js exactly ─────────
    Real deal shape (flat, not nested under .client or .summary):
      clientName, contactNo, email, destination, travelDates,
@@ -1882,6 +1901,8 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const [clientForm, setClientForm] = useState(null);
   const [savingClient, setSavingClient] = useState(false);
   const [busy, setBusy] = useState(false); // stage-change / delete in flight
+  const [aiInsight, setAiInsight] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
 
@@ -1977,6 +1998,44 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const payments = deal.clientPayments || [];
   const travellers = deal.travellers || [];
   const landPackages = deal.landVendors || [];
+
+  const askAI = async () => {
+    setAiLoading(true);
+    setAiInsight('');
+    try {
+      const summary = [
+        `Client: ${clientName(deal)}`,
+        `Destination: ${destination(deal) || 'not set'}`,
+        `Travel dates: ${deal.travelDates || 'not set'}`,
+        `Stage: ${stageOf(deal)}`,
+        `Selling price: ₹${sell}`,
+        `Vendor cost: ₹${cost}`,
+        `Profit: ₹${profit} (${marginPct}% margin)`,
+        `Client paid so far: ₹${paid}`,
+        `Balance due: ₹${balance}`,
+        `Components: ${flights.length} flight(s), ${trains.length} train(s), ${hotels.length} hotel(s), ${visas.length} visa(s), ${landPackages.length} land package(s)`,
+        `Travellers on file: ${travellers.length}`,
+      ].join('\n');
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 400,
+          system: 'You are a sharp travel-agency deal analyst. Given a deal summary, respond with 2-4 short, concrete, actionable bullet points (start each with "•") — flag margin risk, missing balance collection, missing components (e.g. no visa added yet for an international destination), or anything that looks off. No preamble, no sign-off, just the bullets. Keep each bullet under 20 words.',
+          messages: [{ role: 'user', content: summary }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
+      const text = (data.content || []).map((c) => c.text || '').join('').trim();
+      setAiInsight(text || 'No specific concerns — deal looks fine.');
+    } catch (e) {
+      window.veToast && window.veToast('Could not get AI insight — try again', 'warning');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <main className="v2-page">
@@ -2603,7 +2662,14 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                 <li>Client balance <b>{fmtINR(balance)}</b> still pending</li>
               </ul>
             )}
-            <button className="v2-ai-cta" onClick={() => window.veToast && window.veToast('AI Deal Insights coming to V2 soon — use the AI Assistant in V1 for now', 'warning')}>+ Ask AI about this deal</button>
+            {aiInsight && (
+              <div className="v2-ai-body" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.15)', whiteSpace: 'pre-line' }}>
+                {aiInsight}
+              </div>
+            )}
+            <button className="v2-ai-cta" onClick={askAI} disabled={aiLoading}>
+              {aiLoading ? '⏳ Thinking…' : '+ Ask AI about this deal'}
+            </button>
           </div>
 
           <div className="v2-side-card">
@@ -2673,17 +2739,478 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   );
 }
 
+/* ─── CLIENTS — unique clients aggregated from leads/deals ─ */
+
+function ClientsV2({ leads, onDealClick }) {
+  const [search, setSearch] = useState('');
+  const [selectedKey, setSelectedKey] = useState(null);
+
+  const clients = useMemo(() => {
+    const map = new Map();
+    leads.forEach((l) => {
+      const key = (l.contactNo || clientName(l) || l._id).trim();
+      if (!map.has(key)) {
+        map.set(key, {
+          key, name: clientName(l), phone: l.contactNo || '', email: l.email || '',
+          deals: [], totalValue: 0, totalPaid: 0, bookedCount: 0,
+        });
+      }
+      const c = map.get(key);
+      c.deals.push(l);
+      c.totalValue += sellINR(l);
+      c.totalPaid += paidINR(l);
+      if (isBookedStage(l)) c.bookedCount++;
+      if (l.contactNo && !c.phone) c.phone = l.contactNo;
+      if (l.email && !c.email) c.email = l.email;
+    });
+    return Array.from(map.values()).sort((a, b) => b.totalValue - a.totalValue);
+  }, [leads]);
+
+  const filtered = useMemo(() => {
+    if (!search) return clients;
+    const q = search.toLowerCase();
+    return clients.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(search));
+  }, [clients, search]);
+
+  const selected = filtered.find((c) => c.key === selectedKey) || filtered[0] || null;
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Clients</h1>
+          <p className="v2-page-sub">Every client derived from your leads &amp; deals · {clients.length} total</p>
+        </div>
+      </div>
+
+      <div className="v2-filter-bar">
+        <input type="text" className="v2-filter-search" placeholder="Search name or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
+      <div className="v2-leads-layout">
+        <div className="v2-leads-list">
+          <div className="v2-leads-list-head">
+            <h3 className="v2-leads-list-title">All Clients <span className="v2-leads-count">{filtered.length}</span></h3>
+          </div>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No clients found.</div>
+          ) : (
+            filtered.map((c) => (
+              <div
+                key={c.key}
+                className={`v2-lead-card ${selected && selected.key === c.key ? 'selected' : ''}`}
+                onClick={() => setSelectedKey(c.key)}
+              >
+                <div className="v2-lead-avatar" style={{ background: avatarGradient(c.name) }}>{initialsOf(c.name)}</div>
+                <div className="v2-lead-main">
+                  <div className="v2-lead-namerow">
+                    <span className="v2-lead-name">{c.name}</span>
+                    {c.bookedCount > 0 && <span className="v2-chip vip">{c.bookedCount} BOOKED</span>}
+                  </div>
+                  <div>
+                    {c.phone && <span className="v2-lead-phone">{c.phone}</span>}
+                    {c.email && <span className="v2-lead-source">{c.email}</span>}
+                  </div>
+                  <div className="v2-lead-trip">{c.deals.length} {c.deals.length === 1 ? 'enquiry/deal' : 'enquiries/deals'} on file</div>
+                </div>
+                <div className="v2-lead-meta">
+                  <div className="v2-lead-value">{fmtINR(c.totalValue)}</div>
+                  <div className="v2-lead-time">{fmtINR(c.totalPaid)} paid</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {selected && (
+          <div className="v2-lead-detail">
+            <div className="v2-detail-head">
+              <div className="v2-detail-head-top">
+                <span className="v2-detail-head-chip">Client</span>
+              </div>
+              <h2 className="v2-detail-name">{selected.name}</h2>
+              {selected.phone && <div className="v2-detail-phone">{selected.phone}</div>}
+            </div>
+            <div className="v2-detail-body">
+              <div className="v2-detail-section-title">All Deals &amp; Enquiries</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {selected.deals.map((d) => (
+                  <div
+                    key={d._id}
+                    onClick={() => onDealClick(d)}
+                    style={{ cursor: 'pointer', background: '#f9fafc', borderRadius: 8, padding: '10px 12px' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <b style={{ fontSize: 12.5 }}>{destination(d) || 'Enquiry'}</b>
+                      <span style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 700 }}>{fmtINR(sellINR(d))}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 3 }}>{stageOf(d)} · {d.travelDates || 'Dates flexible'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+/* ─── PROPOSALS — leads that have been quoted, not yet booked ─ */
+
+function ProposalsV2({ leads, onDealClick }) {
+  const proposals = useMemo(() => {
+    return leads
+      .filter((l) => !isBookedStage(l) && !isCancelledStage(l) && sellINR(l) > 0)
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  }, [leads]);
+
+  const totalValue = proposals.reduce((s, l) => s + sellINR(l), 0);
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Proposals</h1>
+          <p className="v2-page-sub">Quoted enquiries awaiting a decision · {proposals.length} open · {fmtINR(totalValue)} pipeline</p>
+        </div>
+      </div>
+
+      <div className="v2-leads-kpis" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        <div className="v2-lead-kpi rate">
+          <div className="v2-lead-kpi-label">Open Proposals</div>
+          <div className="v2-lead-kpi-value">{proposals.length}</div>
+          <div className="v2-lead-kpi-sub">Quoted, not yet booked</div>
+        </div>
+        <div className="v2-lead-kpi converted">
+          <div className="v2-lead-kpi-label">Pipeline Value</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalValue)}</div>
+          <div className="v2-lead-kpi-sub">If all convert</div>
+        </div>
+        <div className="v2-lead-kpi warm">
+          <div className="v2-lead-kpi-label">Avg. Quote Value</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(proposals.length ? totalValue / proposals.length : 0)}</div>
+          <div className="v2-lead-kpi-sub">Per proposal</div>
+        </div>
+      </div>
+
+      <div className="v2-leads-list">
+        <div className="v2-leads-list-head">
+          <h3 className="v2-leads-list-title">All Proposals <span className="v2-leads-count">{proposals.length}</span></h3>
+        </div>
+        {proposals.length === 0 ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No open proposals — quote a lead to see it here.</div>
+        ) : (
+          proposals.map((l) => (
+            <div key={l._id} className="v2-lead-card" onClick={() => onDealClick(l)}>
+              <div className="v2-lead-avatar" style={{ background: avatarGradient(clientName(l)) }}>{initialsOf(clientName(l))}</div>
+              <div className="v2-lead-main">
+                <div className="v2-lead-namerow">
+                  <span className="v2-lead-name">{clientName(l)}</span>
+                  <span className={`v2-chip ${categorize(l)}`}>{stageOf(l)}</span>
+                </div>
+                <div className="v2-lead-trip">{flagOf(destination(l))} {destination(l) || 'Enquiry'} · {l.travelDates || 'Dates flexible'}</div>
+              </div>
+              <div className="v2-lead-meta">
+                <div className="v2-lead-value">{fmtINR(sellINR(l))}</div>
+                <div className="v2-lead-time">{timeAgo(l.updatedAt || l.createdAt)}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </main>
+  );
+}
+
+/* ─── VENDORS — aggregated from every vendor entry across deals ─ */
+
+function VendorsV2({ leads }) {
+  const vendors = useMemo(() => {
+    const map = new Map();
+    const categories = [
+      ['flightVendors', 'Flight'], ['hotelVendors', 'Hotel'], ['trainVendors', 'Train'],
+      ['landVendors', 'Land'], ['visaVendors', 'Visa'],
+    ];
+    leads.forEach((l) => {
+      categories.forEach(([key, label]) => {
+        (l[key] || []).forEach((v) => {
+          const name = (v.name || v.hotelName || 'Unnamed').trim();
+          const mapKey = label + '|' + name;
+          if (!map.has(mapKey)) map.set(mapKey, { name, category: label, cost: 0, bookings: 0 });
+          const entry = map.get(mapKey);
+          entry.cost += toINR(v.costPrice, v.currency, v.exchangeRate);
+          entry.bookings += 1;
+        });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
+  }, [leads]);
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Vendors</h1>
+          <p className="v2-page-sub">Every supplier used across your deals, ranked by total spend</p>
+        </div>
+      </div>
+
+      <div className="v2-panel">
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">All Vendors <span style={{ fontWeight: 400, fontSize: 13, color: '#6b7a99' }}>({vendors.length})</span></h3>
+        </div>
+        {vendors.length === 0 ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No vendor entries yet — add flights/hotels/etc. to deals to see them here.</div>
+        ) : (
+          <table className="info" style={{ width: '100%' }}>
+            <thead>
+              <tr><th>Vendor</th><th>Category</th><th style={{ textAlign: 'center' }}>Bookings</th><th style={{ textAlign: 'right' }}>Total Cost</th></tr>
+            </thead>
+            <tbody>
+              {vendors.map((v, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 600, color: '#0d1b3e' }}>{v.name}</td>
+                  <td><span className="v2-detail-tag" style={{ background: '#f4f6fb', color: '#33446b' }}>{v.category}</span></td>
+                  <td style={{ textAlign: 'center' }}>{v.bookings}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtINR(v.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </main>
+  );
+}
+
+/* ─── VISA FILINGS — every visa entry across all deals ──── */
+
+function VisaFilingsV2({ leads, onDealClick }) {
+  const [filter, setFilter] = useState('all');
+
+  const filings = useMemo(() => {
+    const rows = [];
+    leads.forEach((l) => {
+      (l.visaVendors || []).forEach((v) => {
+        rows.push({
+          deal: l, name: v.name || 'Visa', status: v.visaStatus || 'Not Applied',
+          cost: toINR(v.sellingPrice, v.currency, v.exchangeRate),
+        });
+      });
+    });
+    return rows;
+  }, [leads]);
+
+  const filtered = filter === 'all' ? filings : filings.filter((f) => f.status === filter);
+  const counts = useMemo(() => {
+    const c = { 'Not Applied': 0, Applied: 0, Approved: 0, Rejected: 0 };
+    filings.forEach((f) => { if (c[f.status] !== undefined) c[f.status]++; });
+    return c;
+  }, [filings]);
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Visa Filings</h1>
+          <p className="v2-page-sub">Every visa application across all deals · {filings.length} total</p>
+        </div>
+      </div>
+
+      <div className="v2-filter-bar">
+        <button className={`v2-filter-chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All <span className="count">{filings.length}</span></button>
+        {Object.entries(counts).map(([status, count]) => (
+          <button key={status} className={`v2-filter-chip ${filter === status ? 'active' : ''}`} onClick={() => setFilter(status)}>
+            {status} <span className="count">{count}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="v2-leads-list">
+        {filtered.length === 0 ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No visa filings in this category.</div>
+        ) : (
+          filtered.map((f, i) => {
+            const statusColor = { 'Not Applied': 'cold', Applied: 'warm', Approved: 'ok', Rejected: 'hot' }[f.status] || 'cold';
+            return (
+              <div key={i} className="v2-lead-card" onClick={() => onDealClick(f.deal)}>
+                <div className="v2-lead-avatar" style={{ background: avatarGradient(clientName(f.deal)) }}>{initialsOf(clientName(f.deal))}</div>
+                <div className="v2-lead-main">
+                  <div className="v2-lead-namerow">
+                    <span className="v2-lead-name">{clientName(f.deal)}</span>
+                    <span className={`v2-chip ${statusColor === 'ok' ? 'booked' : statusColor}`}>{f.status}</span>
+                  </div>
+                  <div className="v2-lead-trip">{f.name} · {flagOf(destination(f.deal))} {destination(f.deal) || ''}</div>
+                </div>
+                <div className="v2-lead-meta">
+                  <div className="v2-lead-value">{fmtINR(f.cost)}</div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </main>
+  );
+}
+
+/* ─── TASKS — real backend-persisted to-do list ─────────── */
+
+function TasksV2({ tasks, leads, refetch }) {
+  const [showNew, setShowNew] = useState(false);
+  const [form, setForm] = useState({ title: '', dueDate: '', dealId: '', priority: 'Normal' });
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState('open');
+
+  const filtered = useMemo(() => {
+    if (filter === 'open') return tasks.filter((t) => !t.done);
+    if (filter === 'done') return tasks.filter((t) => t.done);
+    return tasks;
+  }, [tasks, filter]);
+
+  const toggleDone = async (task) => {
+    try {
+      const res = await fetch(`${apiBase()}/api/tasks/${task._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ done: !task.done }),
+      });
+      if (!res.ok) throw new Error();
+      refetch();
+    } catch {
+      window.veToast && window.veToast('Could not update task', 'warning');
+    }
+  };
+
+  const deleteTask = async (task) => {
+    if (!window.confirm('Delete this task?')) return;
+    try {
+      const res = await fetch(`${apiBase()}/api/tasks/${task._id}`, { method: 'DELETE', headers: authHeaders() });
+      if (!res.ok) throw new Error();
+      refetch();
+    } catch {
+      window.veToast && window.veToast('Could not delete task', 'warning');
+    }
+  };
+
+  const createTask = async () => {
+    if (!form.title.trim()) { window.veToast && window.veToast('Task title is required', 'warning'); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${apiBase()}/api/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error();
+      window.veToast && window.veToast('Task added ✓', 'success');
+      setForm({ title: '', dueDate: '', dealId: '', priority: 'Normal' });
+      setShowNew(false);
+      refetch();
+    } catch {
+      window.veToast && window.veToast('Could not save task', 'warning');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dealLabel = (dealId) => {
+    const d = leads.find((l) => l._id === dealId);
+    return d ? `${clientName(d)} — ${destination(d) || 'Enquiry'}` : '';
+  };
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Tasks</h1>
+          <p className="v2-page-sub">Reminders and to-dos, optionally linked to a deal</p>
+        </div>
+        <div className="v2-header-actions">
+          <button className="v2-cta" onClick={() => setShowNew(true)}>+ New Task</button>
+        </div>
+      </div>
+
+      <div className="v2-filter-bar">
+        <button className={`v2-filter-chip ${filter === 'open' ? 'active' : ''}`} onClick={() => setFilter('open')}>Open <span className="count">{tasks.filter((t) => !t.done).length}</span></button>
+        <button className={`v2-filter-chip ${filter === 'done' ? 'active' : ''}`} onClick={() => setFilter('done')}>Done <span className="count">{tasks.filter((t) => t.done).length}</span></button>
+        <button className={`v2-filter-chip ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All <span className="count">{tasks.length}</span></button>
+      </div>
+
+      <div className="v2-leads-list">
+        {filtered.length === 0 ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>Nothing here.</div>
+        ) : (
+          filtered.map((t) => (
+            <div key={t._id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #f4f7fc' }}>
+              <input type="checkbox" checked={!!t.done} onChange={() => toggleDone(t)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: t.done ? '#6b7a99' : '#0d1b3e', textDecoration: t.done ? 'line-through' : 'none' }}>
+                  {t.title}
+                </div>
+                <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>
+                  {t.dueDate ? `Due ${t.dueDate}` : 'No due date'}{t.dealId ? ` · ${dealLabel(t.dealId)}` : ''}
+                </div>
+              </div>
+              {t.priority && t.priority !== 'Normal' && <span className={`v2-chip ${t.priority === 'High' || t.priority === 'Urgent' ? 'hot' : 'warm'}`}>{t.priority}</span>}
+              <button onClick={() => deleteTask(t)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {showNew && (
+        <ModalShell
+          title="+ New Task"
+          onClose={() => setShowNew(false)}
+          onSubmit={createTask}
+          saving={saving}
+          err=""
+        >
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Task *</div>
+            <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Follow up on Vietnam quote" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Due Date</div>
+              <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Priority</div>
+              <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))} style={inputStyle}>
+                {['Low', 'Normal', 'High', 'Urgent'].map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Link to Deal (optional)</div>
+            <select value={form.dealId} onChange={(e) => setForm((f) => ({ ...f, dealId: e.target.value }))} style={inputStyle}>
+              <option value="">None</option>
+              {leads.slice(0, 100).map((l) => (
+                <option key={l._id} value={l._id}>{clientName(l)} — {destination(l) || 'Enquiry'}</option>
+              ))}
+            </select>
+          </div>
+        </ModalShell>
+      )}
+    </main>
+  );
+}
+
 /* ─── ROUTER ─────────────────────────────────────────── */
 
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks'];
+
 export default function V2Pages() {
-  const [route, setRoute] = useState('dashboard'); // 'dashboard' | 'leads' | 'deals' | 'deal'
+  const [route, setRoute] = useState('dashboard');
   const [selectedDeal, setSelectedDeal] = useState(null);
   const { items, loading, error, refetch } = useLeads();
+  const { tasks, refetch: refetchTasks } = useTasks();
 
   const navigate = useCallback((key) => {
-    if (key === 'dashboard') { setRoute('dashboard'); setSelectedDeal(null); }
-    if (key === 'leads') { setRoute('leads'); setSelectedDeal(null); }
-    if (key === 'deals') { setRoute('deals'); setSelectedDeal(null); }
+    if (ROUTABLE_V2_KEYS.includes(key)) { setRoute(key); setSelectedDeal(null); }
   }, []);
 
   // Two independent paths to receive sidebar navigation, so a timing quirk
@@ -2756,6 +3283,21 @@ export default function V2Pages() {
   }
   if (route === 'leads') {
     return <LeadsV2 leads={items} onDealClick={openDeal} mode="active" onLeadCreated={refetch} />;
+  }
+  if (route === 'clients') {
+    return <ClientsV2 leads={items} onDealClick={openDeal} />;
+  }
+  if (route === 'proposals') {
+    return <ProposalsV2 leads={items} onDealClick={openDeal} />;
+  }
+  if (route === 'vendors') {
+    return <VendorsV2 leads={items} />;
+  }
+  if (route === 'visa') {
+    return <VisaFilingsV2 leads={items} onDealClick={openDeal} />;
+  }
+  if (route === 'tasks') {
+    return <TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />;
   }
   return <DashboardV2 leads={items} onDealClick={openDeal} />;
 }

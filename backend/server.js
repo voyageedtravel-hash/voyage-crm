@@ -100,6 +100,12 @@ const start = async () => {
     const counterSchema = new mongoose.Schema({ _id: String, seq: Number });
     const Counter = mongoose.model("Counter", counterSchema);
 
+    // ─── TASK SCHEMA (V2) ─────────────────────────────────────────────────────
+    // Flexible schema matching the Lead pattern — simple to-dos/reminders,
+    // optionally linked to a deal via dealId.
+    const taskSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
+    const Task = mongoose.model("Task", taskSchema);
+
     async function getNextDealNumber() {
       const year = new Date().getFullYear();
       const counterId = `deals_${year}`;
@@ -208,6 +214,52 @@ const start = async () => {
         const lead = await Lead.findByIdAndDelete(req.params.id);
         if (!lead) return res.status(404).json({ error: "Deal not found" });
         res.json({ success: true, message: "Deal deleted" });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // ─── TASK ROUTES (V2) ─────────────────────────────────────────────────────
+    app.get("/api/tasks", authMiddleware, async (req, res) => {
+      try {
+        const filter = {};
+        if (req.query.dealId) filter.dealId = req.query.dealId;
+        const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 }).limit(500);
+        res.json(tasks);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.post("/api/tasks", authMiddleware, async (req, res) => {
+      try {
+        const task = new Task({ ...req.body, done: !!req.body.done, createdBy: req.user?.username || "" });
+        await task.save();
+        res.status(201).json(task);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.put("/api/tasks/:id", authMiddleware, async (req, res) => {
+      try {
+        const task = await Task.findByIdAndUpdate(
+          req.params.id,
+          { ...req.body, updatedAt: new Date() },
+          { new: true }
+        );
+        if (!task) return res.status(404).json({ error: "Task not found" });
+        res.json(task);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.delete("/api/tasks/:id", authMiddleware, async (req, res) => {
+      try {
+        const task = await Task.findByIdAndDelete(req.params.id);
+        if (!task) return res.status(404).json({ error: "Task not found" });
+        res.json({ success: true });
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
