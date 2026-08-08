@@ -1024,20 +1024,117 @@ async function patchDeal(dealId, patch) {
   return res.json();
 }
 
+/* ─── AI EXTRACT — screenshot / PDF → structured JSON ───
+   Same backend endpoint + prompts V1's "AI Extract" already uses in
+   production (/api/chat, model claude-sonnet-4-6). Reads a flight or
+   hotel screenshot / PDF and returns structured fields to pre-fill
+   the Add Flight / Add Hotel form — the person still reviews and
+   confirms before saving, nothing is auto-committed.               */
+
+const AIX_SYS = {
+  flight: 'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back — put every leg in "sectors" in journey order, leave "returnSectors" empty. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
+  hotel: 'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
+};
+
+const fileToDataURI = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
+const blockFromDataURI = (dataURI) => {
+  const pdf = dataURI.match(/^data:application\/pdf;base64,(.+)$/);
+  if (pdf) return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf[1] } };
+  const im = dataURI.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+  if (im) return { type: 'image', source: { type: 'base64', media_type: im[1], data: im[2] } };
+  return null;
+};
+
+async function runAIExtract(kind, files) {
+  const dataURIs = await Promise.all(files.map(fileToDataURI));
+  const content = dataURIs.map(blockFromDataURI).filter(Boolean);
+  if (!content.length) throw new Error('Could not read the attached file(s)');
+  content.push({ type: 'text', text: 'Extract from the attached file(s).' });
+
+  const res = await fetch(`${apiBase()}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8000,
+      system: AIX_SYS[kind],
+      messages: [{ role: 'user', content }],
+    }),
+  });
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Server didn't respond (HTTP ${res.status})`); }
+  if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || `API error (HTTP ${res.status})`);
+  const txt = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
+  if (!txt) throw new Error('AI returned nothing — file may not have been readable');
+  try { return JSON.parse(txt); }
+  catch { throw new Error("Could not understand the AI's response — try a clearer image"); }
+}
+
 function AddFlightModal({ deal, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
   });
+  const [aiSectors, setAiSectors] = useState(null); // full multi-sector data from AI, if used
+  const [aiReturnSectors, setAiReturnSectors] = useState(null);
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('flight', files);
+      const mapSec = (x) => ({
+        from: x.from || '', fromName: x.fromName || '', to: x.to || '', toName: x.toName || '',
+        date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
+        airlineCode: (x.airlineCode || '').toUpperCase(), airlineName: x.airlineName || '',
+      });
+      const secs = (j.sectors || []).map(mapSec);
+      const retSecs = (j.returnSectors || []).map(mapSec);
+      if (!secs.length) throw new Error('No flight details found in this file');
+      setAiSectors(secs);
+      setAiReturnSectors(retSecs);
+      const first = secs[0];
+      setForm((f) => ({
+        ...f,
+        name: j.vendorName || first.airlineName || f.name,
+        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
+        from: first.from, fromName: first.fromName, to: first.to, toName: first.toName,
+        date: first.date, depTime: first.depTime, arrTime: first.arrTime,
+      }));
+      const totalLegs = secs.length + retSecs.length;
+      setAiSummary(
+        totalLegs > 1
+          ? `✓ Extracted ${secs.length} outbound + ${retSecs.length} return sector${retSecs.length !== 1 ? 's' : ''} — all will be saved. Fields below show the first leg for review.`
+          : '✓ Extracted — review the fields below before saving.'
+      );
+      window.veToast && window.veToast('Flight details extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer screenshot');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
 
   const submit = async () => {
     if (!form.name.trim()) { setErr('Airline name is required'); return; }
     setSaving(true);
     setErr('');
     try {
+      const usingAI = Array.isArray(aiSectors) && aiSectors.length > 0;
       const newVendor = {
         id: 'fl_' + Date.now(),
         name: form.name,
@@ -1045,12 +1142,12 @@ function AddFlightModal({ deal, onClose, onSaved }) {
         costPrice: Number(form.costPrice) || 0,
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
-        flightType: 'oneway',
-        sectors: [{
+        flightType: usingAI && aiReturnSectors && aiReturnSectors.length ? 'return' : 'oneway',
+        sectors: usingAI ? aiSectors : [{
           from: form.from, fromName: form.fromName, to: form.to, toName: form.toName,
           date: form.date, depTime: form.depTime, arrTime: form.arrTime,
         }],
-        returnSectors: [],
+        returnSectors: usingAI ? aiReturnSectors : [],
         payments: [],
       };
       const updated = await patchDeal(deal._id, { flightVendors: [...(deal.flightVendors || []), newVendor] });
@@ -1064,6 +1161,16 @@ function AddFlightModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="+ Add Flight" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+          </span>
+          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+      </div>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam Airlines" style={inputStyle} />
@@ -1112,9 +1219,47 @@ function AddHotelModal({ deal, onClose, onSaved }) {
     hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
   });
+  const [extraHotels, setExtraHotels] = useState([]); // any additional hotels found beyond the first
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('hotel', files);
+      const hotels = j.hotels || [];
+      if (!hotels.length) throw new Error('No hotel details found in this file');
+      const h0 = hotels[0];
+      setForm((f) => ({
+        ...f,
+        hotelName: h0.hotelName || f.hotelName,
+        city: h0.city || f.city,
+        starRating: h0.starRating || f.starRating,
+        roomCategory: h0.roomCategory || f.roomCategory,
+        checkIn: h0.checkIn || f.checkIn,
+        checkOut: h0.checkOut || f.checkOut,
+        costPrice: h0.costPrice != null ? String(h0.costPrice) : f.costPrice,
+      }));
+      setExtraHotels(hotels.slice(1));
+      setAiSummary(
+        hotels.length > 1
+          ? `✓ Found ${hotels.length} hotels. First one filled below — the other ${hotels.length - 1} will be added when you save.`
+          : '✓ Extracted — review the fields below before saving.'
+      );
+      window.veToast && window.veToast('Hotel details extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer screenshot');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
 
   const submit = async () => {
     if (!form.hotelName.trim()) { setErr('Hotel name is required'); return; }
@@ -1133,8 +1278,24 @@ function AddHotelModal({ deal, onClose, onSaved }) {
         checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
         payments: [],
       };
-      const updated = await patchDeal(deal._id, { hotelVendors: [...(deal.hotelVendors || []), newVendor] });
-      window.veToast && window.veToast('Hotel added ✓', 'success');
+      // Any additional hotels the AI found (e.g. a multi-city itinerary
+      // screenshot) get added as their own entries too — cost price only,
+      // since selling price/markup is a per-property decision.
+      const extraVendors = extraHotels.map((h, i) => ({
+        id: 'ht_' + Date.now() + '_' + i,
+        hotelName: h.hotelName || '', currency: 'INR',
+        costPrice: Number(h.costPrice) || 0, sellingPrice: 0, exchangeRate: 1,
+        country: '', city: h.city || '', starRating: h.starRating || '',
+        roomCategory: h.roomCategory || '', checkIn: h.checkIn || '', checkOut: h.checkOut || '',
+        confirmationNo: '', payments: [],
+      }));
+      const updated = await patchDeal(deal._id, {
+        hotelVendors: [...(deal.hotelVendors || []), newVendor, ...extraVendors],
+      });
+      window.veToast && window.veToast(
+        extraVendors.length ? `${1 + extraVendors.length} hotels added ✓` : 'Hotel added ✓',
+        'success'
+      );
       onSaved(updated);
     } catch (e) {
       setErr('Could not save — check connection and try again.');
@@ -1144,6 +1305,16 @@ function AddHotelModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="+ Add Hotel" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+          </span>
+          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+      </div>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Name *</div>
         <input value={form.hotelName} onChange={set('hotelName')} placeholder="e.g. Radisson Hotel Danang" style={inputStyle} />
