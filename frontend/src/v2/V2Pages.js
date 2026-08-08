@@ -1034,6 +1034,9 @@ async function patchDeal(dealId, patch) {
 const AIX_SYS = {
   flight: 'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back — put every leg in "sectors" in journey order, leave "returnSectors" empty. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
   hotel: 'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
+  train: 'You extract train booking details for a travel agency CRM (domestic Indian trains like IRCTC/Rajdhani/Vande Bharat or international rail like Eurostar/Shinkansen/Trenitalia). Output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"isInternational":boolean,"tripType":"one-way|return|multi-city","segments":[...],"returnSegments":[...]}. Each segment = {"trainNo":string,"trainName":string,"from":"station code","fromStation":"full station name","to":"station code","toStation":"full station name","date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","classOfTravel":"1A|2A|3A|SL|CC|EC|2S|Sleeper|First Class|Business|Standard|Other","coach":string,"pnr":string}. RULES: (1) Distinguish tripType: "return" if journey goes A→B and later comes back B→A — outbound legs in segments, homebound in returnSegments; "one-way" if single direction; "multi-city" for 3+ cities. (2) For Indian trains: use IRCTC station codes (NDLS, MMCT, HWH, MAS, etc.) and Indian classes (1A/2A/3A/SL/CC/EC/2S). Set isInternational=false. (3) For international: use rail station codes if visible, common classes First/Business/Standard. Set isInternational=true. (4) PNR is 10 digits for IRCTC. Missing fields = empty string or null. Never invent a PNR — leave empty if unclear.',
+  ticket: 'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed. (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
+  passport: 'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ when available — it is the most reliable source.',
 };
 
 const fileToDataURI = (file) => new Promise((resolve, reject) => {
@@ -1207,6 +1210,169 @@ function AddFlightModal({ deal, onClose, onSaved }) {
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Arr Time</div>
           <input value={form.arrTime} onChange={set('arrTime')} placeholder="06:05" style={inputStyle} />
+        </div>
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
+function AddTrainModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '',
+    date: '', depTime: '', arrTime: '', classOfTravel: '3A', pnr: '',
+  });
+  const [aiSegments, setAiSegments] = useState(null);
+  const [aiReturnSegments, setAiReturnSegments] = useState(null);
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('train', files);
+      const mapSeg = (x) => ({
+        trainNo: x.trainNo || '', trainName: x.trainName || '',
+        from: x.from || '', fromStation: x.fromStation || '', to: x.to || '', toStation: x.toStation || '',
+        date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
+        classOfTravel: x.classOfTravel || '', coach: x.coach || '', pnr: x.pnr || '',
+      });
+      const segs = (j.segments || []).map(mapSeg);
+      const retSegs = (j.returnSegments || []).map(mapSeg);
+      if (!segs.length) throw new Error('No train details found in this file');
+      setAiSegments(segs);
+      setAiReturnSegments(retSegs);
+      const first = segs[0];
+      setForm((f) => ({
+        ...f,
+        name: j.vendorName || first.trainName || f.name,
+        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
+        trainNo: first.trainNo, trainName: first.trainName,
+        from: first.from, fromStation: first.fromStation, to: first.to, toStation: first.toStation,
+        date: first.date, depTime: first.depTime, arrTime: first.arrTime,
+        classOfTravel: first.classOfTravel || f.classOfTravel, pnr: first.pnr,
+      }));
+      const totalLegs = segs.length + retSegs.length;
+      setAiSummary(
+        totalLegs > 1
+          ? `✓ Extracted ${segs.length} outbound + ${retSegs.length} return segment${retSegs.length !== 1 ? 's' : ''} — all will be saved.`
+          : '✓ Extracted — review the fields below before saving.'
+      );
+      window.veToast && window.veToast('Train details extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer screenshot');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
+
+  const submit = async () => {
+    if (!form.name.trim() && !form.trainName.trim()) { setErr('Train name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const usingAI = Array.isArray(aiSegments) && aiSegments.length > 0;
+      const newVendor = {
+        id: 'tr_' + Date.now(),
+        name: form.name || form.trainName,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        tripType: usingAI && aiReturnSegments && aiReturnSegments.length ? 'return' : 'one-way',
+        isInternational: false,
+        segments: usingAI ? aiSegments : [{
+          trainNo: form.trainNo, trainName: form.trainName,
+          from: form.from, fromStation: form.fromStation, to: form.to, toStation: form.toStation,
+          date: form.date, depTime: form.depTime, arrTime: form.arrTime,
+          classOfTravel: form.classOfTravel, pnr: form.pnr,
+        }],
+        returnSegments: usingAI ? aiReturnSegments : [],
+        payments: [],
+      };
+      const updated = await patchDeal(deal._id, { trainVendors: [...(deal.trainVendors || []), newVendor] });
+      window.veToast && window.veToast('Train added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="+ Add Train" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+          </span>
+          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Train No.</div>
+          <input value={form.trainNo} onChange={set('trainNo')} placeholder="12951" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Train Name *</div>
+          <input value={form.trainName} onChange={set('trainName')} placeholder="Rajdhani Express" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (station code)</div>
+          <input value={form.from} onChange={set('from')} placeholder="NDLS" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (station code)</div>
+          <input value={form.to} onChange={set('to')} placeholder="MMCT" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (station name)</div>
+          <input value={form.fromStation} onChange={set('fromStation')} placeholder="New Delhi" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (station name)</div>
+          <input value={form.toStation} onChange={set('toStation')} placeholder="Mumbai Central" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input value={form.date} onChange={set('date')} placeholder="15 Oct 2026" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Dep Time</div>
+          <input value={form.depTime} onChange={set('depTime')} placeholder="1630" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Arr Time</div>
+          <input value={form.arrTime} onChange={set('arrTime')} placeholder="0800" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Class</div>
+          <select value={form.classOfTravel} onChange={set('classOfTravel')} style={inputStyle}>
+            {['1A', '2A', '3A', 'SL', 'CC', 'EC', '2S', 'Sleeper', 'First Class', 'Business', 'Standard'].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>PNR</div>
+          <input value={form.pnr} onChange={set('pnr')} placeholder="10-digit PNR" style={inputStyle} />
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
@@ -1459,6 +1625,158 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
   );
 }
 
+function ScanTicketModal({ deal, onClose, onSaved }) {
+  const [extracting, setExtracting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('ticket', files);
+      if (!j.pnr && !(j.passengers || []).length) throw new Error('No ticket details found in this file');
+      setPreview(j);
+      window.veToast && window.veToast('E-Ticket details extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer scan');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
+
+  const submit = async () => {
+    if (!preview) { setErr('Scan an e-ticket first'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const updated = await patchDeal(deal._id, { eTicket: preview });
+      window.veToast && window.veToast('E-Ticket saved ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="✨ Scan E-Ticket" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🎫'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading ticket…' : 'Upload the e-ticket (PDF or screenshot) — reads PNR, passengers, segments'}
+          </span>
+          <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+      </div>
+      {preview && (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ background: '#f9fafc', borderRadius: 8, padding: '10px 12px' }}>
+            <div className="v2-detail-field-label">PNR</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 700, color: '#0d1b3e' }}>
+              {preview.pnr || '—'}
+            </div>
+            <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4 }}>
+              {preview.airlineName || preview.airlineCode || ''} {preview.issuedDate ? `· Issued ${preview.issuedDate}` : ''}
+            </div>
+          </div>
+          {(preview.passengers || []).length > 0 && (
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Passengers</div>
+              {preview.passengers.map((p, i) => (
+                <div key={i} style={{ fontSize: 12.5, padding: '4px 0', borderBottom: i < preview.passengers.length - 1 ? '1px solid #f0f2f7' : 'none' }}>
+                  {p.name} <span style={{ color: '#6b7a99' }}>· {p.type} · Ticket {p.ticketNo || '—'} · Seat {p.seat || '—'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+function ScanTravellerModal({ deal, onClose, onSaved }) {
+  const [extracting, setExtracting] = useState(false);
+  const [preview, setPreview] = useState(null); // travellers array pending confirmation
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true);
+    setErr('');
+    try {
+      const j = await runAIExtract('passport', files);
+      const list = j.travellers || [];
+      if (!list.length) throw new Error('No traveller details found in this file');
+      setPreview(list);
+      window.veToast && window.veToast(`${list.length} traveller${list.length !== 1 ? 's' : ''} extracted ✓`, 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read this file — try a clearer scan');
+    } finally {
+      setExtracting(false);
+      e.target.value = '';
+    }
+  };
+
+  const submit = async () => {
+    if (!preview || !preview.length) { setErr('Scan a passport/ID first'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newTravellers = preview.map((t) => ({
+        id: 'tv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        firstName: t.firstName || '', lastName: t.lastName || 'LNU',
+        salutation: t.salutation || 'Mr', type: t.type || 'Adult',
+        dob: t.dob || '', isLead: false,
+        passportNo: t.passportNo || '', idType: t.idType || 'Passport',
+        passportIssue: t.passportIssue || '', passportExpiry: t.passportExpiry || '',
+        nationality: t.nationality || 'Indian',
+      }));
+      const updated = await patchDeal(deal._id, { travellers: [...(deal.travellers || []), ...newTravellers] });
+      window.veToast && window.veToast(`${newTravellers.length} traveller${newTravellers.length !== 1 ? 's' : ''} added ✓`, 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="✨ Scan Passport / ID" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🛂'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading document(s)…' : 'Upload passport / Aadhaar photos — one or more travellers at once'}
+          </span>
+          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+      </div>
+      {preview && preview.length > 0 && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div className="v2-detail-field-label">Found {preview.length} traveller{preview.length !== 1 ? 's' : ''} — review before saving</div>
+          {preview.map((t, i) => (
+            <div key={i} style={{ background: '#f9fafc', borderRadius: 8, padding: '10px 12px', fontSize: 12.5 }}>
+              <b>{t.salutation} {t.firstName} {t.lastName}</b>
+              <div style={{ color: '#6b7a99', marginTop: 2 }}>
+                {t.idType || 'Passport'} {t.passportNo || '—'} · {t.nationality || '—'} · {t.dob || 'DOB unknown'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
 function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
@@ -1557,9 +1875,11 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const isBooked = isBookedStage(deal);
 
   const flights = deal.flightVendors || [];
+  const trains = deal.trainVendors || [];
   const hotels = deal.hotelVendors || [];
   const visas = deal.visaVendors || [];
   const payments = deal.clientPayments || [];
+  const travellers = deal.travellers || [];
 
   return (
     <main className="v2-page">
@@ -1742,6 +2062,36 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                 </div>
               )}
 
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #e8ecf5' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div className="v2-detail-field-label" style={{ marginBottom: 0 }}>
+                    Travellers ({travellers.length})
+                  </div>
+                  <button className="v2-acc-btn-sm" onClick={() => setModal('traveller')}>🛂 Scan Passport / ID</button>
+                </div>
+                {travellers.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#6b7a99' }}>No travellers added yet.</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {travellers.map((t) => (
+                      <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9fafc', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>
+                        <div>
+                          <b>{t.salutation} {t.firstName} {t.lastName}</b>
+                          <span style={{ color: '#6b7a99', marginLeft: 8 }}>
+                            {t.type} · {t.idType} {t.passportNo || ''}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => deleteVendor('travellers', t.id, 'traveller')}
+                          disabled={busy}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 13 }}
+                        >✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="v2-client-actions">
                 {editingClient ? (
                   <>
@@ -1788,9 +2138,11 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                 <h3 className="v2-acc-title">Flights</h3>
                 <div className="v2-acc-meta">
                   {flights.length > 0 ? `${flights.length} ${flights.length === 1 ? 'flight' : 'flights'}` : 'None added yet'}
+                  {deal.eTicket?.pnr ? ` · PNR ${deal.eTicket.pnr}` : ''}
                 </div>
               </div>
               <div className="v2-acc-actions">
+                <button className="v2-acc-btn-sm" onClick={() => setModal('ticket')}>🎫 Scan E-Ticket</button>
                 <button className="v2-acc-btn-primary" onClick={() => setModal('flight')}>+ Add Flight</button>
               </div>
             </div>
@@ -1849,6 +2201,85 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                             <span>Paid: <b>{fmtINRFull(fPaid)}</b> / {fmtINRFull(fSell)}</span>
                             <span className={`v2-pay-status ${fPaid >= fSell ? 'paid' : 'due'}`}>
                               {fPaid >= fSell ? '✓ Fully Paid' : `${fmtINRFull(fSell - fPaid)} due`}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Trains */}
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">🚆</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Trains</h3>
+                <div className="v2-acc-meta">
+                  {trains.length > 0 ? `${trains.length} ${trains.length === 1 ? 'train' : 'trains'}` : 'None added yet'}
+                </div>
+              </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('train')}>+ Add Train</button>
+              </div>
+            </div>
+            {trains.length > 0 && (
+              <div className="v2-acc-body">
+                {trains.map((t, i) => {
+                  const allSegs = [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to);
+                  const tSell = toINR(t.sellingPrice, t.currency, t.exchangeRate);
+                  const tPaid = sumBy(t.payments, 'amount');
+                  return (
+                    <div key={t.id || i} className="v2-flight-card">
+                      <div className="v2-flight-head">
+                        <div className="v2-airline-code">{(t.name || 'TR').slice(0, 2).toUpperCase()}</div>
+                        <div className="v2-flight-info">
+                          <div className="v2-flight-airline">{t.name || 'Train'}</div>
+                          <div className="v2-flight-meta">
+                            {t.tripType === 'return' ? 'Round trip' : 'One way'} · {allSegs.length} segment{allSegs.length !== 1 ? 's' : ''}
+                            {allSegs[0]?.pnr ? ` · PNR ${allSegs[0].pnr}` : ''}
+                          </div>
+                        </div>
+                        <div className="v2-flight-price">
+                          <div className="v2-flight-price-val">{fmtINRFull(tSell)}</div>
+                        </div>
+                        <button
+                          onClick={() => deleteVendor('trainVendors', t.id, 'train')}
+                          disabled={busy}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✕</button>
+                      </div>
+                      {allSegs.map((seg, si) => (
+                        <div className="v2-flight-leg" key={si}>
+                          <div>
+                            <div className="v2-flight-city">{(seg.from || '—').toUpperCase()}</div>
+                            <div className="v2-flight-airport">{seg.fromStation || ''}</div>
+                            <div className="v2-flight-time">{seg.depTime || '—'}</div>
+                            <div className="v2-flight-date">{seg.date || ''} · {seg.classOfTravel || ''}</div>
+                          </div>
+                          <div className="v2-flight-duration">
+                            <div style={{ borderTop: '1px dashed #d4dcec', marginTop: 8, width: 100 }}></div>
+                          </div>
+                          <div className="v2-flight-right">
+                            <div className="v2-flight-city">{(seg.to || '—').toUpperCase()}</div>
+                            <div className="v2-flight-airport">{seg.toStation || ''}</div>
+                            <div className="v2-flight-time">{seg.arrTime || '—'}</div>
+                          </div>
+                        </div>
+                      ))}
+                      {tSell > 0 && (
+                        <div className="v2-pay-bar">
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${tPaid >= tSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (tPaid / tSell) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid: <b>{fmtINRFull(tPaid)}</b> / {fmtINRFull(tSell)}</span>
+                            <span className={`v2-pay-status ${tPaid >= tSell ? 'paid' : 'due'}`}>
+                              {tPaid >= tSell ? '✓ Fully Paid' : `${fmtINRFull(tSell - tPaid)} due`}
                             </span>
                           </div>
                         </div>
@@ -1987,6 +2418,9 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           </div>
 
           {modal === 'flight' && <AddFlightModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'ticket' && <ScanTicketModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'train' && <AddTrainModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'traveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'hotel' && <AddHotelModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'visa' && <AddVisaModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
