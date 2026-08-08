@@ -940,7 +940,7 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
                 </button>
                 <button
                   className="v2-detail-cta"
-                  onClick={() => window.veToast && window.veToast('Proposal generation stays in V1 for now', 'warning')}
+                  onClick={() => openProposalV2(selected)}
                 >◆ Send Proposal</button>
                 <button
                   className="v2-detail-cta"
@@ -1097,6 +1097,198 @@ async function runAIExtract(kind, files) {
   if (!txt) throw new Error('AI returned nothing — file may not have been readable');
   try { return JSON.parse(txt); }
   catch { throw new Error("Could not understand the AI's response — try a clearer image"); }
+}
+
+/* ─── PROPOSAL PDF — client-side HTML, same mechanism V1 uses
+   (window.open + document.write, then browser's own "Save as PDF"
+   via window.print()). Simplified from V1's ~500-line builder: no
+   cover-photo/gallery picker, no per-tier hotel options, no custom
+   day-override editing UI — those need dedicated settings screens
+   this pass doesn't build. Everything else (flights, hotels, trains,
+   land itinerary, visa, pricing, payment summary, standard
+   cancellation policy) uses the deal's real saved data.            */
+
+const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function buildProposalHTMLV2(deal) {
+  const ref = deal.dealNumber || ('VE' + String(Date.now()).slice(-6));
+  const pax = `${deal.adults || 0} Adults${Number(deal.children) > 0 ? `, ${deal.children} Children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} Infants` : ''}`;
+  const totalPax = paxOf(deal);
+  const flights = (deal.flightVendors || []).filter((f) => (f.sectors || []).some((s) => s.from || s.to));
+  const trains = (deal.trainVendors || []).filter((t) => (t.segments || []).some((s) => s.from || s.to));
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName || h.city);
+  const visas = (deal.visaVendors || []).filter((v) => v.name);
+  const landPkgs = (deal.landVendors || []).filter((l) => l.itinerary);
+  const nightsTotal = hotels.reduce((s, h) => s + (Number(h.nights) || 0), 0);
+
+  const dayHdr = /^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+  const parseDays = (text) => {
+    const raw = (text || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const first = raw.findIndex((l) => dayHdr.test(l));
+    if (first < 0) return raw;
+    const out = []; let cur = null;
+    raw.slice(first).forEach((l) => {
+      if (dayHdr.test(l)) { if (cur !== null) out.push(cur); cur = l; }
+      else { cur = cur === null ? l : cur + ' ' + l; }
+    });
+    if (cur !== null) out.push(cur);
+    return out;
+  };
+  const allDayLines = landPkgs.map((l) => parseDays(l.itinerary)).reduce((a, b) => a.concat(b), []);
+
+  const sell = sellINR(deal);
+  const paid = paidINR(deal);
+  const balance = sell - paid;
+
+  const statCard = (val, label) => `<div style="flex:1;min-width:100px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${val}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">${label}</div></div>`;
+  const statsRibbon = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px">
+    ${nightsTotal ? statCard(nightsTotal, 'NIGHTS') : ''}
+    ${hotels.length ? statCard(hotels.length, `STAY${hotels.length > 1 ? 'S' : ''}`) : ''}
+    ${flights.length ? statCard(flights.reduce((s, f) => s + (f.sectors || []).length + (f.returnSectors || []).length, 0), 'FLIGHT SECTORS') : ''}
+    ${allDayLines.length ? statCard(allDayLines.length, 'CURATED DAYS') : ''}
+    ${statCard(totalPax || '–', `TRAVELLER${totalPax > 1 ? 'S' : ''}`)}
+  </div>`;
+
+  const priceBlock = sell > 0 ? `<div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;margin-bottom:18px;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div><div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">PACKAGE PRICE</div><div style="font-size:30px;font-weight:800;margin-top:4px">₹${sell.toLocaleString('en-IN')}</div><div style="font-size:11px;opacity:.75;margin-top:2px">For ${pax}</div></div>
+    <div style="text-align:right;font-size:11px;opacity:.85">Ref: ${escHtml(ref)}<br>Valid for 7 days from today</div>
+  </div>` : '';
+
+  const payBlock = (sell > 0 && paid > 0) ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:18px">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT SUMMARY</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
+      <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${paid.toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED — thank you! 🙏</div></div>
+      <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0, balance).toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
+    </div>
+  </div>` : '';
+
+  const flightBlocks = flights.map((f) => {
+    const legs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
+    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
+      <div style="font-weight:800;color:#0d1b3e;font-size:13px;margin-bottom:10px">${escHtml(f.name || legs[0]?.airlineName || 'Flight')}</div>
+      ${legs.map((s) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #f0f2f7;font-size:12px">
+        <div><b style="color:#0d1b3e">${escHtml((s.from || '').toUpperCase())}</b> ${escHtml(s.fromName || '')} → <b style="color:#0d1b3e">${escHtml((s.to || '').toUpperCase())}</b> ${escHtml(s.toName || '')}</div>
+        <div style="color:#5a6b8c">${escHtml(s.date || '')} · ${escHtml(s.depTime || '')}-${escHtml(s.arrTime || '')}</div>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+
+  const trainBlocks = trains.map((t) => {
+    const legs = [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to);
+    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
+      <div style="font-weight:800;color:#0d1b3e;font-size:13px;margin-bottom:10px">${escHtml(t.name || 'Train')}</div>
+      ${legs.map((s) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #f0f2f7;font-size:12px">
+        <div><b style="color:#0d1b3e">${escHtml(s.fromStation || s.from || '')}</b> → <b style="color:#0d1b3e">${escHtml(s.toStation || s.to || '')}</b></div>
+        <div style="color:#5a6b8c">${escHtml(s.date || '')} · ${escHtml(s.classOfTravel || '')}</div>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+
+  const hotelBlocks = hotels.map((h) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-weight:800;color:#0d1b3e;font-size:13px">${escHtml(h.hotelName || 'Hotel')} ${h.starRating ? '★'.repeat(Number(h.starRating) || 0) : ''}</div>
+      <div style="font-size:11.5px;color:#5a6b8c;margin-top:4px">${escHtml(h.roomCategory || 'Room')} · ${escHtml(h.city || '')} ${h.nights ? `· ${h.nights} nights` : ''}</div>
+      <div style="font-size:11px;color:#8a97b5;margin-top:2px">${escHtml(h.checkIn || '')}${h.checkOut ? ` → ${escHtml(h.checkOut)}` : ''}</div>
+    </div>
+  </div>`).join('');
+
+  const visaBlocks = visas.map((v) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 18px;margin-bottom:10px;font-size:12.5px;color:#33415e"><b style="color:#0d1b3e">${escHtml(v.name)}</b> — ${escHtml(v.visaStatus || 'Not Applied')}</div>`).join('');
+
+  const timelineHTML = allDayLines.length ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:12px;line-height:1.9;color:#33415e;margin-bottom:16px">
+    ${allDayLines.map((d, i) => `<div style="padding:6px 0;${i < allDayLines.length - 1 ? 'border-bottom:1px solid #f0f2f7' : ''}"><b style="color:#c9961a">Day ${i + 1}:</b> ${escHtml(d.replace(dayHdr, '').replace(/^[:\-–\s]+/, ''))}</div>`).join('')}
+  </div>` : '';
+
+  const incItems = [];
+  if (flights.length) incItems.push('Flights as mentioned above');
+  if (hotels.length) { incItems.push('Hotel stays with breakfast'); incItems.push('All transfers & sightseeing as per itinerary'); }
+  if (visas.some((v) => (Number(v.sellingPrice) || 0) > 0)) incItems.push('Visa fees & visa assistance');
+  incItems.push('Dedicated trip manager on WhatsApp');
+  incItems.push('All taxes included — no hidden charges');
+
+  const excItems = ['Meals other than specified'];
+  if (!visas.some((v) => (Number(v.sellingPrice) || 0) > 0)) excItems.push('Visa fees (unless mentioned)');
+  excItems.push('Travel insurance & personal expenses');
+  excItems.push('Anything not mentioned in inclusions');
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${escHtml(clientName(deal))}</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#f4f6fb;color:#33415e}
+  @media print{ .noprint{display:none} }
+</style></head><body>
+<div style="max-width:820px;margin:0 auto;background:#fff">
+  <div style="position:relative;background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:44px 40px 30px;color:#fff">
+    <div style="font-size:10px;letter-spacing:3px;color:#f0c842;font-weight:800">VOYAGE-ED TRAVELS · PROPOSAL</div>
+    <div style="font-family:Georgia,serif;font-size:34px;font-weight:700;margin-top:10px">Trip to ${escHtml(destination(deal) || 'Your Destination')}</div>
+    <div style="font-size:13px;opacity:.85;margin-top:8px">${escHtml(pax)} · ${escHtml(deal.travelDates || 'Dates flexible')}</div>
+  </div>
+  <div style="background:rgba(10,21,48,.9);padding:12px 40px;color:#fff;font-size:12px">Specially crafted for <b style="color:#f0c842">${escHtml(clientName(deal)) || 'our valued guest'}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
+
+  <div style="padding:34px 36px">
+    ${statsRibbon}
+    ${priceBlock}
+    ${flights.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}` : ''}
+    ${trains.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
+    ${hotels.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}` : ''}
+    ${allDayLines.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}` : ''}
+    ${visas.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🛂 Visa</h2>${visaBlocks}` : ''}
+
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
+      <div style="flex:1;min-width:250px">
+        <h2 style="font-size:15px;color:#15803d;margin:0 0 8px">✅ What's Included</h2>
+        <div style="background:#fff;border:1px solid #d3ecd9;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
+          ${incItems.map((x) => '✅ ' + escHtml(x)).join('<br>')}
+        </div>
+      </div>
+      <div style="flex:1;min-width:250px">
+        <h2 style="font-size:15px;color:#b4540a;margin:0 0 8px">ℹ️ Not Included</h2>
+        <div style="background:#fff;border:1px solid #f3e3cf;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
+          ${excItems.map((x) => '✖ ' + escHtml(x)).join('<br>')}
+        </div>
+      </div>
+    </div>
+
+    <h2 style="font-size:17px;color:#0d1b3e;margin:24px 0 10px">📋 Booking Terms &amp; Cancellation Policy</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:11.5px;line-height:1.9;color:#4a5772">
+      <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">BOOKING &amp; PAYMENT POLICY</div>
+      • A <b style="color:#0d1b3e">non-refundable deposit of ₹20,000 per person</b> is required to initiate a booking, OR the actual hotel, flight &amp; land component minimum due — whichever is higher.<br>
+      • If the date of travel is <b style="color:#0d1b3e">less than 7 days</b> away, a non-refundable deposit of <b style="color:#0d1b3e">50% of the total cost</b> shall be applicable.<br>
+      • <b style="color:#0d1b3e">Full payment</b> is required on confirmation of all services and before departure from India.<br>
+      • Photocopies of the passport (<b style="color:#0d1b3e">first &amp; address page</b>) are mandatory for all destinations.<br>
+      <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin:12px 0 6px">CANCELLATION POLICY</div>
+      <table style="width:100%;border-collapse:collapse;margin:2px 0 8px;font-size:11px">
+        <tr><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left">Days Before Departure</th><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left">Cancellation Charge</th></tr>
+        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">30 – 16 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#0d1b3e">50% of the total cost</td></tr>
+        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd">15 – 8 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd;font-weight:700;color:#0d1b3e">75% of the total cost</td></tr>
+        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">7 – 0 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#b91c1c">100% of the total cost (no refund)</td></tr>
+      </table>
+      • Visa fee &amp; service charges are <b style="color:#0d1b3e">non-refundable</b>.<br>
+      • No refund for any <b style="color:#0d1b3e">unused part of the services</b> provided in the package.<br>
+      • Overseas Insurance Policy after issuance is non-refundable (Travel Insurance Charges: <b style="color:#0d1b3e">₹1,000 per person</b>).
+    </div>
+    <div style="font-size:10px;color:#8a97b5;margin-top:12px;line-height:1.7">This itinerary is a preliminary proposal. All services &amp; prices are subject to availability and currency fluctuation at the time of booking. GST is applicable as per government norms.</div>
+
+    ${payBlock}
+
+    <div style="margin-top:22px;display:flex;justify-content:flex-end"><div style="text-align:right">
+      <div style="font-family:Georgia,serif;font-size:16px;color:#0d1b3e;font-style:italic">Warm regards,</div>
+      <div style="font-size:12.5px;font-weight:800;color:#0d1b3e;margin-top:2px">Vishal Sharma &amp; Sahitya Singh</div>
+      <div style="font-size:10.5px;color:#7d8bab">Founders · Voyage-Ed Travels</div>
+    </div></div>
+    <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;color:#fff">
+      <b style="color:#f0c842">Ready to make it happen?</b><br>
+      <span style="font-size:12px">📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com<br>GMADA Aerocity, Mohali · Learn · Travel · Explore</span>
+    </div>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
+function openProposalV2(deal) {
+  const w = window.open('', '_blank');
+  if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
+  w.document.write(buildProposalHTMLV2(deal));
+  w.document.close();
 }
 
 function AddFlightModal({ deal, onClose, onSaved }) {
@@ -2069,7 +2261,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
             ) : (
               <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
             )}
-            <button className="v2-hero-btn gold" onClick={() => window.veToast && window.veToast('Proposal PDF generation stays in V1 for now', 'warning')}>📄 Proposal PDF</button>
+            <button className="v2-hero-btn gold" onClick={() => openProposalV2(deal)}>📄 Proposal PDF</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -2279,7 +2471,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                     ) : (
                       <button className="v2-acc-btn-sm" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
                     )}
-                    <button className="v2-acc-btn-primary" onClick={() => window.veToast && window.veToast('Proposal PDF generation stays in V1 for now', 'warning')}>📄 Proposal PDF</button>
+                    <button className="v2-acc-btn-primary" onClick={() => openProposalV2(deal)}>📄 Proposal PDF</button>
                   </>
                 )}
               </div>
