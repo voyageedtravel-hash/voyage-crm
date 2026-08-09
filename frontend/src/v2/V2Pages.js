@@ -2421,6 +2421,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const [aiInsight, setAiInsight] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [savingTiers, setSavingTiers] = useState(false);
 
   useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
 
@@ -2534,6 +2535,72 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  // ─── Tiered pricing (3★/4★/5★ stay options) ────────────
+  // Same shape V1 uses: deal.tiers[] with {star, label, enabled, booked,
+  // hotels[], totalPrice}. bookedTierOf()/sellINR() already read this —
+  // marking a tier 'booked' here is what actually drives the deal's
+  // selling price once tiered pricing is switched on, exactly like V1.
+  const defaultTiersV2 = () => ([
+    { id: 'tier_3', star: 3, label: '3-Star', enabled: false, booked: false, hotels: [], totalPrice: '' },
+    { id: 'tier_4', star: 4, label: '4-Star', enabled: false, booked: false, hotels: [], totalPrice: '' },
+    { id: 'tier_5', star: 5, label: '5-Star', enabled: false, booked: false, hotels: [], totalPrice: '' },
+  ]);
+
+  const patchTiers = async (nextTiers, nextUseTiers, activityLabel) => {
+    setSavingTiers(true);
+    try {
+      const updated = await patchDeal(deal._id, {
+        tiers: nextTiers,
+        useTiers: nextUseTiers,
+        auditLog: activityLabel ? [...(deal.auditLog || []), logEntry(activityLabel)] : (deal.auditLog || []),
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+    } catch (ex) {
+      window.veToast && window.veToast('Could not save — try again', 'warning');
+    } finally {
+      setSavingTiers(false);
+    }
+  };
+
+  const toggleUseTiers = () => {
+    const next = !deal.useTiers;
+    const tiers = (deal.tiers && deal.tiers.length) ? deal.tiers : defaultTiersV2();
+    patchTiers(tiers, next, next ? 'Switched to tiered pricing' : 'Switched off tiered pricing');
+  };
+
+  const updateTier = (tierId, key, val) => {
+    const next = (deal.tiers || []).map((t) => t.id === tierId ? { ...t, [key]: val } : t);
+    patchTiers(next, deal.useTiers, null);
+  };
+
+  const markTierBooked = (tierId) => {
+    const next = (deal.tiers || []).map((t) => ({ ...t, booked: t.id === tierId }));
+    const booked = next.find((t) => t.id === tierId);
+    patchTiers(next, deal.useTiers, `Booked the ${booked?.label || 'selected'} option`);
+  };
+
+  const addTierHotel = (tierId) => {
+    const next = (deal.tiers || []).map((t) => t.id === tierId
+      ? { ...t, hotels: [...(t.hotels || []), { id: 'th_' + Date.now(), hotelName: '', city: '', photoUrl: '', roomCategory: '' }] }
+      : t);
+    patchTiers(next, deal.useTiers, null);
+  };
+
+  const updateTierHotel = (tierId, hotelId, key, val) => {
+    const next = (deal.tiers || []).map((t) => t.id === tierId
+      ? { ...t, hotels: (t.hotels || []).map((h) => h.id === hotelId ? { ...h, [key]: val } : h) }
+      : t);
+    patchTiers(next, deal.useTiers, null);
+  };
+
+  const removeTierHotel = (tierId, hotelId) => {
+    const next = (deal.tiers || []).map((t) => t.id === tierId
+      ? { ...t, hotels: (t.hotels || []).filter((h) => h.id !== hotelId) }
+      : t);
+    patchTiers(next, deal.useTiers, null);
   };
 
   const changeStage = async (newStage, confirmMsg) => {
@@ -2738,6 +2805,100 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
             {balance > 0 ? 'Payment pending' : 'Fully collected'}
           </div>
         </div>
+      </div>
+
+      {/* Stay Options (Tiered Pricing) */}
+      <div className="v2-acc" style={{ marginBottom: 24 }}>
+        <div className="v2-acc-head">
+          <div className="v2-acc-icon">🏆</div>
+          <div className="v2-acc-title-block">
+            <h3 className="v2-acc-title">Stay Options (3★ / 4★ / 5★)</h3>
+            <div className="v2-acc-meta">
+              {deal.useTiers ? 'Tiered pricing is ON — the booked tier sets the selling price' : 'Off — selling price comes from individual components'}
+            </div>
+          </div>
+          <div className="v2-acc-actions">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#33446b', cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!deal.useTiers} onChange={toggleUseTiers} disabled={savingTiers} />
+              Use tiered pricing
+            </label>
+          </div>
+        </div>
+        {deal.useTiers && (
+          <div className="v2-acc-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+              {(deal.tiers && deal.tiers.length ? deal.tiers : defaultTiersV2()).map((t) => (
+                <div
+                  key={t.id}
+                  style={{
+                    border: t.booked ? '2px solid #c9a84c' : '1px solid #e8ecf5',
+                    borderRadius: 14, padding: 16,
+                    background: t.booked ? '#faf7f0' : '#fff',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontWeight: 700, color: '#0d1b3e', fontSize: 14 }}>{'★'.repeat(t.star)} {t.label}</div>
+                    {t.booked && <span className="v2-chip vip">BOOKED</span>}
+                  </div>
+
+                  {(t.hotels || []).map((h) => (
+                    <div key={h.id} style={{ background: '#f9fafc', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                      {h.photoUrl && <img src={h.photoUrl} alt={h.hotelName} style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, marginBottom: 6 }} />}
+                      <input
+                        value={h.hotelName}
+                        onChange={(e) => updateTierHotel(t.id, h.id, 'hotelName', e.target.value)}
+                        placeholder="Hotel name"
+                        style={{ ...inputStyle, padding: '6px 8px', fontSize: 12, marginBottom: 6 }}
+                      />
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          value={h.city}
+                          onChange={(e) => updateTierHotel(t.id, h.id, 'city', e.target.value)}
+                          placeholder="City"
+                          style={{ ...inputStyle, padding: '6px 8px', fontSize: 12, flex: 1 }}
+                        />
+                        <button onClick={() => removeTierHotel(t.id, h.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                      </div>
+                      <div
+                        onPaste={(e) => {
+                          const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+                          if (it) {
+                            e.preventDefault();
+                            const f = it.getAsFile();
+                            if (f) imgToDataURL(f, (d) => updateTierHotel(t.id, h.id, 'photoUrl', d));
+                          }
+                        }}
+                        tabIndex={0}
+                        style={{ fontSize: 10.5, color: '#6b7a99', marginTop: 6, cursor: 'text', border: '1px dashed #d4dcec', borderRadius: 6, padding: 6, textAlign: 'center' }}
+                      >
+                        {h.photoUrl ? 'Click, paste to replace photo' : 'Click here, paste (Ctrl+V) a photo'}
+                      </div>
+                    </div>
+                  ))}
+                  <button onClick={() => addTierHotel(t.id)} className="v2-acc-btn-sm" style={{ width: '100%', marginBottom: 10 }}>+ Add Hotel</button>
+
+                  <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Total Price (₹)</div>
+                  <input
+                    type="number"
+                    value={t.totalPrice}
+                    onChange={(e) => updateTier(t.id, 'totalPrice', e.target.value)}
+                    placeholder="0"
+                    style={{ ...inputStyle, marginBottom: 10 }}
+                  />
+
+                  <button
+                    onClick={() => markTierBooked(t.id)}
+                    disabled={savingTiers || t.booked}
+                    className={t.booked ? 'v2-acc-btn-sm' : 'v2-acc-btn-primary'}
+                    style={{ width: '100%' }}
+                  >
+                    {t.booked ? '✓ This is booked' : 'Mark as Booked'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="v2-deal-layout">
