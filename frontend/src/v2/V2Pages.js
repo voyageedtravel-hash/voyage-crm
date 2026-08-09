@@ -213,9 +213,16 @@ const sellINR = (d) => {
 };
 const costINR = (d) => dealVendors(d).reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
 const paidINR = (d) => sumBy(d.clientPayments, 'amount');
-const profitINR = (d) => sellINR(d) - costINR(d);
+const refundedINR = (d) => sumBy(d.refunds, 'amount');
+// Matches V1's dealFinance() exactly: netSell = sell - refunded, then
+// GPM and balance are both computed off the *net* figure (a refund is
+// cash that left the business, so it reduces both realized profit and
+// what's still owed by the client). Forfeit-amount edge case not
+// carried over — niche field, not worth the extra complexity here.
+const netSellINR = (d) => sellINR(d) - refundedINR(d);
+const profitINR = (d) => netSellINR(d) - costINR(d);
 // eslint-disable-next-line no-unused-vars
-const balanceINR = (d) => sellINR(d) - paidINR(d);
+const balanceINR = (d) => netSellINR(d) - paidINR(d);
 
 // Categorize for pipeline chips: booked/cancelled first, then hot/warm/cold by priority + age
 const categorize = (lead) => {
@@ -1007,7 +1014,7 @@ function CurrencyCostRow({ form, setForm }) {
   );
 }
 
-function ModalShell({ title, onClose, onSubmit, saving, err, children }) {
+function ModalShell({ title, onClose, onSubmit, saving, err, children, submitLabel }) {
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
@@ -1025,7 +1032,7 @@ function ModalShell({ title, onClose, onSubmit, saving, err, children }) {
         <div style={{ padding: '18px 26px', borderTop: '1px solid #e8ecf5', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button onClick={onClose} className="v2-detail-cta" style={{ padding: '11px 20px' }}>Cancel</button>
           <button onClick={onSubmit} disabled={saving} className="v2-detail-cta primary" style={{ padding: '11px 20px', opacity: saving ? 0.6 : 1 }}>
-            {saving ? 'Saving…' : '✓ Add'}
+            {saving ? 'Saving…' : (submitLabel || '✓ Add')}
           </button>
         </div>
       </div>
@@ -1684,8 +1691,16 @@ function AddTrainModal({ deal, onClose, onSaved }) {
   );
 }
 
-function AddHotelModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
+function AddHotelModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    hotelName: editing.hotelName || '', currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    country: editing.country || '', city: editing.city || '', starRating: editing.starRating || '4',
+    roomCategory: editing.roomCategory || '', checkIn: editing.checkIn || '', checkOut: editing.checkOut || '',
+    confirmationNo: editing.confirmationNo || '', photoUrl: editing.photoUrl || '',
+  } : {
     hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
     photoUrl: '',
@@ -1737,8 +1752,7 @@ function AddHotelModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const newVendor = {
-        id: 'ht_' + Date.now(),
+      const vendorFields = {
         hotelName: form.hotelName,
         currency: form.currency,
         costPrice: Number(form.costPrice) || 0,
@@ -1748,8 +1762,17 @@ function AddHotelModal({ deal, onClose, onSaved }) {
         starRating: form.starRating, roomCategory: form.roomCategory,
         checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
         photoUrl: form.photoUrl,
-        payments: [],
       };
+
+      if (editing) {
+        const updatedList = (deal.hotelVendors || []).map((h) => h.id === editing.id ? { ...h, ...vendorFields } : h);
+        const updated = await patchDeal(deal._id, { hotelVendors: updatedList });
+        window.veToast && window.veToast('Hotel updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+
+      const newVendor = { id: 'ht_' + Date.now(), ...vendorFields, payments: [] };
       // Any additional hotels the AI found (e.g. a multi-city itinerary
       // screenshot) get added as their own entries too — cost price only,
       // since selling price/markup is a per-property decision.
@@ -1776,17 +1799,19 @@ function AddHotelModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Add Hotel" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
-          </span>
-          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-      </div>
+    <ModalShell title={editing ? '✎ Edit Hotel' : '+ Add Hotel'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+            </span>
+            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Name *</div>
         <input value={form.hotelName} onChange={set('hotelName')} placeholder="e.g. Radisson Hotel Danang" style={inputStyle} />
@@ -2064,6 +2089,81 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
   );
 }
 
+const REFUND_MODES = ['Bank Transfer', 'UPI', 'Cash'];
+const REFUND_REASONS = ['Service Issue', 'Visa Rejection', 'Travel Plan Cancelled', 'Goodwill / Adjustment', 'Other'];
+const REFUND_APPROVERS = ['Vishal Sharma', 'Sahitya Singh'];
+
+function AddRefundModal({ deal, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    amount: '', mode: REFUND_MODES[0], reason: REFUND_REASONS[0], approvedBy: REFUND_APPROVERS[0],
+    date: '', refNo: '', note: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.amount || Number(form.amount) <= 0) { setErr('Enter a valid amount'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newRefund = {
+        amount: Number(form.amount), mode: form.mode, reason: form.reason, approvedBy: form.approvedBy,
+        date: form.date || new Date().toISOString().slice(0, 10), refNo: form.refNo, note: form.note,
+      };
+      const updated = await patchDeal(deal._id, { refunds: [...(deal.refunds || []), newRefund] });
+      window.veToast && window.veToast('Refund recorded ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="− Record Refund to Client" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Refunded (₹) *</div>
+        <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Mode</div>
+          <select value={form.mode} onChange={set('mode')} style={inputStyle}>
+            {REFUND_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input type="date" value={form.date} onChange={set('date')} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reason</div>
+          <select value={form.reason} onChange={set('reason')} style={inputStyle}>
+            {REFUND_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Approved By</div>
+          <select value={form.approvedBy} onChange={set('approvedBy')} style={inputStyle}>
+            {REFUND_APPROVERS.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reference No. (optional)</div>
+        <input value={form.refNo} onChange={set('refNo')} style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
+        <input value={form.note} onChange={set('note')} placeholder="e.g. Hotel cancelled, partial refund" style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 function ScanTicketModal({ deal, onClose, onSaved }) {
   const [extracting, setExtracting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -2220,7 +2320,8 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 
 function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
-  const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment'
+  const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
+  const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
   const [editingClient, setEditingClient] = useState(false);
   const [clientForm, setClientForm] = useState(null);
   const [savingClient, setSavingClient] = useState(false);
@@ -2233,6 +2334,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const handleSaved = (updated) => {
     setDeal(updated);
     setModal(null);
+    setEditingVendor(null);
     onDealUpdated && onDealUpdated(updated);
   };
 
@@ -2307,10 +2409,12 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const sell = sellINR(deal);
   const cost = costINR(deal);
   const paid = paidINR(deal);
-  const profit = sell - cost;
-  const marginPct = sell > 0 ? Math.round((profit / sell) * 1000) / 10 : 0;
-  const balance = sell - paid;
-  const collectionPct = sell > 0 ? Math.round((paid / sell) * 1000) / 10 : 0;
+  const refunded = refundedINR(deal);
+  const netSell = sell - refunded;
+  const profit = netSell - cost;
+  const marginPct = netSell > 0 ? Math.round((profit / netSell) * 1000) / 10 : 0;
+  const balance = netSell - paid;
+  const collectionPct = netSell > 0 ? Math.round((paid / netSell) * 1000) / 10 : 0;
 
   const isVIP = (deal.priority === 'High' || deal.priority === 'Urgent');
   const isBooked = isBookedStage(deal);
@@ -2320,6 +2424,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const hotels = deal.hotelVendors || [];
   const visas = deal.visaVendors || [];
   const payments = deal.clientPayments || [];
+  const refunds = deal.refunds || [];
   const travellers = deal.travellers || [];
   const landPackages = deal.landVendors || [];
 
@@ -2432,7 +2537,7 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
         <div>
           <div className="v2-fin-label">Selling Price</div>
           <div className="v2-fin-value">{fmtINRFull(sell)}</div>
-          <div className="v2-fin-sub">Client final quote</div>
+          <div className="v2-fin-sub">{refunded > 0 ? `Net of ${fmtINRFull(refunded)} refunded` : 'Client final quote'}</div>
         </div>
         <div>
           <div className="v2-fin-label">Vendor Cost</div>
@@ -2812,10 +2917,16 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-hotel-price-sub">{h.currency !== 'INR' ? `${h.currency} ${h.costPrice || 0}` : 'Total'}</div>
                         </div>
                         <button
+                          onClick={() => { setEditingVendor(h); setModal('hotel'); }}
+                          disabled={busy}
+                          title="Edit"
+                          style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✎</button>
+                        <button
                           onClick={() => deleteVendor('hotelVendors', h.id, 'hotel')}
                           disabled={busy}
                           title="Remove"
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
                       <div className="v2-hotel-facts">
@@ -2968,9 +3079,17 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           {modal === 'ticket' && <ScanTicketModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'train' && <AddTrainModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'traveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'hotel' && <AddHotelModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'hotel' && (
+            <AddHotelModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
           {modal === 'visa' && <AddVisaModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
 
         {/* Right sidebar */}
@@ -3003,28 +3122,48 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
               <span className="v2-side-panel-title">Payment Schedule</span>
-              <button
-                onClick={() => setModal('payment')}
-                style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
-              >+ Add</button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setModal('refund')}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+                >− Refund</button>
+                <button
+                  onClick={() => setModal('payment')}
+                  style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+                >+ Add</button>
+              </div>
             </div>
-            {payments.length === 0 ? (
+            {payments.length === 0 && refunds.length === 0 ? (
               <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>
                 No payments recorded yet.
               </div>
             ) : (
-              payments.slice(0, 5).map((p, i) => (
-                <div key={i} className="v2-schedule-row">
-                  <div>
-                    <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
-                    <div className="v2-schedule-date">{p.date || ''}</div>
+              <>
+                {payments.slice(0, 5).map((p, i) => (
+                  <div key={'p' + i} className="v2-schedule-row">
+                    <div>
+                      <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
+                      <div className="v2-schedule-date">{p.date || ''}</div>
+                    </div>
+                    <div className="v2-schedule-amount">
+                      <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
+                      <div className="v2-schedule-status paid">Paid</div>
+                    </div>
                   </div>
-                  <div className="v2-schedule-amount">
-                    <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
-                    <div className="v2-schedule-status paid">Paid</div>
+                ))}
+                {refunds.map((r, i) => (
+                  <div key={'r' + i} className="v2-schedule-row">
+                    <div>
+                      <div className="v2-schedule-milestone">{r.note || r.reason || 'Refund'}</div>
+                      <div className="v2-schedule-date">{r.date || ''} {r.approvedBy ? `· ${r.approvedBy}` : ''}</div>
+                    </div>
+                    <div className="v2-schedule-amount">
+                      <div className="v2-schedule-amount-val" style={{ color: '#dc2626' }}>− {fmtINR(r.amount || 0)}</div>
+                      <div className="v2-schedule-status due">Refunded</div>
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </>
             )}
             {balance > 0 && (
               <div className="v2-schedule-row">
