@@ -1059,6 +1059,29 @@ const AIX_SYS = {
   land: 'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
 };
 
+// Compress a pasted/selected image to a resized JPEG data URL — same
+// approach V1 uses (window.__veImgToData) so hotel photos stay small
+// enough to store inline in the deal record.
+const imgToDataURL = (file, cb, maxW = 760) => {
+  try {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        const sc = Math.min(1, maxW / img.width);
+        c.width = Math.round(img.width * sc);
+        c.height = Math.round(img.height * sc);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        cb(c.toDataURL('image/jpeg', 0.85));
+      } catch (e) { /* ignore */ }
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
+  } catch (e) { /* ignore */ }
+};
+
 const fileToDataURI = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(reader.result);
@@ -1066,6 +1089,8 @@ const fileToDataURI = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+// Same technique V1 uses for hotel photos: resize via canvas to a max width
+// so a pasted photo doesn't bloat the deal record, then export as JPEG.
 const blockFromDataURI = (dataURI) => {
   const pdf = dataURI.match(/^data:application\/pdf;base64,(.+)$/);
   if (pdf) return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf[1] } };
@@ -1112,6 +1137,8 @@ const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ 
 
 function buildProposalHTMLV2(deal) {
   const ref = deal.dealNumber || ('VE' + String(Date.now()).slice(-6));
+  const acceptWA = 'https://wa.me/917009659048?text=' + encodeURIComponent('I ACCEPT ' + ref);
+  const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=' + encodeURIComponent(acceptWA);
   const pax = `${deal.adults || 0} Adults${Number(deal.children) > 0 ? `, ${deal.children} Children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} Infants` : ''}`;
   const totalPax = paxOf(deal);
   const flights = (deal.flightVendors || []).filter((f) => (f.sectors || []).some((s) => s.from || s.to));
@@ -1184,12 +1211,11 @@ function buildProposalHTMLV2(deal) {
     </div>`;
   }).join('');
 
-  const hotelBlocks = hotels.map((h) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-    <div>
-      <div style="font-weight:800;color:#0d1b3e;font-size:13px">${escHtml(h.hotelName || 'Hotel')} ${h.starRating ? '★'.repeat(Number(h.starRating) || 0) : ''}</div>
-      <div style="font-size:11.5px;color:#5a6b8c;margin-top:4px">${escHtml(h.roomCategory || 'Room')} · ${escHtml(h.city || '')} ${h.nights ? `· ${h.nights} nights` : ''}</div>
-      <div style="font-size:11px;color:#8a97b5;margin-top:2px">${escHtml(h.checkIn || '')}${h.checkOut ? ` → ${escHtml(h.checkOut)}` : ''}</div>
-    </div>
+  const hotelBlocks = hotels.map((h) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
+    ${h.photoUrl ? `<img src="${h.photoUrl}" alt="${escHtml(h.hotelName)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>` : ''}
+    <div style="font-weight:800;color:#0d1b3e;font-size:13px">${escHtml(h.hotelName || 'Hotel')} ${h.starRating ? '★'.repeat(Number(h.starRating) || 0) : ''}</div>
+    <div style="font-size:11.5px;color:#5a6b8c;margin-top:4px">${escHtml(h.roomCategory || 'Room')} · ${escHtml(h.city || '')} ${h.nights ? `· ${h.nights} nights` : ''}</div>
+    <div style="font-size:11px;color:#8a97b5;margin-top:2px">${escHtml(h.checkIn || '')}${h.checkOut ? ` → ${escHtml(h.checkOut)}` : ''}</div>
   </div>`).join('');
 
   const visaBlocks = visas.map((v) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 18px;margin-bottom:10px;font-size:12.5px;color:#33415e"><b style="color:#0d1b3e">${escHtml(v.name)}</b> — ${escHtml(v.visaStatus || 'Not Applied')}</div>`).join('');
@@ -1213,7 +1239,7 @@ function buildProposalHTMLV2(deal) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${escHtml(clientName(deal))}</title>
 <style>
   body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#f4f6fb;color:#33415e}
-  @media print{ .noprint{display:none} }
+  @media print{ body{background:#fff} .noprint{display:none} .ve-interactive{display:none!important} .ve-printsign{display:block!important} }
 </style></head><body>
 <div style="max-width:820px;margin:0 auto;background:#fff">
   <div style="position:relative;background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:44px 40px 30px;color:#fff">
@@ -1268,6 +1294,72 @@ function buildProposalHTMLV2(deal) {
     <div style="font-size:10px;color:#8a97b5;margin-top:12px;line-height:1.7">This itinerary is a preliminary proposal. All services &amp; prices are subject to availability and currency fluctuation at the time of booking. GST is applicable as per government norms.</div>
 
     ${payBlock}
+
+    <div style="margin-top:26px">
+      <h2 style="font-size:16px;color:#0d1b3e;margin:0 0 10px">⚖️ Terms &amp; Conditions of Service (Legal)</h2>
+      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:10px;line-height:1.75;color:#4a5772">
+        <b style="color:#0d1b3e">1. Definitions &amp; Parties.</b> In these Terms, "the Company" means <b>Voyage-Ed Travels</b>, having its office at GMADA Aerocity, Mohali, Punjab, India; "the Client" means the person(s) named in this proposal and all travellers on whose behalf the booking is made; "Suppliers" means airlines, hotels, cruise lines, transport operators, insurers and other third-party service providers; "Total Cost" means the total package price stated in this proposal. These Terms constitute a legally binding agreement between the Company and the Client.<br>
+        <b style="color:#0d1b3e">2. Acceptance &amp; Authority.</b> Acceptance of this proposal — by digital acceptance below, written or electronic confirmation, or payment of any deposit — constitutes unconditional acceptance of these Terms by the Client on behalf of all travellers in the booking, and the Client warrants that they have authority to bind all such travellers.<br>
+        <b style="color:#0d1b3e">3. Role of the Company.</b> The Company acts solely as an agent of the Suppliers. All services are additionally governed by the Suppliers' own tariffs, terms and conditions of carriage/service, which are deemed incorporated herein by reference. The Company shall not be liable for any act, omission, default or insolvency of any Supplier.<br>
+        <b style="color:#0d1b3e">4. Booking &amp; Payment.</b> A non-refundable deposit of ₹20,000 per person — or the actual hotel, flight and land component minimum due, whichever is higher — is required to initiate a booking. Where the date of travel is less than 7 (seven) days away, a non-refundable deposit of 50% of the Total Cost shall apply. Full payment is required upon confirmation of all services and prior to departure from India. Time is of the essence: failure to pay any amount by its due date entitles the Company to treat the booking as cancelled by the Client, and the Cancellation Policy shall apply.<br>
+        <b style="color:#0d1b3e">5. Cancellation &amp; Refunds.</b> The Cancellation Policy stated in this proposal (the standard slab: 30–16 days before departure — 50%; 15–8 days — 75%; 7–0 days — 100% of the Total Cost) forms an integral part of this Agreement. All cancellations must be communicated in writing and take effect from the date of receipt by the Company. Visa fees and service charges are non-refundable in all circumstances. No refund shall be payable, in whole or in part, for any unused, partially used or forfeited service. Travel insurance, once issued, is non-refundable (insurance charge: ₹1,000 per person). Failure to travel / no-show shall be treated as a cancellation attracting 100% charges.<br>
+        <b style="color:#0d1b3e">6. Refund Processing.</b> Refunds, where due, shall be processed only after realisation of the corresponding amounts from the respective Suppliers and in accordance with their policies, ordinarily within 30–45 working days of receipt. Refunds shall be made to the same account/instrument from which payment was received.<br>
+        <b style="color:#0d1b3e">7. Amendments &amp; Transfers.</b> Any change requested by the Client (dates, names, itinerary, room category or otherwise) is treated as a fresh booking, subject to availability and revised pricing; changes within the cancellation window attract applicable cancellation charges. Bookings are non-transferable except with the Company's prior written consent and payment of applicable Supplier charges.<br>
+        <b style="color:#0d1b3e">8. Travel Documents, Visas &amp; Permits.</b> The Client is solely responsible for holding valid passports (minimum 6 months' validity from the date of return travel), visas, permits, and health/vaccination documentation for all travellers. Photocopies of passport (first and address page) are mandatory for all destinations. Grant, refusal or delay of any visa is at the sole discretion of the concerned Embassy/authority; the Company assumes no liability therefor, and cancellation charges shall apply in case of visa refusal or delayed issuance.<br>
+        <b style="color:#0d1b3e">9. Prices &amp; Taxes.</b> All prices are subject to availability, rate of exchange, fuel and Supplier surcharges, and statutory levies (including GST as per government norms) prevailing at the time of booking and may be revised accordingly until full payment. Mandatory gala dinner supplements on special dates (24/31 December, 14 February) may be payable by the Client directly at the hotel.<br>
+        <b style="color:#0d1b3e">10. Itinerary Changes by the Company.</b> The Company reserves the right to modify, re-sequence or substitute any part of the itinerary or services due to force majeure, weather, operational requirements, safety considerations or non-availability, with suitable alternatives of comparable standard being provided where reasonably possible; no compensation shall be payable for such modification.<br>
+        <b style="color:#0d1b3e">11. Force Majeure.</b> The Company shall not be liable for any delay, alteration, curtailment, cancellation, loss or damage arising from acts of God, weather, natural calamity, epidemic/pandemic, strikes, riots, civil disturbance, war, terrorism, government or regulatory action, airspace or border closures, technical or operational failure of Suppliers, or any other cause beyond its reasonable control. Any additional cost so arising (including extended stay, re-routing or repatriation) shall be borne by the Client.<br>
+        <b style="color:#0d1b3e">12. Limitation of Liability &amp; Indemnity.</b> To the maximum extent permitted by law, the Company's aggregate liability under or in connection with this Agreement, howsoever arising, shall not exceed the amount actually received by the Company for the booking. The Company shall not be liable for any indirect, incidental or consequential loss, loss of enjoyment, or loss of baggage/personal effects. The Client shall indemnify and hold harmless the Company against all claims, losses and expenses arising from the Client's breach of these Terms, unlawful conduct, or inaccurate information supplied.<br>
+        <b style="color:#0d1b3e">13. Health, Insurance &amp; Conduct.</b> The Client warrants fitness to travel and shall disclose any medical condition relevant to the services booked. Comprehensive travel insurance is strongly recommended and is the Client's responsibility. The Company or its Suppliers may decline or terminate services, without refund, in case of unlawful, unsafe or abusive conduct. Check-in/check-out timings, baggage allowances and on-board rules are as per the respective Suppliers.<br>
+        <b style="color:#0d1b3e">14. Complaints &amp; Notices.</b> Any complaint regarding the services must be notified to the Company in writing at enquiry@voyage-ed.com within 14 (fourteen) days of completion of travel, failing which the claim shall be deemed waived. All notices under this Agreement shall be in writing to the addresses/e-mail stated in this proposal.<br>
+        <b style="color:#0d1b3e">15. Severability &amp; Waiver.</b> If any provision of these Terms is held invalid or unenforceable, the remaining provisions shall continue in full force. No failure or delay by the Company in exercising any right shall operate as a waiver thereof.<br>
+        <b style="color:#0d1b3e">16. Governing Law, Jurisdiction &amp; Entire Agreement.</b> This Agreement shall be governed by and construed in accordance with the laws of India. Subject to an attempt at amicable resolution, all disputes shall be subject to the exclusive jurisdiction of the competent courts at Mohali / Chandigarh, Punjab, India. This proposal together with these Terms constitutes the entire agreement between the parties and supersedes all prior communications relating to this booking.
+      </div>
+    </div>
+
+    <div id="ve-accept" style="margin-top:16px;background:linear-gradient(135deg,#fdf9ee,#fff);border:2px solid #c9961a;border-radius:16px;padding:18px 22px">
+      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">✍️ CLIENT ACCEPTANCE</div>
+      <div class="ve-interactive">
+        <label style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:#33415e;cursor:pointer;line-height:1.6">
+          <input type="checkbox" id="veAgree" style="width:18px;height:18px;margin-top:2px;accent-color:#c9961a"/>
+          <span>I, <b style="color:#0d1b3e">${escHtml(clientName(deal)) || 'the undersigned Client'}</b>, confirm that I have read, understood and unconditionally accept the Booking &amp; Payment Policy, the Cancellation Policy and the Terms &amp; Conditions of Service (Clauses 1–16) stated in this proposal (Ref: <b>${escHtml(ref)}</b>). I understand that my submission constitutes a legally binding acceptance of these terms.</span>
+        </label>
+        <button id="veAccBtn" style="margin-top:12px;background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;font-size:13px;font-weight:800;cursor:pointer">✅ Accept &amp; Submit</button>
+        <div id="veAccMsg" style="font-size:12px;margin-top:10px;font-weight:700"></div>
+        <div style="font-size:10.5px;color:#7d8bab;margin-top:8px">Or in one tap: <a href="${acceptWA}" style="color:#15803d;font-weight:800">Accept on WhatsApp →</a></div>
+      </div>
+      <div class="ve-printsign" style="display:none">
+        <a href="${acceptWA}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);border-radius:14px;padding:16px 20px;text-align:center;margin:4px 0 12px">
+          <span style="color:#fff;font-size:16px;font-weight:800;letter-spacing:.5px">✅ &nbsp;TAP HERE TO ACCEPT THIS PROPOSAL</span><br>
+          <span style="color:#d7f5e0;font-size:10.5px">One tap opens WhatsApp with a ready-typed acceptance message — just press Send.<br>By sending, you accept the Booking Policy, Cancellation Policy &amp; Terms (Clauses 1–16) · Ref: ${escHtml(ref)}</span>
+        </a>
+        <div style="font-size:10px;color:#7d8bab;text-align:center;margin-bottom:10px">Or WhatsApp us directly: <b style="color:#33415e">"I ACCEPT ${escHtml(ref)}"</b> → <b style="color:#33415e">+91 70096 59048</b> · Or scan the QR code below</div>
+        <div style="text-align:center;margin-bottom:10px"><img src="${qrURL}" style="height:76px;width:76px;border-radius:8px;background:#fff;padding:4px" alt="QR"/></div>
+        <div style="font-size:11px;color:#33415e;line-height:2.2;border-top:1px dashed #e3d9be;padding-top:8px">
+          For physical signing: &nbsp; Client Signature: ______________________________ &nbsp;&nbsp; Name: ${escHtml(clientName(deal)) || '____________________'} &nbsp;&nbsp; Date: ________________
+        </div>
+      </div>
+    </div>
+    <script>
+      (function(){
+        var btn=document.getElementById("veAccBtn"); if(!btn) return;
+        var VE_REF=${JSON.stringify(String(ref || ''))}, VE_CLIENT=${JSON.stringify(String(clientName(deal) || 'Client'))}, VE_DEST=${JSON.stringify(String(destination(deal) || ''))}, VE_PRICE=${JSON.stringify(sell > 0 ? ('Rs. ' + sell.toLocaleString('en-IN')) : 'On request')};
+        btn.addEventListener("click",function(){
+          var chk=document.getElementById("veAgree"), msg=document.getElementById("veAccMsg");
+          if(!chk.checked){ msg.style.color="#b91c1c"; msg.textContent="⚠️ Please tick the acceptance checkbox first."; return; }
+          btn.disabled=true; btn.textContent="Submitting...";
+          var body={ _subject: "PROPOSAL ACCEPTED - " + VE_REF + " - " + VE_CLIENT,
+            type:"Proposal T&C Acceptance", reference:VE_REF, client:VE_CLIENT, destination:VE_DEST,
+            packagePrice:VE_PRICE, acceptedAtISO:new Date().toISOString(), acceptedFrom:(navigator.userAgent||"").slice(0,120) };
+          fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify(body)})
+          .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+          .then(function(){ msg.style.color="#15803d"; msg.textContent="✅ Thank you! Your acceptance has been recorded and sent to Voyage-Ed Travels (Ref: "+VE_REF+")."; btn.textContent="✅ Accepted"; })
+          .catch(function(){ msg.style.color="#b91c1c";
+            var mailto="mailto:enquiry@voyage-ed.com?subject="+encodeURIComponent("PROPOSAL ACCEPTED - "+VE_REF+" - "+VE_CLIENT)+"&body="+encodeURIComponent("I accept the T&C, Booking Policy and Cancellation Policy of proposal "+VE_REF+".");
+            msg.innerHTML="⚠️ Could not auto-submit. <a href='"+mailto+"' style='color:#0d1b3e'>Click here to send your acceptance by email</a>."; btn.disabled=false; btn.textContent="✅ Accept & Submit"; });
+        });
+      })();
+    </script>
 
     <div style="margin-top:22px;display:flex;justify-content:flex-end"><div style="text-align:right">
       <div style="font-family:Georgia,serif;font-size:16px;color:#0d1b3e;font-style:italic">Warm regards,</div>
@@ -1596,6 +1688,7 @@ function AddHotelModal({ deal, onClose, onSaved }) {
   const [form, setForm] = useState({
     hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
+    photoUrl: '',
   });
   const [extraHotels, setExtraHotels] = useState([]); // any additional hotels found beyond the first
   const [aiSummary, setAiSummary] = useState('');
@@ -1654,6 +1747,7 @@ function AddHotelModal({ deal, onClose, onSaved }) {
         country: form.country, city: form.city,
         starRating: form.starRating, roomCategory: form.roomCategory,
         checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
+        photoUrl: form.photoUrl,
         payments: [],
       };
       // Any additional hotels the AI found (e.g. a multi-city itinerary
@@ -1730,6 +1824,44 @@ function AddHotelModal({ deal, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Confirmation No.</div>
         <input value={form.confirmationNo} onChange={set('confirmationNo')} style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Photo</div>
+        <div
+          onPaste={(e) => {
+            const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+            if (it) {
+              e.preventDefault();
+              const f = it.getAsFile();
+              if (f) imgToDataURL(f, (d) => setForm((form2) => ({ ...form2, photoUrl: d })));
+            } else {
+              const t = e.clipboardData.getData('text');
+              if (t && t.trim()) setForm((form2) => ({ ...form2, photoUrl: t.trim() }));
+            }
+          }}
+          tabIndex={0}
+          style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'text', minHeight: 44 }}
+        >
+          {form.photoUrl ? (
+            <>
+              <img src={form.photoUrl} alt="hotel" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+              <span style={{ fontSize: 11.5, color: '#059669', flex: 1 }}>Photo attached ✓</span>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, photoUrl: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
+            </>
+          ) : (
+            <span style={{ fontSize: 12, color: '#6b7a99' }}>Click here, then paste (Ctrl+V) a copied photo — or paste a photo URL</span>
+          )}
+        </div>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) imgToDataURL(f, (d) => setForm((form2) => ({ ...form2, photoUrl: d })));
+            e.target.value = '';
+          }}
+          style={{ fontSize: 11, marginTop: 6 }}
+        />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
     </ModalShell>
@@ -2661,7 +2793,11 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                   return (
                     <div key={h.id || i} className="v2-hotel-card">
                       <div className="v2-hotel-head">
-                        <div className="v2-hotel-code">{(h.hotelName || 'H').slice(0, 2).toUpperCase()}</div>
+                        {h.photoUrl ? (
+                          <img src={h.photoUrl} alt={h.hotelName} style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />
+                        ) : (
+                          <div className="v2-hotel-code">{(h.hotelName || 'H').slice(0, 2).toUpperCase()}</div>
+                        )}
                         <div className="v2-hotel-info">
                           <div className="v2-hotel-name">
                             {h.hotelName || 'Hotel'}
