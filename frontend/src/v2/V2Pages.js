@@ -1390,13 +1390,28 @@ function openProposalV2(deal) {
   w.document.close();
 }
 
-function AddFlightModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
-    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-    from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
+function AddFlightModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => {
+    if (editing) {
+      const first = (editing.sectors || [])[0] || {};
+      return {
+        name: editing.name || '', currency: editing.currency || 'INR',
+        costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+        sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+        exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+        from: first.from || '', fromName: first.fromName || '', to: first.to || '', toName: first.toName || '',
+        date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
+      };
+    }
+    return {
+      name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+      from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
+    };
   });
-  const [aiSectors, setAiSectors] = useState(null); // full multi-sector data from AI, if used
-  const [aiReturnSectors, setAiReturnSectors] = useState(null);
+  // Pre-seed with the existing multi-sector data when editing, so a
+  // round-trip entry keeps ALL its legs unless the user re-scans.
+  const [aiSectors, setAiSectors] = useState(() => editing ? (editing.sectors || null) : null);
+  const [aiReturnSectors, setAiReturnSectors] = useState(() => editing ? (editing.returnSectors || null) : null);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1449,21 +1464,35 @@ function AddFlightModal({ deal, onClose, onSaved }) {
     setErr('');
     try {
       const usingAI = Array.isArray(aiSectors) && aiSectors.length > 0;
-      const newVendor = {
-        id: 'fl_' + Date.now(),
+      // The visible form always represents leg #1 — sync any edits made
+      // to it back into aiSectors[0] before saving, so editing an
+      // existing (possibly multi-leg) flight doesn't silently ignore
+      // changes typed into the form.
+      const firstLeg = {
+        from: form.from, fromName: form.fromName, to: form.to, toName: form.toName,
+        date: form.date, depTime: form.depTime, arrTime: form.arrTime,
+      };
+      const finalSectors = usingAI ? [firstLeg, ...aiSectors.slice(1)] : [firstLeg];
+      const vendorFields = {
         name: form.name,
         currency: form.currency,
         costPrice: Number(form.costPrice) || 0,
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
-        flightType: usingAI && aiReturnSectors && aiReturnSectors.length ? 'return' : 'oneway',
-        sectors: usingAI ? aiSectors : [{
-          from: form.from, fromName: form.fromName, to: form.to, toName: form.toName,
-          date: form.date, depTime: form.depTime, arrTime: form.arrTime,
-        }],
-        returnSectors: usingAI ? aiReturnSectors : [],
-        payments: [],
+        flightType: aiReturnSectors && aiReturnSectors.length ? 'return' : 'oneway',
+        sectors: finalSectors,
+        returnSectors: aiReturnSectors || [],
       };
+
+      if (editing) {
+        const updatedList = (deal.flightVendors || []).map((f) => f.id === editing.id ? { ...f, ...vendorFields } : f);
+        const updated = await patchDeal(deal._id, { flightVendors: updatedList });
+        window.veToast && window.veToast('Flight updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+
+      const newVendor = { id: 'fl_' + Date.now(), ...vendorFields, payments: [] };
       const updated = await patchDeal(deal._id, { flightVendors: [...(deal.flightVendors || []), newVendor] });
       window.veToast && window.veToast('Flight added ✓', 'success');
       onSaved(updated);
@@ -1474,17 +1503,24 @@ function AddFlightModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Add Flight" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
-          </span>
-          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-      </div>
+    <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+            </span>
+            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
+      {editing && (aiSectors || []).length + (aiReturnSectors || []).length > 1 && (
+        <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: '8px 12px' }}>
+          This flight has {(aiSectors || []).length + (aiReturnSectors || []).length} legs total. The fields below edit leg 1 only — other legs are kept as-is.
+        </div>
+      )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam Airlines" style={inputStyle} />
@@ -1528,14 +1564,29 @@ function AddFlightModal({ deal, onClose, onSaved }) {
   );
 }
 
-function AddTrainModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
-    name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-    trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '',
-    date: '', depTime: '', arrTime: '', classOfTravel: '3A', pnr: '',
+function AddTrainModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => {
+    if (editing) {
+      const first = (editing.segments || [])[0] || {};
+      return {
+        name: editing.name || '', currency: editing.currency || 'INR',
+        costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+        sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+        exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+        trainNo: first.trainNo || '', trainName: first.trainName || '',
+        from: first.from || '', fromStation: first.fromStation || '', to: first.to || '', toStation: first.toStation || '',
+        date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
+        classOfTravel: first.classOfTravel || '3A', pnr: first.pnr || '',
+      };
+    }
+    return {
+      name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+      trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '',
+      date: '', depTime: '', arrTime: '', classOfTravel: '3A', pnr: '',
+    };
   });
-  const [aiSegments, setAiSegments] = useState(null);
-  const [aiReturnSegments, setAiReturnSegments] = useState(null);
+  const [aiSegments, setAiSegments] = useState(() => editing ? (editing.segments || null) : null);
+  const [aiReturnSegments, setAiReturnSegments] = useState(() => editing ? (editing.returnSegments || null) : null);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1590,25 +1641,34 @@ function AddTrainModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const usingAI = Array.isArray(aiSegments) && aiSegments.length > 0;
-      const newVendor = {
-        id: 'tr_' + Date.now(),
+      const firstLeg = {
+        trainNo: form.trainNo, trainName: form.trainName,
+        from: form.from, fromStation: form.fromStation, to: form.to, toStation: form.toStation,
+        date: form.date, depTime: form.depTime, arrTime: form.arrTime,
+        classOfTravel: form.classOfTravel, pnr: form.pnr,
+      };
+      const finalSegments = (aiSegments && aiSegments.length) ? [firstLeg, ...aiSegments.slice(1)] : [firstLeg];
+      const vendorFields = {
         name: form.name || form.trainName,
         currency: form.currency,
         costPrice: Number(form.costPrice) || 0,
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
-        tripType: usingAI && aiReturnSegments && aiReturnSegments.length ? 'return' : 'one-way',
+        tripType: aiReturnSegments && aiReturnSegments.length ? 'return' : 'one-way',
         isInternational: false,
-        segments: usingAI ? aiSegments : [{
-          trainNo: form.trainNo, trainName: form.trainName,
-          from: form.from, fromStation: form.fromStation, to: form.to, toStation: form.toStation,
-          date: form.date, depTime: form.depTime, arrTime: form.arrTime,
-          classOfTravel: form.classOfTravel, pnr: form.pnr,
-        }],
-        returnSegments: usingAI ? aiReturnSegments : [],
-        payments: [],
+        segments: finalSegments,
+        returnSegments: aiReturnSegments || [],
       };
+
+      if (editing) {
+        const updatedList = (deal.trainVendors || []).map((t) => t.id === editing.id ? { ...t, ...vendorFields } : t);
+        const updated = await patchDeal(deal._id, { trainVendors: updatedList });
+        window.veToast && window.veToast('Train updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+
+      const newVendor = { id: 'tr_' + Date.now(), ...vendorFields, payments: [] };
       const updated = await patchDeal(deal._id, { trainVendors: [...(deal.trainVendors || []), newVendor] });
       window.veToast && window.veToast('Train added ✓', 'success');
       onSaved(updated);
@@ -1619,17 +1679,19 @@ function AddTrainModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Add Train" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
-          </span>
-          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-      </div>
+    <ModalShell title={editing ? '✎ Edit Train' : '+ Add Train'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+            </span>
+            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Train No.</div>
@@ -1893,8 +1955,14 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
   );
 }
 
-function AddLandModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
+function AddLandModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    name: editing.name || '', currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    confirmationNo: editing.confirmationNo || '', itinerary: editing.itinerary || '',
+  } : {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     confirmationNo: '', itinerary: '',
   });
@@ -1933,8 +2001,7 @@ function AddLandModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const newVendor = {
-        id: 'ld_' + Date.now(),
+      const vendorFields = {
         name: form.name,
         currency: form.currency,
         costPrice: Number(form.costPrice) || 0,
@@ -1942,8 +2009,17 @@ function AddLandModal({ deal, onClose, onSaved }) {
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         itinerary: form.itinerary,
         confirmationNo: form.confirmationNo,
-        payments: [],
       };
+
+      if (editing) {
+        const updatedList = (deal.landVendors || []).map((l) => l.id === editing.id ? { ...l, ...vendorFields } : l);
+        const updated = await patchDeal(deal._id, { landVendors: updatedList });
+        window.veToast && window.veToast('Land package updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+
+      const newVendor = { id: 'ld_' + Date.now(), ...vendorFields, payments: [] };
       const updated = await patchDeal(deal._id, { landVendors: [...(deal.landVendors || []), newVendor] });
       window.veToast && window.veToast('Land package added ✓', 'success');
       onSaved(updated);
@@ -1954,17 +2030,19 @@ function AddLandModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Add Land Package / Itinerary" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading itinerary…' : 'Scan a DMC quote / itinerary PDF or screenshot — AI writes the day-wise plan'}
-          </span>
-          <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-      </div>
+    <ModalShell title={editing ? '✎ Edit Land Package' : '+ Add Land Package / Itinerary'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading itinerary…' : 'Scan a DMC quote / itinerary PDF or screenshot — AI writes the day-wise plan'}
+            </span>
+            <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Package Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. ABC DMC — Bali 5N Land Package" style={inputStyle} />
@@ -1988,8 +2066,14 @@ function AddLandModal({ deal, onClose, onSaved }) {
   );
 }
 
-function AddVisaModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
+function AddVisaModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    name: editing.name || '', currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    visaStatus: editing.visaStatus || 'Not Applied',
+  } : {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '', visaStatus: 'Not Applied',
   });
   const [saving, setSaving] = useState(false);
@@ -2001,16 +2085,24 @@ function AddVisaModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const newVendor = {
-        id: 'vs_' + Date.now(),
+      const vendorFields = {
         name: form.name,
         currency: form.currency,
         costPrice: Number(form.costPrice) || 0,
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         visaStatus: form.visaStatus,
-        payments: [],
       };
+
+      if (editing) {
+        const updatedList = (deal.visaVendors || []).map((v) => v.id === editing.id ? { ...v, ...vendorFields } : v);
+        const updated = await patchDeal(deal._id, { visaVendors: updatedList });
+        window.veToast && window.veToast('Visa updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+
+      const newVendor = { id: 'vs_' + Date.now(), ...vendorFields, payments: [] };
       const updated = await patchDeal(deal._id, { visaVendors: [...(deal.visaVendors || []), newVendor] });
       window.veToast && window.veToast('Visa added ✓', 'success');
       onSaved(updated);
@@ -2021,7 +2113,7 @@ function AddVisaModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Add Visa" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+    <ModalShell title={editing ? '✎ Edit Visa' : '+ Add Visa'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Visa Type / Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam e-Visa" style={inputStyle} />
@@ -2752,10 +2844,16 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-flight-price-sub">{allSectors.length} sector{allSectors.length !== 1 ? 's' : ''} total</div>
                         </div>
                         <button
+                          onClick={() => { setEditingVendor(f); setModal('flight'); }}
+                          disabled={busy}
+                          title="Edit"
+                          style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✎</button>
+                        <button
                           onClick={() => deleteVendor('flightVendors', f.id, 'flight')}
                           disabled={busy}
                           title="Remove"
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
                       {allSectors.map((sec, si) => (
@@ -2832,10 +2930,16 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-flight-price-val">{fmtINRFull(tSell)}</div>
                         </div>
                         <button
+                          onClick={() => { setEditingVendor(t); setModal('train'); }}
+                          disabled={busy}
+                          title="Edit"
+                          style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✎</button>
+                        <button
                           onClick={() => deleteVendor('trainVendors', t.id, 'train')}
                           disabled={busy}
                           title="Remove"
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
                       {allSegs.map((seg, si) => (
@@ -2999,10 +3103,16 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-hotel-price-val">{fmtINRFull(vSell)}</div>
                         </div>
                         <button
+                          onClick={() => { setEditingVendor(v); setModal('visa'); }}
+                          disabled={busy}
+                          title="Edit"
+                          style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✎</button>
+                        <button
                           onClick={() => deleteVendor('visaVendors', v.id, 'visa')}
                           disabled={busy}
                           title="Remove"
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
                     </div>
@@ -3043,10 +3153,16 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
                           <div className="v2-hotel-price-val">{fmtINRFull(lSell)}</div>
                         </div>
                         <button
+                          onClick={() => { setEditingVendor(l); setModal('land'); }}
+                          disabled={busy}
+                          title="Edit"
+                          style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                        >✎</button>
+                        <button
                           onClick={() => deleteVendor('landVendors', l.id, 'land package')}
                           disabled={busy}
                           title="Remove"
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
                       {l.itinerary && (
@@ -3074,10 +3190,31 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
             )}
           </div>
 
-          {modal === 'flight' && <AddFlightModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'land' && <AddLandModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'flight' && (
+            <AddFlightModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
+          {modal === 'land' && (
+            <AddLandModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
           {modal === 'ticket' && <ScanTicketModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'train' && <AddTrainModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'train' && (
+            <AddTrainModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
           {modal === 'traveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'hotel' && (
             <AddHotelModal
@@ -3087,7 +3224,14 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
               onSaved={handleSaved}
             />
           )}
-          {modal === 'visa' && <AddVisaModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'visa' && (
+            <AddVisaModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
           {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
