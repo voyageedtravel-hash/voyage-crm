@@ -3934,9 +3934,346 @@ function TasksV2({ tasks, leads, refetch }) {
   );
 }
 
+/* ─── ACCOUNTS — reads/writes the SAME localStorage V1 uses
+   (key: travelcrm_accounts). Not MongoDB-backed in V1 either, so
+   this is a genuine shared data source, not a simplified copy —
+   editing a cash location here shows up in V1 immediately and
+   vice versa, same browser/device. ───────────────────────────── */
+
+const ACCOUNTS_KEY = 'travelcrm_accounts';
+const defaultAccountsV2 = () => ({
+  bankBalance: '',
+  cashLocations: [],
+  ledger: [],
+});
+const loadAccountsV2 = () => {
+  try {
+    const v = localStorage.getItem(ACCOUNTS_KEY);
+    return v ? { ...defaultAccountsV2(), ...JSON.parse(v) } : defaultAccountsV2();
+  } catch { return defaultAccountsV2(); }
+};
+const saveAccountsV2 = (a) => {
+  try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); } catch { /* ignore */ }
+};
+
+function AccountsV2({ leads }) {
+  const [accounts, setAccounts] = useState(loadAccountsV2);
+  const [showLedgerForm, setShowLedgerForm] = useState(false);
+  const [ledgerForm, setLedgerForm] = useState({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
+
+  const persist = (updater) => {
+    setAccounts((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveAccountsV2(next);
+      return next;
+    });
+  };
+
+  const totalCash = (accounts.cashLocations || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const bankBalance = Number(accounts.bankBalance) || 0;
+
+  // Real, live figures from actual deal data — not something stored
+  // separately, so this always reflects the current MongoDB state.
+  const bookedDeals = leads.filter(isBookedStage);
+  const totalReceived = bookedDeals.reduce((s, d) => s + paidINR(d), 0);
+  const totalOwedToVendors = bookedDeals.reduce((s, d) => {
+    const vendors = dealVendors(d);
+    const paidToVendors = vendors.reduce((vs, v) => vs + sumBy(v.payments, 'amount'), 0);
+    const cost = vendors.reduce((vs, v) => vs + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+    return s + Math.max(0, cost - paidToVendors);
+  }, 0);
+
+  const addCashLoc = () => persist((a) => ({ ...a, cashLocations: [...(a.cashLocations || []), { id: 'cl_' + Date.now(), name: 'New location', amount: '', note: '' }] }));
+  const updCashLoc = (id, key, val) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).map((c) => c.id === id ? { ...c, [key]: val } : c) }));
+  const rmCashLoc = (id) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).filter((c) => c.id !== id) }));
+
+  const addLedgerEntry = () => {
+    if (!ledgerForm.amount || Number(ledgerForm.amount) <= 0) { window.veToast && window.veToast('Enter a valid amount', 'warning'); return; }
+    persist((a) => ({
+      ...a,
+      ledger: [...(a.ledger || []), { id: 'lg_' + Date.now(), ...ledgerForm, amount: Number(ledgerForm.amount), source: 'manual' }],
+    }));
+    setLedgerForm({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
+    setShowLedgerForm(false);
+    window.veToast && window.veToast('Ledger entry added ✓', 'success');
+  };
+  const rmLedgerEntry = (id) => persist((a) => ({ ...a, ledger: (a.ledger || []).filter((l) => l.id !== id) }));
+
+  const sortedLedger = [...(accounts.ledger || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Accounts</h1>
+          <p className="v2-page-sub">Cash on hand, bank balance, and ledger — synced with V1 on this device</p>
+        </div>
+      </div>
+
+      <div className="v2-leads-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="v2-lead-kpi converted">
+          <div className="v2-lead-kpi-label">Total Cash</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalCash)}</div>
+          <div className="v2-lead-kpi-sub">Across all locations</div>
+        </div>
+        <div className="v2-lead-kpi rate">
+          <div className="v2-lead-kpi-label">Bank Balance</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(bankBalance)}</div>
+          <div className="v2-lead-kpi-sub">Manually entered</div>
+        </div>
+        <div className="v2-lead-kpi hot" style={{ borderLeftColor: '#059669' }}>
+          <div className="v2-lead-kpi-label">Total Received</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalReceived)}</div>
+          <div className="v2-lead-kpi-sub">From booked deals</div>
+        </div>
+        <div className="v2-lead-kpi warm">
+          <div className="v2-lead-kpi-label">Owed to Vendors</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalOwedToVendors)}</div>
+          <div className="v2-lead-kpi-sub">Still to pay</div>
+        </div>
+      </div>
+
+      <div className="v2-two-col">
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">Cash Locations</h3>
+            <button className="v2-view-all" onClick={addCashLoc}>+ Add</button>
+          </div>
+          {(accounts.cashLocations || []).length === 0 ? (
+            <div style={{ fontSize: 13, color: '#6b7a99' }}>No cash locations yet.</div>
+          ) : (
+            accounts.cashLocations.map((c) => (
+              <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 32px', gap: 10, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
+                <input value={c.name} onChange={(e) => updCashLoc(c.id, 'name', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }} />
+                <input type="number" value={c.amount} onChange={(e) => updCashLoc(c.id, 'amount', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '8px 10px', textAlign: 'right' }} />
+                <button onClick={() => rmCashLoc(c.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
+              </div>
+            ))
+          )}
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e8ecf5' }}>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Bank Balance</div>
+            <input
+              type="number"
+              value={accounts.bankBalance}
+              onChange={(e) => persist((a) => ({ ...a, bankBalance: e.target.value }))}
+              placeholder="0"
+              style={inputStyle}
+            />
+          </div>
+        </div>
+
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">Ledger</h3>
+            <button className="v2-view-all" onClick={() => setShowLedgerForm(true)}>+ Add Entry</button>
+          </div>
+          {sortedLedger.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#6b7a99' }}>No ledger entries yet.</div>
+          ) : (
+            sortedLedger.slice(0, 15).map((l) => (
+              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{l.party || l.kind}</div>
+                  <div style={{ fontSize: 11, color: '#6b7a99' }}>{l.date} · {l.kind}{l.note ? ` · ${l.note}` : ''}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: l.kind === 'income' ? '#059669' : '#dc2626' }}>
+                    {l.kind === 'income' ? '+' : '−'} {fmtINR(l.amount)}
+                  </div>
+                  <button onClick={() => rmLedgerEntry(l.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {showLedgerForm && (
+        <ModalShell title="+ Add Ledger Entry" onClose={() => setShowLedgerForm(false)} onSubmit={addLedgerEntry} saving={false} err="">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+              <input type="date" value={ledgerForm.date} onChange={(e) => setLedgerForm((f) => ({ ...f, date: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Type</div>
+              <select value={ledgerForm.kind} onChange={(e) => setLedgerForm((f) => ({ ...f, kind: e.target.value }))} style={inputStyle}>
+                {['expense', 'income', 'salary', 'gst', 'other'].map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Party / Description</div>
+            <input value={ledgerForm.party} onChange={(e) => setLedgerForm((f) => ({ ...f, party: e.target.value }))} placeholder="e.g. Office Rent" style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount (₹)</div>
+            <input type="number" value={ledgerForm.amount} onChange={(e) => setLedgerForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
+            <input value={ledgerForm.note} onChange={(e) => setLedgerForm((f) => ({ ...f, note: e.target.value }))} style={inputStyle} />
+          </div>
+        </ModalShell>
+      )}
+    </main>
+  );
+}
+
+/* ─── REPORTS — pure derived view over the same leads/deals ────
+   Matches V1's three sections (Repeat Customers, Vendor Performance,
+   Monthly P&L). No new data, no backend calls — same computation
+   V1's Reports screen does, just run against the same MongoDB data
+   V2 already has loaded. ───────────────────────────────────────── */
+
+function ReportsV2({ leads }) {
+  const bookedDeals = useMemo(() => leads.filter(isBookedStage), [leads]);
+
+  const repeats = useMemo(() => {
+    const byCust = {};
+    leads.forEach((d) => {
+      const key = (d.contactNo || '').replace(/[^0-9]/g, '').slice(-10) || (d.clientName || '').toLowerCase().trim();
+      if (!key) return;
+      if (!byCust[key]) byCust[key] = { name: d.clientName, phone: d.contactNo, deals: [] };
+      byCust[key].deals.push(d);
+    });
+    return Object.values(byCust)
+      .map((c) => {
+        const booked = c.deals.filter(isBookedStage);
+        return { ...c, bookedCount: booked.length, enquiries: c.deals.length, total: booked.reduce((s, d) => s + sellINR(d), 0) };
+      })
+      .filter((c) => c.bookedCount > 1)
+      .sort((a, b) => b.total - a.total);
+  }, [leads]);
+
+  const vendors = useMemo(() => {
+    const byVendor = {};
+    bookedDeals.forEach((d) => {
+      dealVendors(d).forEach((v) => {
+        const raw = (v.name || '').trim();
+        if (!raw) return;
+        const key = raw.toLowerCase();
+        if (!byVendor[key]) byVendor[key] = { name: raw, deals: 0, cost: 0, paid: 0, sell: 0, priced: 0 };
+        const c = toINR(v.costPrice, v.currency, v.exchangeRate);
+        const s = toINR(v.sellingPrice, v.currency, v.exchangeRate);
+        byVendor[key].deals++;
+        byVendor[key].cost += c;
+        byVendor[key].paid += sumBy(v.payments, 'amount');
+        if (s > 0) { byVendor[key].sell += s; byVendor[key].priced += c; }
+      });
+    });
+    return Object.values(byVendor)
+      .filter((v) => v.cost > 0 || v.sell > 0)
+      .map((v) => ({ ...v, due: Math.max(0, v.cost - v.paid), margin: v.sell > 0 ? v.sell - v.priced : null }))
+      .sort((a, b) => b.cost - a.cost);
+  }, [bookedDeals]);
+
+  const months = useMemo(() => {
+    const byMonth = {};
+    bookedDeals.forEach((d) => {
+      const key = d.createdAt ? String(d.createdAt).slice(0, 7) : '0000-00';
+      const mon = d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : 'Undated';
+      if (!byMonth[key]) byMonth[key] = { key, mon, deals: 0, sell: 0, cost: 0, profit: 0 };
+      byMonth[key].deals++;
+      byMonth[key].sell += netSellINR(d);
+      byMonth[key].cost += costINR(d);
+      byMonth[key].profit += profitINR(d);
+    });
+    return Object.values(byMonth).sort((a, b) => a.key.localeCompare(b.key));
+  }, [bookedDeals]);
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Reports</h1>
+          <p className="v2-page-sub">Repeat customers, vendor performance, and monthly P&amp;L — from your real booked deals</p>
+        </div>
+      </div>
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">🔁 Repeat Customers</h3>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Clients who booked more than once — your most loyal, easiest to upsell.</p>
+        {repeats.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7a99' }}>No repeat customers yet.</div>
+        ) : (
+          <table className="info" style={{ width: '100%' }}>
+            <thead><tr><th>Client</th><th>Phone</th><th style={{ textAlign: 'center' }}>Booked</th><th style={{ textAlign: 'center' }}>Enquiries</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
+            <tbody>
+              {repeats.map((c, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 600 }}>{c.name || '—'}</td>
+                  <td>{c.phone || '—'}</td>
+                  <td style={{ textAlign: 'center' }}><span className="v2-chip vip">{c.bookedCount}×</span></td>
+                  <td style={{ textAlign: 'center' }}>{c.enquiries}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtINR(c.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">🤝 Vendor Performance</h3>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Booked deals only. Margin shows only where that vendor has a selling price set.</p>
+        {vendors.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7a99' }}>No vendor data yet.</div>
+        ) : (
+          <table className="info" style={{ width: '100%' }}>
+            <thead><tr><th>Vendor</th><th style={{ textAlign: 'center' }}>Times Used</th><th style={{ textAlign: 'right' }}>Business Given</th><th style={{ textAlign: 'right' }}>Still to Pay</th><th style={{ textAlign: 'right' }}>Margin</th></tr></thead>
+            <tbody>
+              {vendors.map((v, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 600 }}>{v.name}</td>
+                  <td style={{ textAlign: 'center' }}>{v.deals}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtINR(v.cost)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: v.due > 0 ? '#dc2626' : '#059669' }}>{v.due > 0 ? fmtINR(v.due) : 'Settled'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, color: v.margin === null ? '#9aa7c4' : v.margin >= 0 ? '#059669' : '#dc2626' }}>
+                    {v.margin === null ? '—' : fmtINR(v.margin)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="v2-panel">
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">💹 Monthly Profit &amp; Loss</h3>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Booked deals grouped by month.</p>
+        {months.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7a99' }}>No booked deals yet.</div>
+        ) : (
+          <table className="info" style={{ width: '100%' }}>
+            <thead><tr><th>Month</th><th style={{ textAlign: 'center' }}>Deals</th><th style={{ textAlign: 'right' }}>Revenue</th><th style={{ textAlign: 'right' }}>Cost</th><th style={{ textAlign: 'right' }}>Profit</th></tr></thead>
+            <tbody>
+              {months.map((m, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 600 }}>{m.mon}</td>
+                  <td style={{ textAlign: 'center' }}>{m.deals}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtINR(m.sell)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtINR(m.cost)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: m.profit >= 0 ? '#059669' : '#dc2626' }}>{fmtINR(m.profit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </main>
+  );
+}
+
 /* ─── ROUTER ─────────────────────────────────────────── */
 
-const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks'];
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports'];
 
 export default function V2Pages() {
   const [route, setRoute] = useState('dashboard');
@@ -4033,6 +4370,12 @@ export default function V2Pages() {
   }
   if (route === 'tasks') {
     return <TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />;
+  }
+  if (route === 'accounts') {
+    return <AccountsV2 leads={items} />;
+  }
+  if (route === 'reports') {
+    return <ReportsV2 leads={items} />;
   }
   return <DashboardV2 leads={items} onDealClick={openDeal} />;
 }

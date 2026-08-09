@@ -122,7 +122,7 @@ function Sidebar() {
       const v2Routable = {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
         clients: 'clients', proposals: 'proposals', vendors: 'vendors',
-        visa: 'visa', tasks: 'tasks',
+        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports',
       };
       if (v2Routable[key]) {
         // Primary path: direct imperative call, no event/listener race possible.
@@ -134,13 +134,7 @@ function Sidebar() {
         }
         return;
       }
-      // Accounts/Reports stay V1-only — financial ledger + analytics engine,
-      // out of scope for V2 in this pass.
-      const comingSoon = {
-        accounts: 'Accounts — turn off V2 Pages to use V1 Accounts for now',
-        reports: 'Reports — turn off V2 Pages to use V1 Reports for now',
-      };
-      window.veToast && window.veToast(comingSoon[key] || 'Coming soon', 'info');
+      window.veToast && window.veToast('Coming soon', 'info');
       return;
     }
 
