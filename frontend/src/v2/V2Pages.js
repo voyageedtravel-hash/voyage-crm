@@ -2420,14 +2420,41 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const [busy, setBusy] = useState(false); // stage-change / delete in flight
   const [aiInsight, setAiInsight] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
 
   useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
 
   const handleSaved = (updated) => {
+    // Modals each save their own specific field (flightVendors, clientPayments,
+    // etc) via patchDeal before calling this — figure out a human label from
+    // which modal/edit-vs-add was active, then fire one small follow-up patch
+    // to append it to the audit trail. Fire-and-forget: the real save already
+    // succeeded, so a logging hiccup shouldn't block the UI or show an error.
+    const isEdit = !!editingVendor;
+    const labelMap = {
+      flight: isEdit ? 'Flight updated' : 'Flight added',
+      train: isEdit ? 'Train updated' : 'Train added',
+      hotel: isEdit ? 'Hotel updated' : 'Hotel added',
+      visa: isEdit ? 'Visa updated' : 'Visa added',
+      land: isEdit ? 'Land package updated' : 'Land package added',
+      payment: 'Payment recorded',
+      refund: 'Refund recorded',
+      traveller: 'Traveller(s) added',
+      ticket: 'E-ticket scanned',
+      attachment: 'Document uploaded',
+    };
+    const label = labelMap[modal];
+
     setDeal(updated);
     setModal(null);
     setEditingVendor(null);
     onDealUpdated && onDealUpdated(updated);
+
+    if (label) {
+      patchDeal(updated._id, { auditLog: [...(updated.auditLog || []), logEntry(label)] })
+        .then((withLog) => { setDeal(withLog); onDealUpdated && onDealUpdated(withLog); })
+        .catch(() => { /* logging is best-effort — the actual save above already succeeded */ });
+    }
   };
 
   const startEditClient = () => {
@@ -2447,10 +2474,14 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
   const saveClientEdit = async () => {
     setSavingClient(true);
     try {
-      const updated = await patchDeal(deal._id, clientForm);
+      const updated = await patchDeal(deal._id, {
+        ...clientForm,
+        auditLog: [...(deal.auditLog || []), logEntry('Client details updated')],
+      });
       window.veToast && window.veToast('Saved ✓', 'success');
       setEditingClient(false);
-      handleSaved(updated);
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
     } catch (e) {
       window.veToast && window.veToast('Could not save — try again', 'warning');
     } finally {
@@ -2458,11 +2489,62 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
     }
   };
 
+  // Small helper so every action that touches the deal leaves a real,
+  // timestamped trail — the Activity sidebar reads deal.auditLog directly,
+  // no separate log service or backend change needed (Lead schema is
+  // already strict:false, so this array just rides along like any other).
+  const logEntry = (title) => ({ title, at: new Date().toISOString(), by: 'You' });
+
+  const handleAttachmentUpload = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setUploadingDoc(true);
+    try {
+      const dataUrl = await fileToDataURI(file);
+      const newAttachment = { id: 'att_' + Date.now(), name: file.name, dataUrl, addedAt: new Date().toISOString() };
+      const updated = await patchDeal(deal._id, {
+        attachments: [...(deal.attachments || []), newAttachment],
+        auditLog: [...(deal.auditLog || []), logEntry(`Document uploaded: ${file.name}`)],
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Document uploaded ✓', 'success');
+    } catch (ex) {
+      window.veToast && window.veToast('Could not upload — try again', 'warning');
+    } finally {
+      setUploadingDoc(false);
+      e.target.value = '';
+    }
+  };
+
+  const removeAttachment = async (attId) => {
+    if (!window.confirm('Remove this document?')) return;
+    setBusy(true);
+    try {
+      const filtered = (deal.attachments || []).filter((a) => a.id !== attId);
+      const updated = await patchDeal(deal._id, {
+        attachments: filtered,
+        auditLog: [...(deal.auditLog || []), logEntry('Document removed')],
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Document removed', 'success');
+    } catch (ex) {
+      window.veToast && window.veToast('Could not remove — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changeStage = async (newStage, confirmMsg) => {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     setBusy(true);
     try {
-      const updated = await patchDeal(deal._id, { stage: newStage, status: newStage });
+      const updated = await patchDeal(deal._id, {
+        stage: newStage,
+        status: newStage,
+        auditLog: [...(deal.auditLog || []), logEntry(`Deal marked ${newStage}`)],
+      });
       window.veToast && window.veToast(`Deal marked ${newStage} ✓`, 'success');
       handleSaved(updated);
     } catch (e) {
@@ -2477,7 +2559,10 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
     setBusy(true);
     try {
       const filtered = (deal[arrayKey] || []).filter((v) => v.id !== vendorId);
-      const updated = await patchDeal(deal._id, { [arrayKey]: filtered });
+      const updated = await patchDeal(deal._id, {
+        [arrayKey]: filtered,
+        auditLog: [...(deal.auditLog || []), logEntry(`${label[0].toUpperCase()}${label.slice(1)} removed`)],
+      });
       window.veToast && window.veToast(`${label} removed`, 'success');
       handleSaved(updated);
     } catch (e) {
@@ -3325,23 +3410,62 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
 
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
+              <span className="v2-side-panel-title">Documents</span>
+              <label style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: uploadingDoc ? 'wait' : 'pointer' }}>
+                {uploadingDoc ? '⏳ …' : '+ Upload'}
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={handleAttachmentUpload}
+                  disabled={uploadingDoc}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            </div>
+            {(deal.attachments || []).length === 0 ? (
+              <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>No documents uploaded yet.</div>
+            ) : (
+              (deal.attachments || []).map((a, i) => (
+                <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: i < (deal.attachments.length - 1) ? '1px solid #f4f7fc' : 'none' }}>
+                  <a href={a.dataUrl} download={a.name} style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 500, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                    📎 {a.name}
+                  </a>
+                  <button
+                    onClick={() => removeAttachment(a.id)}
+                    disabled={busy}
+                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                  >✕</button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="v2-side-card">
+            <div className="v2-side-panel-head">
               <span className="v2-side-panel-title">Activity</span>
             </div>
-            <div className="v2-activity-item">
-              <div className="v2-activity-dot navy"></div>
-              <div className="v2-activity-body">
-                <div className="v2-activity-title">Deal opened in V2 view</div>
-                <div className="v2-activity-meta">Just now</div>
-              </div>
-            </div>
-            {deal.createdAt && (
-              <div className="v2-activity-item">
-                <div className="v2-activity-dot"></div>
-                <div className="v2-activity-body">
-                  <div className="v2-activity-title">Deal created</div>
-                  <div className="v2-activity-meta">{new Date(deal.createdAt).toLocaleDateString('en-IN')}</div>
+            {(deal.auditLog || []).length === 0 ? (
+              deal.createdAt ? (
+                <div className="v2-activity-item">
+                  <div className="v2-activity-dot"></div>
+                  <div className="v2-activity-body">
+                    <div className="v2-activity-title">Deal created</div>
+                    <div className="v2-activity-meta">{new Date(deal.createdAt).toLocaleDateString('en-IN')}</div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>No activity recorded yet.</div>
+              )
+            ) : (
+              [...deal.auditLog].slice(-12).reverse().map((a, i) => (
+                <div className="v2-activity-item" key={i}>
+                  <div className={`v2-activity-dot ${i === 0 ? 'navy' : ''}`}></div>
+                  <div className="v2-activity-body">
+                    <div className="v2-activity-title">{a.title}</div>
+                    <div className="v2-activity-meta">{timeAgo(a.at)}{a.by ? ` · ${a.by}` : ''}</div>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
