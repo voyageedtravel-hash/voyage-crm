@@ -646,6 +646,48 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [showNewLead, setShowNewLead] = useState(false);
+  const [selectedBulk, setSelectedBulk] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const toggleBulk = (id) => {
+    setSelectedBulk((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearBulk = () => setSelectedBulk(new Set());
+
+  const bulkSetPriority = async (priority) => {
+    setBulkBusy(true);
+    try {
+      await Promise.all(Array.from(selectedBulk).map((id) => patchDeal(id, { priority })));
+      window.veToast && window.veToast(`${selectedBulk.size} lead${selectedBulk.size !== 1 ? 's' : ''} updated ✓`, 'success');
+      clearBulk();
+      onLeadCreated && onLeadCreated();
+    } catch {
+      window.veToast && window.veToast('Some updates failed — try again', 'warning');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedBulk.size} selected lead${selectedBulk.size !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setBulkBusy(true);
+    try {
+      await Promise.all(Array.from(selectedBulk).map((id) =>
+        fetch(`${apiBase()}/api/leads/${id}`, { method: 'DELETE', headers: authHeaders() })
+      ));
+      window.veToast && window.veToast(`${selectedBulk.size} lead${selectedBulk.size !== 1 ? 's' : ''} deleted`, 'success');
+      clearBulk();
+      onLeadCreated && onLeadCreated();
+    } catch {
+      window.veToast && window.veToast('Some deletions failed — try again', 'warning');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const isDealsMode = mode === 'booked';
 
@@ -837,6 +879,20 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
             </select>
           </div>
 
+          {selectedBulk.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#faf7f0', border: '1px solid #c9a84c', borderRadius: 10, padding: '10px 14px', marginBottom: 14, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{selectedBulk.size} selected</span>
+              {!isDealsMode && (
+                <>
+                  <button className="v2-acc-btn-sm" disabled={bulkBusy} onClick={() => bulkSetPriority('High')}>Mark High Priority</button>
+                  <button className="v2-acc-btn-sm" disabled={bulkBusy} onClick={() => bulkSetPriority('Low')}>Mark Low Priority</button>
+                </>
+              )}
+              <button className="v2-acc-btn-sm" disabled={bulkBusy} onClick={bulkDelete} style={{ color: '#dc2626', borderColor: '#fecaca' }}>🗑 Delete Selected</button>
+              <button onClick={clearBulk} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 12 }}>Clear</button>
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>
               No leads match this filter.
@@ -852,9 +908,19 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
                   key={l._id}
                   className={`v2-lead-card ${isSelected ? 'selected' : ''}`}
                   onClick={() => setSelectedId(l._id)}
+                  style={{ gridTemplateColumns: '90px 1fr auto' }}
                 >
-                  <div className="v2-lead-avatar" style={{ background: avatarGradient(clientName(l)) }}>
-                    {initialsOf(clientName(l))}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedBulk.has(l._id)}
+                      onChange={() => toggleBulk(l._id)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ width: 16, height: 16, marginTop: 6, cursor: 'pointer', flexShrink: 0 }}
+                    />
+                    <div className="v2-lead-avatar" style={{ background: avatarGradient(clientName(l)) }}>
+                      {initialsOf(clientName(l))}
+                    </div>
                   </div>
                   <div className="v2-lead-main">
                     <div className="v2-lead-namerow">
@@ -4803,6 +4869,7 @@ const defaultAccountsV2 = () => ({
   bankBalance: '',
   cashLocations: [],
   ledger: [],
+  recurring: [], // {id, name, amount, kind, dayOfMonth, lastMaterialized: 'YYYY-MM'}
 });
 const loadAccountsV2 = () => {
   try {
@@ -4856,6 +4923,43 @@ function AccountsV2({ leads }) {
     window.veToast && window.veToast('Ledger entry added ✓', 'success');
   };
   const rmLedgerEntry = (id) => persist((a) => ({ ...a, ledger: (a.ledger || []).filter((l) => l.id !== id) }));
+
+  // Recurring expenses/income — templates the person fires manually each
+  // month (no server-side cron on a static site, so "automatic" would be
+  // dishonest — this is a one-click "run this month's recurring items"
+  // instead, which is safe and predictable).
+  const currentMonthKey = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const addRecurring = () => persist((a) => ({
+    ...a,
+    recurring: [...(a.recurring || []), { id: 'rc_' + Date.now(), name: 'New recurring item', amount: '', kind: 'expense', dayOfMonth: 1, lastMaterialized: '' }],
+  }));
+  const updRecurring = (id, key, val) => persist((a) => ({
+    ...a,
+    recurring: (a.recurring || []).map((r) => r.id === id ? { ...r, [key]: val } : r),
+  }));
+  const rmRecurring = (id) => persist((a) => ({ ...a, recurring: (a.recurring || []).filter((r) => r.id !== id) }));
+
+  const pendingRecurring = (accounts.recurring || []).filter((r) => r.lastMaterialized !== currentMonthKey && Number(r.amount) > 0);
+
+  const runRecurringThisMonth = () => {
+    if (!pendingRecurring.length) { window.veToast && window.veToast('Nothing pending for this month', 'info'); return; }
+    persist((a) => {
+      const newEntries = pendingRecurring.map((r) => ({
+        id: 'lg_' + Date.now() + '_' + r.id,
+        date: new Date().toISOString().slice(0, 10),
+        kind: r.kind, party: r.name, amount: Number(r.amount), note: 'Recurring — auto-added',
+        source: 'recurring',
+      }));
+      return {
+        ...a,
+        ledger: [...(a.ledger || []), ...newEntries],
+        recurring: (a.recurring || []).map((r) =>
+          pendingRecurring.find((p) => p.id === r.id) ? { ...r, lastMaterialized: currentMonthKey } : r
+        ),
+      };
+    });
+    window.veToast && window.veToast(`${pendingRecurring.length} recurring item${pendingRecurring.length !== 1 ? 's' : ''} added to ledger ✓`, 'success');
+  };
 
   const sortedLedger = [...(accounts.ledger || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
@@ -4944,6 +5048,45 @@ function AccountsV2({ leads }) {
             ))
           )}
         </div>
+      </div>
+
+      <div className="v2-panel" style={{ marginTop: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">Recurring Expenses / Income</h3>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {pendingRecurring.length > 0 && (
+              <button className="v2-cta" style={{ padding: '8px 16px', fontSize: 12 }} onClick={runRecurringThisMonth}>
+                ▶ Run {pendingRecurring.length} for this month
+              </button>
+            )}
+            <button className="v2-view-all" onClick={addRecurring}>+ Add Template</button>
+          </div>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+          Rent, salaries, subscriptions — set them up once, then click "Run" each month to add them to the ledger. Nothing fires automatically (this is a browser app, not a server) — you stay in control of when it posts.
+        </p>
+        {(accounts.recurring || []).length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7a99' }}>No recurring items set up yet.</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {(accounts.recurring || []).map((r) => {
+              const done = r.lastMaterialized === currentMonthKey;
+              return (
+                <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 110px 90px 32px', gap: 10, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
+                  <input value={r.name} onChange={(e) => updRecurring(r.id, 'name', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }} />
+                  <input type="number" value={r.amount} onChange={(e) => updRecurring(r.id, 'amount', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '8px 10px', textAlign: 'right' }} />
+                  <select value={r.kind} onChange={(e) => updRecurring(r.id, 'kind', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
+                    {['expense', 'income', 'salary', 'gst', 'other'].map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <span style={{ fontSize: 11, textAlign: 'center', color: done ? '#059669' : '#c9942a', fontWeight: 600 }}>
+                    {done ? '✓ Posted' : 'Pending'}
+                  </span>
+                  <button onClick={() => rmRecurring(r.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {showLedgerForm && (
