@@ -1587,8 +1587,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -1623,7 +1622,24 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer screenshot');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -1674,11 +1690,11 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
             <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
             <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
             </span>
             <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
           </label>
@@ -1762,8 +1778,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -1801,7 +1816,24 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer screenshot');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -1850,11 +1882,11 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Train' : '+ Add Train'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
             <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
             <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
             </span>
             <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
           </label>
@@ -1943,8 +1975,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -1974,7 +2005,24 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer screenshot');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -2032,11 +2080,15 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Hotel' : '+ Add Hotel'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <div
+          tabIndex={0}
+          onPaste={handlePaste}
+          style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+        >
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
             <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
             <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Scan a screenshot or PDF — AI fills the form below'}
+              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
             </span>
             <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
           </label>
@@ -2141,8 +2193,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -2161,7 +2212,24 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer scan');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -2201,11 +2269,15 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Land Package' : '+ Add Land Package / Itinerary'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+        <div
+          tabIndex={0}
+          onPaste={handlePaste}
+          style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+        >
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
             <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
             <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading itinerary…' : 'Scan a DMC quote / itinerary PDF or screenshot — AI writes the day-wise plan'}
+              {extracting ? 'Reading itinerary…' : 'Click here, then paste (Ctrl+V) — or choose a DMC quote/itinerary file'}
             </span>
             <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
           </label>
@@ -2623,8 +2695,7 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -2637,7 +2708,24 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer scan');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -2657,11 +2745,15 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="✨ Scan E-Ticket" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+      <div
+        tabIndex={0}
+        onPaste={handlePaste}
+        style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+      >
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
           <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🎫'}</span>
           <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading ticket…' : 'Upload the e-ticket (PDF or screenshot) — reads PNR, passengers, segments'}
+            {extracting ? 'Reading ticket…' : 'Click here, then paste (Ctrl+V) — or choose the e-ticket file'}
           </span>
           <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
         </label>
@@ -2699,8 +2791,7 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true);
     setErr('');
@@ -2714,7 +2805,24 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
       setErr(ex.message || 'Could not read this file — try a clearer scan');
     } finally {
       setExtracting(false);
-      e.target.value = '';
+    }
+  };
+
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    e.target.value = '';
+  };
+
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      processFiles(files);
     }
   };
 
@@ -2743,11 +2851,15 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="✨ Scan Passport / ID" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+      <div
+        tabIndex={0}
+        onPaste={handlePaste}
+        style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+      >
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
           <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🛂'}</span>
           <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading document(s)…' : 'Upload passport / Aadhaar photos — one or more travellers at once'}
+            {extracting ? 'Reading document(s)…' : 'Click here, then paste (Ctrl+V) — or choose passport/Aadhaar photos'}
           </span>
           <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
         </label>
