@@ -1141,6 +1141,7 @@ async function runAIExtract(kind, files) {
    cancellation policy) uses the deal's real saved data.            */
 
 const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const logEntryStatic = (title) => ({ title, at: new Date().toISOString(), by: 'You' });
 
 function buildProposalHTMLV2(deal) {
   const ref = deal.dealNumber || ('VE' + String(Date.now()).slice(-6));
@@ -1388,6 +1389,174 @@ function openProposalV2(deal) {
   if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
   w.document.write(buildProposalHTMLV2(deal));
   w.document.close();
+}
+
+/* ─── COMBINED PROPOSAL — one PDF spanning several destinations
+   under the same enquiry (e.g. client asked about both Dubai and
+   Singapore for the same trip window). Reuses the same brand styling
+   as the single-deal proposal but loops a per-destination section
+   for each linked deal, with one shared price total and one shared
+   terms/acceptance block. ──────────────────────────────────────── */
+
+function buildCombinedProposalHTMLV2(deals) {
+  const primary = deals[0];
+  const ref = 'VE-COMBINED-' + String(Date.now()).slice(-6);
+  const totalSell = deals.reduce((s, d) => s + sellINR(d), 0);
+  const totalPaid = deals.reduce((s, d) => s + paidINR(d), 0);
+  const destinations = deals.map((d) => destination(d) || 'Destination').join(' + ');
+
+  const destSection = (d, idx) => {
+    const flights = (d.flightVendors || []).filter((f) => (f.sectors || []).some((s) => s.from || s.to));
+    const hotels = (d.hotelVendors || []).filter((h) => h.hotelName || h.city);
+    const visas = (d.visaVendors || []).filter((v) => v.name);
+    const dSell = sellINR(d);
+
+    const flightRows = flights.map((f) => {
+      const legs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
+      return legs.map((s) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #f0f2f7;font-size:11.5px">
+        <div><b style="color:#0d1b3e">${escHtml((s.from || '').toUpperCase())}</b> → <b style="color:#0d1b3e">${escHtml((s.to || '').toUpperCase())}</b> <span style="color:#6b7a99">${escHtml(f.name || '')}</span></div>
+        <div style="color:#5a6b8c">${escHtml(s.date || '')} · ${escHtml(s.depTime || '')}-${escHtml(s.arrTime || '')}</div>
+      </div>`).join('');
+    }).join('');
+
+    const hotelRows = hotels.map((h) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #f0f2f7;font-size:11.5px">
+      <div><b style="color:#0d1b3e">${escHtml(h.hotelName || 'Hotel')}</b> ${h.starRating ? '★'.repeat(Number(h.starRating) || 0) : ''} <span style="color:#6b7a99">${escHtml(h.city || '')}</span></div>
+      <div style="color:#5a6b8c">${escHtml(h.checkIn || '')} → ${escHtml(h.checkOut || '')}</div>
+    </div>`).join('');
+
+    const visaRows = visas.map((v) => `<div style="font-size:11.5px;color:#33415e;padding:4px 0">🛂 ${escHtml(v.name)} — ${escHtml(v.visaStatus || 'Not Applied')}</div>`).join('');
+
+    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:18px 22px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-family:Georgia,serif;font-size:18px;font-weight:700;color:#0d1b3e">Destination ${idx + 1}: ${escHtml(destination(d) || 'Trip')}</div>
+        <div style="font-size:15px;font-weight:800;color:#c9961a">₹${dSell.toLocaleString('en-IN')}</div>
+      </div>
+      <div style="font-size:11px;color:#6b7a99;margin-bottom:10px">${escHtml(d.travelDates || 'Dates flexible')}</div>
+      ${flightRows || ''}
+      ${hotelRows || ''}
+      ${visaRows || ''}
+    </div>`;
+  };
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Combined Proposal — ${escHtml(clientName(primary))}</title>
+<style>body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#f4f6fb;color:#33415e}@media print{.noprint{display:none}}</style></head><body>
+<div style="max-width:820px;margin:0 auto;background:#fff">
+  <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:44px 40px 30px;color:#fff">
+    <div style="font-size:10px;letter-spacing:3px;color:#f0c842;font-weight:800">VOYAGE-ED TRAVELS · COMBINED PROPOSAL</div>
+    <div style="font-family:Georgia,serif;font-size:30px;font-weight:700;margin-top:10px">${escHtml(destinations)}</div>
+    <div style="font-size:13px;opacity:.85;margin-top:8px">${deals.length} linked destinations for one enquiry · Prepared for ${escHtml(clientName(primary))}</div>
+  </div>
+  <div style="background:rgba(10,21,48,.9);padding:12px 40px;color:#fff;font-size:12px">Ref: ${escHtml(ref)} &nbsp;·&nbsp; 📞 +91 70096 59048</div>
+
+  <div style="padding:34px 36px">
+    <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;margin-bottom:22px;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div><div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">COMBINED PACKAGE PRICE</div><div style="font-size:30px;font-weight:800;margin-top:4px">₹${totalSell.toLocaleString('en-IN')}</div><div style="font-size:11px;opacity:.75;margin-top:2px">Across ${deals.length} destinations</div></div>
+      <div style="text-align:right;font-size:11px;opacity:.85">Valid for 7 days from today</div>
+    </div>
+
+    ${deals.map((d, i) => destSection(d, i)).join('')}
+
+    ${totalPaid > 0 ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:18px">
+      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT SUMMARY (COMBINED)</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
+        <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${totalPaid.toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED across all destinations</div></div>
+        <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0, totalSell - totalPaid).toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
+      </div>
+    </div>` : ''}
+
+    <h2 style="font-size:16px;color:#0d1b3e;margin:20px 0 10px">📋 Booking Terms — same policy applies to every destination above</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:11.5px;line-height:1.9;color:#4a5772">
+      • A <b style="color:#0d1b3e">non-refundable deposit of ₹20,000 per person</b> per destination is required to initiate booking.<br>
+      • <b style="color:#0d1b3e">Full payment</b> required on confirmation of all services and before departure.<br>
+      • Standard cancellation slab applies per destination: 30–16 days — 50%; 15–8 days — 75%; 7–0 days — 100% of that destination's cost.<br>
+      • Visa fees and service charges are non-refundable.
+    </div>
+
+    <div style="margin-top:22px;display:flex;justify-content:flex-end"><div style="text-align:right">
+      <div style="font-family:Georgia,serif;font-size:16px;color:#0d1b3e;font-style:italic">Warm regards,</div>
+      <div style="font-size:12.5px;font-weight:800;color:#0d1b3e;margin-top:2px">Vishal Sharma &amp; Sahitya Singh</div>
+      <div style="font-size:10.5px;color:#7d8bab">Founders · Voyage-Ed Travels</div>
+    </div></div>
+    <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;color:#fff">
+      <b style="color:#f0c842">Ready to make it happen?</b><br>
+      <span style="font-size:12px">📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com</span>
+    </div>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
+function openCombinedProposalV2(deals) {
+  const w = window.open('', '_blank');
+  if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
+  w.document.write(buildCombinedProposalHTMLV2(deals));
+  w.document.close();
+}
+
+function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
+  const [selectedIds, setSelectedIds] = useState(() => new Set((allLeads || []).filter((l) => l.enquiryId && l.enquiryId === deal.enquiryId && l._id !== deal._id).map((l) => l._id)));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const candidates = useMemo(() => {
+    const myPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
+    return (allLeads || []).filter((l) => {
+      if (l._id === deal._id) return false;
+      const lPhone = (l.contactNo || '').replace(/[^\d]/g, '');
+      const sameClient = (myPhone && lPhone && myPhone === lPhone) || (clientName(l).toLowerCase() === clientName(deal).toLowerCase() && clientName(deal) !== 'Unknown');
+      return sameClient;
+    });
+  }, [allLeads, deal]);
+
+  const toggle = (id) => setSelectedIds((s) => { const n2 = new Set(s); n2.has(id) ? n2.delete(id) : n2.add(id); return n2; });
+
+  const submit = async () => {
+    if (selectedIds.size === 0) { setErr('Select at least one other destination to link'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const eid = deal.enquiryId || ('enq_' + Date.now());
+      let updatedSelf = deal;
+      if (!deal.enquiryId) {
+        updatedSelf = await patchDeal(deal._id, { enquiryId: eid, auditLog: [...(deal.auditLog || []), logEntryStatic('Linked to combined enquiry')] });
+      }
+      await Promise.all(
+        Array.from(selectedIds).map((id) => {
+          const other = candidates.find((c) => c._id === id);
+          return patchDeal(id, { enquiryId: eid, auditLog: [...(other?.auditLog || []), logEntryStatic('Linked to combined enquiry')] });
+        })
+      );
+      window.veToast && window.veToast(`Linked ${selectedIds.size + 1} destinations ✓`, 'success');
+      onSaved(updatedSelf);
+    } catch (e) {
+      setErr('Could not link — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="🔗 Link Destinations" onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Link">
+      <div style={{ fontSize: 12, color: '#6b7a99' }}>
+        Select other enquiries from the same client to combine into one proposal (e.g. this client is also considering another destination for the same trip).
+      </div>
+      {candidates.length === 0 ? (
+        <div style={{ fontSize: 13, color: '#6b7a99', padding: '12px 0' }}>No other enquiries found for this client (matched by phone number or name).</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {candidates.map((c) => (
+            <label key={c._id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f9fafc', borderRadius: 8, padding: '10px 12px', cursor: 'pointer' }}>
+              <input type="checkbox" checked={selectedIds.has(c._id)} onChange={() => toggle(c._id)} />
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{destination(c) || 'Enquiry'}</div>
+                <div style={{ fontSize: 11, color: '#6b7a99' }}>{stageOf(c)} · {fmtINR(sellINR(c))}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  );
 }
 
 function AddFlightModal({ deal, editing, onClose, onSaved }) {
@@ -2256,6 +2425,198 @@ function AddRefundModal({ deal, onClose, onSaved }) {
   );
 }
 
+const CANCEL_REASONS = ['Client Request', 'Visa Rejection', 'Medical Emergency', 'Vendor Cancellation', 'Weather / Force Majeure', 'Other'];
+
+function AddCancellationModal({ deal, onClose, onSaved }) {
+  const allComponents = useMemo(() => {
+    const list = [];
+    (deal.flightVendors || []).forEach((v) => list.push({ kind: 'flight', id: v.id, label: `✈ ${v.name || 'Flight'}` }));
+    (deal.trainVendors || []).forEach((v) => list.push({ kind: 'train', id: v.id, label: `🚆 ${v.name || 'Train'}` }));
+    (deal.hotelVendors || []).forEach((v) => list.push({ kind: 'hotel', id: v.id, label: `🏨 ${v.hotelName || 'Hotel'}` }));
+    (deal.visaVendors || []).forEach((v) => list.push({ kind: 'visa', id: v.id, label: `🛂 ${v.name || 'Visa'}` }));
+    (deal.landVendors || []).forEach((v) => list.push({ kind: 'land', id: v.id, label: `🗺 ${v.name || 'Land Package'}` }));
+    return list;
+  }, [deal]);
+
+  const [scope, setScope] = useState('components'); // 'full' | 'components'
+  const [reason, setReason] = useState(CANCEL_REASONS[0]);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [refundMode, setRefundMode] = useState(REFUND_MODES[0]);
+  const [approvedBy, setApprovedBy] = useState(REFUND_APPROVERS[0]);
+  const [refNo, setRefNo] = useState('');
+  const [note, setNote] = useState('');
+  const [lines, setLines] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const addLine = () => setLines((ls) => [...ls, {
+    id: 'cl_' + Date.now() + '_' + ls.length,
+    compKind: '', compId: '', label: '',
+    vendorRetained: '', vendorPenaltyToClient: '', myProfit: '', clientRefund: '',
+  }]);
+  const updateLine = (id, key, val) => setLines((ls) => ls.map((l) => l.id === id ? { ...l, [key]: val } : l));
+  const removeLine = (id) => setLines((ls) => ls.filter((l) => l.id !== id));
+
+  // Exact same formula as V1's cancelCompute(): what we keep from the
+  // client (penalty + our extra profit) minus what we lose to the vendor.
+  const netProfitOf = (l) => (Number(l.vendorPenaltyToClient) || 0) + (Number(l.myProfit) || 0) - (Number(l.vendorRetained) || 0);
+
+  const totals = useMemo(() => {
+    return lines.reduce((acc, l) => ({
+      refund: acc.refund + (Number(l.clientRefund) || 0),
+      penalty: acc.penalty + (Number(l.vendorPenaltyToClient) || 0),
+      vendorLoss: acc.vendorLoss + (Number(l.vendorRetained) || 0),
+      netProfit: acc.netProfit + netProfitOf(l),
+    }), { refund: 0, penalty: 0, vendorLoss: 0, netProfit: 0 });
+  }, [lines]);
+
+  const submit = async () => {
+    if (lines.length === 0) { setErr('Add at least one component line'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const finalLines = lines.map((l) => ({
+        ...l,
+        vendorRetained: Number(l.vendorRetained) || 0,
+        vendorPenaltyToClient: Number(l.vendorPenaltyToClient) || 0,
+        myProfit: Number(l.myProfit) || 0,
+        clientRefund: Number(l.clientRefund) || 0,
+        netProfit: netProfitOf(l),
+      }));
+      const newCancellation = {
+        id: 'cxl_' + Date.now(),
+        scope, reason, date, refundMode, approvedBy, refNo, note,
+        status: 'Refund Approved',
+        lines: finalLines,
+      };
+      const updated = await patchDeal(deal._id, {
+        cancellations: [...(deal.cancellations || []), newCancellation],
+        auditLog: [...(deal.auditLog || []), { title: `Cancellation recorded — ${reason}`, at: new Date().toISOString(), by: 'You' }],
+      });
+      window.veToast && window.veToast('Cancellation recorded ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="− Record Cancellation" onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Record">
+      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: 12, fontSize: 11.5, color: '#7f1d1d' }}>
+        This records the cancellation for accounting/audit purposes with the same
+        profit formula V1 uses. It does <b>not</b> automatically change the deal's
+        selling price or component costs — reduce or remove the affected
+        component yourself (✎ Edit / ✕ Remove) if the booking itself changed.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Scope</div>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} style={inputStyle}>
+            <option value="components">Specific component(s)</option>
+            <option value="full">Full booking</option>
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reason</div>
+          <select value={reason} onChange={(e) => setReason(e.target.value)} style={inputStyle}>
+            {CANCEL_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Approved By</div>
+          <select value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} style={inputStyle}>
+            {REFUND_APPROVERS.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid #e8ecf5', paddingTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div className="v2-detail-field-label" style={{ marginBottom: 0 }}>Affected Components</div>
+          <button className="v2-acc-btn-sm" onClick={addLine} type="button">+ Add Line</button>
+        </div>
+        {lines.length === 0 && <div style={{ fontSize: 12, color: '#6b7a99' }}>No lines added yet.</div>}
+        {lines.map((l) => (
+          <div key={l.id} style={{ background: '#f9fafc', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px', gap: 8, marginBottom: 8 }}>
+              <select
+                value={l.compId ? `${l.compKind}|${l.compId}` : ''}
+                onChange={(e) => {
+                  const [kind, id] = e.target.value.split('|');
+                  const comp = allComponents.find((c) => c.kind === kind && c.id === id);
+                  updateLine(l.id, 'compKind', kind);
+                  updateLine(l.id, 'compId', id);
+                  updateLine(l.id, 'label', comp ? comp.label : '');
+                }}
+                style={{ ...inputStyle, padding: '8px 10px' }}
+              >
+                <option value="">Select component…</option>
+                {allComponents.map((c) => <option key={c.kind + c.id} value={`${c.kind}|${c.id}`}>{c.label}</option>)}
+              </select>
+              <button onClick={() => removeLine(l.id)} type="button" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4 }}>Vendor Loss (₹)</div>
+                <input type="number" value={l.vendorRetained} onChange={(e) => updateLine(l.id, 'vendorRetained', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '7px 10px' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4 }}>Penalty to Client (₹)</div>
+                <input type="number" value={l.vendorPenaltyToClient} onChange={(e) => updateLine(l.id, 'vendorPenaltyToClient', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '7px 10px' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4 }}>Extra Profit Kept (₹)</div>
+                <input type="number" value={l.myProfit} onChange={(e) => updateLine(l.id, 'myProfit', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '7px 10px' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4 }}>Refund to Client (₹)</div>
+                <input type="number" value={l.clientRefund} onChange={(e) => updateLine(l.id, 'clientRefund', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '7px 10px' }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: netProfitOf(l) >= 0 ? '#059669' : '#dc2626' }}>
+              Net {netProfitOf(l) >= 0 ? 'profit' : 'loss'} on this line: {fmtINR(Math.abs(netProfitOf(l)))}
+            </div>
+          </div>
+        ))}
+        {lines.length > 0 && (
+          <div style={{ background: '#faf7f0', border: '1px solid #c9a84c', borderRadius: 10, padding: 12, fontSize: 12, display: 'grid', gap: 4 }}>
+            <div>Total refund to client: <b>{fmtINR(totals.refund)}</b></div>
+            <div>Total penalty collected: <b>{fmtINR(totals.penalty)}</b></div>
+            <div>Total vendor loss: <b>{fmtINR(totals.vendorLoss)}</b></div>
+            <div style={{ color: totals.netProfit >= 0 ? '#059669' : '#dc2626', fontWeight: 700 }}>
+              Net {totals.netProfit >= 0 ? 'profit' : 'loss'} from this cancellation: {fmtINR(Math.abs(totals.netProfit))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Refund Mode</div>
+          <select value={refundMode} onChange={(e) => setRefundMode(e.target.value)} style={inputStyle}>
+            {REFUND_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reference No.</div>
+          <input value={refNo} onChange={(e) => setRefNo(e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
+        <input value={note} onChange={(e) => setNote(e.target.value)} style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 function ScanTicketModal({ deal, onClose, onSaved }) {
   const [extracting, setExtracting] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -2410,7 +2771,7 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
-function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
+function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
   const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
@@ -2639,6 +3000,12 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
     }
   };
 
+  const linkedDeals = useMemo(() => {
+    if (!deal.enquiryId) return [deal];
+    const others = (allLeads || []).filter((l) => l.enquiryId === deal.enquiryId && l._id !== deal._id);
+    return [deal, ...others];
+  }, [deal, allLeads]);
+
   const waLink = () => {
     const phone = (deal.contactNo || '').replace(/[^\d]/g, '');
     const msg = encodeURIComponent(`Hi ${clientName(deal)}, following up on your ${destination(deal) || 'trip'} booking with Voyage-Ed.`);
@@ -2741,6 +3108,10 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
               <a href={mailLink()} className="v2-hero-btn" style={{ textDecoration: 'none' }}>✉ Email</a>
             ) : (
               <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
+            )}
+            <button className="v2-hero-btn" onClick={() => setModal('link')}>🔗 Link Destinations</button>
+            {linkedDeals.length > 1 && (
+              <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
             )}
             <button className="v2-hero-btn gold" onClick={() => openProposalV2(deal)}>📄 Proposal PDF</button>
           </div>
@@ -3480,6 +3851,8 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
           )}
           {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
 
         {/* Right sidebar */}
@@ -3508,6 +3881,47 @@ function DealDetailV2({ deal: initialDeal, onBack, onDealUpdated }) {
               {aiLoading ? '⏳ Thinking…' : '+ Ask AI about this deal'}
             </button>
           </div>
+
+          {(deal.cancellations || []).length > 0 && (
+            <div className="v2-side-card">
+              <div className="v2-side-panel-head">
+                <span className="v2-side-panel-title">Cancellations</span>
+                <button
+                  onClick={() => setModal('cancellation')}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+                >+ Record</button>
+              </div>
+              {deal.cancellations.map((c) => {
+                const netProfit = (c.lines || []).reduce((s, l) => s + (Number(l.netProfit) || 0), 0);
+                const refund = (c.lines || []).reduce((s, l) => s + (Number(l.clientRefund) || 0), 0);
+                return (
+                  <div key={c.id} style={{ padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{c.reason}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: netProfit >= 0 ? '#059669' : '#dc2626' }}>
+                        {netProfit >= 0 ? '+' : '−'} {fmtINR(Math.abs(netProfit))}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>
+                      {c.date} · {(c.lines || []).length} component{(c.lines || []).length !== 1 ? 's' : ''} · Refund {fmtINR(refund)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {(deal.cancellations || []).length === 0 && (
+            <div className="v2-side-card">
+              <div className="v2-side-panel-head">
+                <span className="v2-side-panel-title">Cancellations</span>
+                <button
+                  onClick={() => setModal('cancellation')}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+                >+ Record</button>
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>No cancellations recorded.</div>
+            </div>
+          )}
 
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
@@ -4506,6 +4920,7 @@ export default function V2Pages() {
     return (
       <DealDetailV2
         deal={selectedDeal}
+        allLeads={items}
         onBack={goBack}
         onDealUpdated={(updated) => { setSelectedDeal(updated); refetch(); }}
       />
