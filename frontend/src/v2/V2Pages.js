@@ -621,6 +621,24 @@ const inputStyle = {
   fontSize: 13, fontFamily: 'inherit', color: '#0d1b3e', outline: 'none', boxSizing: 'border-box',
 };
 
+/* ─── CSV export — plain client-side download, no backend involved ── */
+const csvEscape = (v) => {
+  const s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const downloadCSV = (filename, rows) => {
+  const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM so ₹/Excel render correctly
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 /* ─── LEADS PAGE ─────────────────────────────────────── */
 
 function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
@@ -3010,6 +3028,46 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     }
   };
 
+  const deletePayment = async (payment) => {
+    if (!window.confirm('Delete this payment record? This does not undo the payment itself — use it only to fix a mistaken entry.')) return;
+    setBusy(true);
+    try {
+      const idx = (deal.clientPayments || []).indexOf(payment);
+      const filtered = (deal.clientPayments || []).filter((_, i) => i !== idx);
+      const updated = await patchDeal(deal._id, {
+        clientPayments: filtered,
+        auditLog: [...(deal.auditLog || []), logEntry('Payment record deleted')],
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Payment deleted', 'success');
+    } catch (ex) {
+      window.veToast && window.veToast('Could not delete — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteRefund = async (refund) => {
+    if (!window.confirm('Delete this refund record? This does not undo the refund itself — use it only to fix a mistaken entry.')) return;
+    setBusy(true);
+    try {
+      const idx = (deal.refunds || []).indexOf(refund);
+      const filtered = (deal.refunds || []).filter((_, i) => i !== idx);
+      const updated = await patchDeal(deal._id, {
+        refunds: filtered,
+        auditLog: [...(deal.auditLog || []), logEntry('Refund record deleted')],
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Refund deleted', 'success');
+    } catch (ex) {
+      window.veToast && window.veToast('Could not delete — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ─── Tiered pricing (3★/4★/5★ stay options) ────────────
   // Same shape V1 uses: deal.tiers[] with {star, label, enabled, booked,
   // hotels[], totalPrice}. bookedTierOf()/sellINR() already read this —
@@ -4061,9 +4119,17 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                       <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
                       <div className="v2-schedule-date">{p.date || ''}</div>
                     </div>
-                    <div className="v2-schedule-amount">
-                      <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
-                      <div className="v2-schedule-status paid">Paid</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="v2-schedule-amount">
+                        <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
+                        <div className="v2-schedule-status paid">Paid</div>
+                      </div>
+                      <button
+                        onClick={() => deletePayment(p)}
+                        disabled={busy}
+                        title="Delete this payment"
+                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                      >✕</button>
                     </div>
                   </div>
                 ))}
@@ -4073,9 +4139,17 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                       <div className="v2-schedule-milestone">{r.note || r.reason || 'Refund'}</div>
                       <div className="v2-schedule-date">{r.date || ''} {r.approvedBy ? `· ${r.approvedBy}` : ''}</div>
                     </div>
-                    <div className="v2-schedule-amount">
-                      <div className="v2-schedule-amount-val" style={{ color: '#dc2626' }}>− {fmtINR(r.amount || 0)}</div>
-                      <div className="v2-schedule-status due">Refunded</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="v2-schedule-amount">
+                        <div className="v2-schedule-amount-val" style={{ color: '#dc2626' }}>− {fmtINR(r.amount || 0)}</div>
+                        <div className="v2-schedule-status due">Refunded</div>
+                      </div>
+                      <button
+                        onClick={() => deleteRefund(r)}
+                        disabled={busy}
+                        title="Delete this refund"
+                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                      >✕</button>
                     </div>
                   </div>
                 ))}
@@ -4347,7 +4421,24 @@ function ProposalsV2({ leads, onDealClick }) {
 
 /* ─── VENDORS — aggregated from every vendor entry across deals ─ */
 
+/* ─── Vendor contact notes — new in V2, doesn't exist in V1.
+   V1 has no supplier master-data table at all; this is a genuinely
+   new, lightweight addition (phone/email/notes per vendor name),
+   stored the same way Accounts is — localStorage, this device only.
+   Not synced with V1 since V1 has nothing to sync with. ─────────── */
+const VENDOR_NOTES_KEY = 'voyage_v2_vendor_notes';
+const loadVendorNotes = () => {
+  try { return JSON.parse(localStorage.getItem(VENDOR_NOTES_KEY) || '{}'); } catch { return {}; }
+};
+const saveVendorNotes = (n) => {
+  try { localStorage.setItem(VENDOR_NOTES_KEY, JSON.stringify(n)); } catch { /* ignore */ }
+};
+
 function VendorsV2({ leads }) {
+  const [notes, setNotes] = useState(loadVendorNotes);
+  const [editingVendor, setEditingVendorNote] = useState(null);
+  const [noteForm, setNoteForm] = useState({ phone: '', email: '', notes: '' });
+
   const vendors = useMemo(() => {
     const map = new Map();
     const categories = [
@@ -4369,6 +4460,19 @@ function VendorsV2({ leads }) {
     return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
   }, [leads]);
 
+  const openNote = (vendorName) => {
+    setEditingVendorNote(vendorName);
+    setNoteForm(notes[vendorName] || { phone: '', email: '', notes: '' });
+  };
+
+  const saveNote = () => {
+    const next = { ...notes, [editingVendor]: noteForm };
+    setNotes(next);
+    saveVendorNotes(next);
+    setEditingVendorNote(null);
+    window.veToast && window.veToast('Vendor contact saved ✓', 'success');
+  };
+
   return (
     <main className="v2-page">
       <div className="v2-page-header">
@@ -4381,27 +4485,71 @@ function VendorsV2({ leads }) {
       <div className="v2-panel">
         <div className="v2-panel-header">
           <h3 className="v2-panel-title">All Vendors <span style={{ fontWeight: 400, fontSize: 13, color: '#6b7a99' }}>({vendors.length})</span></h3>
+          {vendors.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('vendors.csv', [
+              ['Vendor', 'Category', 'Bookings', 'Total Cost (INR)', 'Phone', 'Email', 'Notes'],
+              ...vendors.map((v) => {
+                const n = notes[v.name] || {};
+                return [v.name, v.category, v.bookings, v.cost, n.phone || '', n.email || '', n.notes || ''];
+              }),
+            ])}>⬇ Export CSV</button>
+          )}
         </div>
         {vendors.length === 0 ? (
           <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No vendor entries yet — add flights/hotels/etc. to deals to see them here.</div>
         ) : (
           <table className="info" style={{ width: '100%' }}>
             <thead>
-              <tr><th>Vendor</th><th>Category</th><th style={{ textAlign: 'center' }}>Bookings</th><th style={{ textAlign: 'right' }}>Total Cost</th></tr>
+              <tr><th>Vendor</th><th>Category</th><th style={{ textAlign: 'center' }}>Bookings</th><th style={{ textAlign: 'right' }}>Total Cost</th><th>Contact</th><th></th></tr>
             </thead>
             <tbody>
-              {vendors.map((v, i) => (
-                <tr key={i}>
-                  <td style={{ fontWeight: 600, color: '#0d1b3e' }}>{v.name}</td>
-                  <td><span className="v2-detail-tag" style={{ background: '#f4f6fb', color: '#33446b' }}>{v.category}</span></td>
-                  <td style={{ textAlign: 'center' }}>{v.bookings}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtINR(v.cost)}</td>
-                </tr>
-              ))}
+              {vendors.map((v, i) => {
+                const n = notes[v.name];
+                return (
+                  <tr key={i}>
+                    <td style={{ fontWeight: 600, color: '#0d1b3e' }}>{v.name}</td>
+                    <td><span className="v2-detail-tag" style={{ background: '#f4f6fb', color: '#33446b' }}>{v.category}</span></td>
+                    <td style={{ textAlign: 'center' }}>{v.bookings}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtINR(v.cost)}</td>
+                    <td style={{ fontSize: 12, color: '#6b7a99' }}>
+                      {n ? (<>{n.phone && <div>{n.phone}</div>}{n.email && <div>{n.email}</div>}</>) : <span style={{ color: '#c4cede' }}>—</span>}
+                    </td>
+                    <td>
+                      <button onClick={() => openNote(v.name)} className="v2-acc-btn-sm" style={{ padding: '4px 10px', fontSize: 11 }}>
+                        {n ? '✎ Edit' : '+ Add contact'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
+
+      {editingVendor && (
+        <ModalShell
+          title={`Contact — ${editingVendor}`}
+          onClose={() => setEditingVendorNote(null)}
+          onSubmit={saveNote}
+          saving={false}
+          err=""
+          submitLabel="✓ Save"
+        >
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Phone</div>
+            <input value={noteForm.phone} onChange={(e) => setNoteForm((f) => ({ ...f, phone: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Email</div>
+            <input value={noteForm.email} onChange={(e) => setNoteForm((f) => ({ ...f, email: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Notes</div>
+            <textarea value={noteForm.notes} onChange={(e) => setNoteForm((f) => ({ ...f, notes: e.target.value }))} rows={4} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+          </div>
+        </ModalShell>
+      )}
     </main>
   );
 }
@@ -4481,6 +4629,7 @@ function VisaFilingsV2({ leads, onDealClick }) {
 
 function TasksV2({ tasks, leads, refetch }) {
   const [showNew, setShowNew] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
   const [form, setForm] = useState({ title: '', dueDate: '', dealId: '', priority: 'Normal' });
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState('open');
@@ -4516,18 +4665,38 @@ function TasksV2({ tasks, leads, refetch }) {
     }
   };
 
-  const createTask = async () => {
+  const openNew = () => {
+    setEditingTask(null);
+    setForm({ title: '', dueDate: '', dealId: '', priority: 'Normal' });
+    setShowNew(true);
+  };
+
+  const openEdit = (task) => {
+    setEditingTask(task);
+    setForm({
+      title: task.title || '', dueDate: task.dueDate || '',
+      dealId: task.dealId || '', priority: task.priority || 'Normal',
+    });
+    setShowNew(true);
+  };
+
+  const saveTask = async () => {
     if (!form.title.trim()) { window.veToast && window.veToast('Task title is required', 'warning'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase()}/api/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(form),
-      });
+      const isEdit = !!editingTask;
+      const res = await fetch(
+        `${apiBase()}/api/tasks${isEdit ? '/' + editingTask._id : ''}`,
+        {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(form),
+        }
+      );
       if (!res.ok) throw new Error();
-      window.veToast && window.veToast('Task added ✓', 'success');
+      window.veToast && window.veToast(isEdit ? 'Task updated ✓' : 'Task added ✓', 'success');
       setForm({ title: '', dueDate: '', dealId: '', priority: 'Normal' });
+      setEditingTask(null);
       setShowNew(false);
       refetch();
     } catch {
@@ -4550,7 +4719,7 @@ function TasksV2({ tasks, leads, refetch }) {
           <p className="v2-page-sub">Reminders and to-dos, optionally linked to a deal</p>
         </div>
         <div className="v2-header-actions">
-          <button className="v2-cta" onClick={() => setShowNew(true)}>+ New Task</button>
+          <button className="v2-cta" onClick={openNew}>+ New Task</button>
         </div>
       </div>
 
@@ -4567,7 +4736,7 @@ function TasksV2({ tasks, leads, refetch }) {
           filtered.map((t) => (
             <div key={t._id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid #f4f7fc' }}>
               <input type="checkbox" checked={!!t.done} onChange={() => toggleDone(t)} style={{ width: 18, height: 18, cursor: 'pointer' }} />
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => openEdit(t)}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: t.done ? '#6b7a99' : '#0d1b3e', textDecoration: t.done ? 'line-through' : 'none' }}>
                   {t.title}
                 </div>
@@ -4576,7 +4745,8 @@ function TasksV2({ tasks, leads, refetch }) {
                 </div>
               </div>
               {t.priority && t.priority !== 'Normal' && <span className={`v2-chip ${t.priority === 'High' || t.priority === 'Urgent' ? 'hot' : 'warm'}`}>{t.priority}</span>}
-              <button onClick={() => deleteTask(t)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
+              <button onClick={() => openEdit(t)} title="Edit" style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 13 }}>✎</button>
+              <button onClick={() => deleteTask(t)} title="Delete" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
             </div>
           ))
         )}
@@ -4584,11 +4754,12 @@ function TasksV2({ tasks, leads, refetch }) {
 
       {showNew && (
         <ModalShell
-          title="+ New Task"
-          onClose={() => setShowNew(false)}
-          onSubmit={createTask}
+          title={editingTask ? '✎ Edit Task' : '+ New Task'}
+          onClose={() => { setShowNew(false); setEditingTask(null); }}
+          onSubmit={saveTask}
           saving={saving}
           err=""
+          submitLabel={editingTask ? '✓ Save Changes' : '✓ Add'}
         >
           <div>
             <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Task *</div>
@@ -4881,6 +5052,12 @@ function ReportsV2({ leads }) {
       <div className="v2-panel" style={{ marginBottom: 24 }}>
         <div className="v2-panel-header">
           <h3 className="v2-panel-title">🔁 Repeat Customers</h3>
+          {repeats.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('repeat-customers.csv', [
+              ['Client', 'Phone', 'Booked Trips', 'Total Enquiries', 'Total Value (INR)'],
+              ...repeats.map((c) => [c.name || '', c.phone || '', c.bookedCount, c.enquiries, c.total]),
+            ])}>⬇ Export CSV</button>
+          )}
         </div>
         <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Clients who booked more than once — your most loyal, easiest to upsell.</p>
         {repeats.length === 0 ? (
@@ -4906,6 +5083,12 @@ function ReportsV2({ leads }) {
       <div className="v2-panel" style={{ marginBottom: 24 }}>
         <div className="v2-panel-header">
           <h3 className="v2-panel-title">🤝 Vendor Performance</h3>
+          {vendors.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('vendor-performance.csv', [
+              ['Vendor', 'Times Used', 'Business Given (INR)', 'Still to Pay (INR)', 'Margin (INR)'],
+              ...vendors.map((v) => [v.name, v.deals, v.cost, v.due, v.margin === null ? '' : v.margin]),
+            ])}>⬇ Export CSV</button>
+          )}
         </div>
         <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Booked deals only. Margin shows only where that vendor has a selling price set.</p>
         {vendors.length === 0 ? (
@@ -4933,6 +5116,12 @@ function ReportsV2({ leads }) {
       <div className="v2-panel">
         <div className="v2-panel-header">
           <h3 className="v2-panel-title">💹 Monthly Profit &amp; Loss</h3>
+          {months.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('monthly-pnl.csv', [
+              ['Month', 'Deals', 'Revenue (INR)', 'Cost (INR)', 'Profit (INR)'],
+              ...months.map((m) => [m.mon, m.deals, m.sell, m.cost, m.profit]),
+            ])}>⬇ Export CSV</button>
+          )}
         </div>
         <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>Booked deals grouped by month.</p>
         {months.length === 0 ? (
