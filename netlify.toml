@@ -23,6 +23,36 @@
     Cache-Control = "no-cache"
     X-Content-Type-Options = "nosniff"
 
+# This was the root cause of a real production bug: the browser (or an
+# intermediate CDN edge) can cache index.html itself. Since index.html
+# is what references the content-hashed JS bundle (main.[hash].js),
+# a stale cached index.html keeps pointing at an OLD bundle even after
+# a brand new deploy has gone live — the person's browser silently
+# keeps running yesterday's code indefinitely until they happen to
+# hard-refresh. That's exactly what happened here: a proposal
+# generated hours after a real fix shipped still showed the old,
+# pre-fix behavior. Force index.html to always be revalidated so a
+# normal reload always picks up the latest deploy.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Static JS/CSS bundles ARE content-hashed by the build (main.<hash>.js) —
+# a given filename's content never changes, so these are safe to cache
+# aggressively and immutably. This also means old bundle files harmlessly
+# stick around for anyone with a lingering cached index.html reference,
+# rather than 404ing.
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 [[redirects]]
   from = "/.well-known/*"
   to = "/.well-known/:splat"
