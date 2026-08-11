@@ -1227,246 +1227,517 @@ async function runAIExtract(kind, files) {
 const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const logEntryStatic = (title) => ({ title, at: new Date().toISOString(), by: 'You' });
 
+const VE_LOGO = "data:image/jpeg;base64,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";
+
+function fmtDV2(d) {
+  if (!d) return '—';
+  const x = new Date(d);
+  return isNaN(x) ? escHtml(d) : x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// Same destination-vibe fallback cover logic as V1's pickFallbackCover() —
+// V2 has no Unsplash gallery-search UI, so this (verified, curated) set of
+// fallback photos is what always renders, matched to the destination text.
+function pickFallbackCoverV2(deal) {
+  const _d = ((deal && deal.destination) || '').toLowerCase();
+  const F = {
+    mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
+    beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
+    city: 'https://images.unsplash.com/photo-1508062878650-88b52897f298?w=1400&q=85',
+    cruise: 'https://images.unsplash.com/photo-1554254648-2d58a1bc3fd5?w=1400&q=85',
+    europe: 'https://images.unsplash.com/photo-1511739001486-6bfe10ce785f?w=1400&q=85',
+    nordic: 'https://images.unsplash.com/photo-1663428520845-056989f8a664?w=1400&q=85',
+    tropicboat: 'https://images.unsplash.com/photo-1589394815804-964ed0be2eb5?w=1400&q=85',
+  };
+  if (/cruise|ship|msc|cordelia/.test(_d)) return F.cruise;
+  if (/kashmir|himachal|spiti|manali|shimla|leh|ladakh|nepal|bhutan|uttarakhand|mussoorie|nainital|darjeeling|gangtok|sikkim|swiss|alps/.test(_d)) return F.mountain;
+  if (/norway|finland|sweden|denmark|iceland|scandinavia|lofoten|fjord/.test(_d)) return F.nordic;
+  if (/paris|france|italy|europe|london|spain|portugal|amsterdam|prague|vienna|rome/.test(_d)) return F.europe;
+  if (/dubai|city|kuala|singapore|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
+  if (/thailand|phuket|krabi|pattaya|bangkok|goa|andaman/.test(_d)) return F.tropicboat;
+  return F.beach;
+}
+
 function buildProposalHTMLV2(deal) {
-  const ref = deal.dealNumber || ('VE' + String(Date.now()).slice(-6));
-  const acceptWA = 'https://wa.me/917009659048?text=' + encodeURIComponent('I ACCEPT ' + ref);
-  const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=' + encodeURIComponent(acceptWA);
+  const cover = pickFallbackCoverV2(deal);
+
+  const _tiers = (deal.useTiers ? (deal.tiers || []) : []).filter((t) =>
+    t.enabled && (Number(t.totalPrice) > 0 || (t.hotels || []).some((h) => h.hotelName || h.photoUrl)));
   const pax = `${deal.adults || 0} Adults${Number(deal.children) > 0 ? `, ${deal.children} Children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} Infants` : ''}`;
-  const totalPax = paxOf(deal);
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName || h.city);
+  const nightsTotal = hotels.reduce((s, h) => s + (Number(h.nights) || 0), 0);
   const flights = (deal.flightVendors || []).filter((f) => (f.sectors || []).some((s) => s.from || s.to));
   const trains = (deal.trainVendors || []).filter((t) => (t.segments || []).some((s) => s.from || s.to));
-  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName || h.city);
-  const visas = (deal.visaVendors || []).filter((v) => v.name);
-  const landPkgs = (deal.landVendors || []).filter((l) => l.itinerary);
-  const nightsTotal = hotels.reduce((s, h) => s + (Number(h.nights) || 0), 0);
+  const ref = deal.dealNumber || ('VE' + String(Date.now()).slice(-6));
+  const showF = flights.length > 0;
+  const showH = true;
+  const sell = sellINR(deal);
+  const totalPax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
 
   const dayHdr = /^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
-  const parseDays = (text) => {
+  const parseDaysV2 = (text) => {
     const raw = (text || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
-    const first = raw.findIndex((l) => dayHdr.test(l));
-    if (first < 0) return raw;
+    const firstHdr = raw.findIndex((l) => dayHdr.test(l));
+    if (firstHdr < 0) return raw;
     const out = []; let cur = null;
-    raw.slice(first).forEach((l) => {
+    raw.slice(firstHdr).forEach((l) => {
       if (dayHdr.test(l)) { if (cur !== null) out.push(cur); cur = l; }
-      else { cur = cur === null ? l : cur + ' ' + l; }
+      else { cur = cur === null ? l : cur + '\n' + l; }
     });
     if (cur !== null) out.push(cur);
     return out;
   };
-  const allDayLines = landPkgs.map((l) => parseDays(l.itinerary)).reduce((a, b) => a.concat(b), []);
+  const allDayLines = (deal.landVendors || []).filter((l) => l.itinerary).map((l) => parseDaysV2(l.itinerary)).reduce((a, b) => a.concat(b), []);
 
-  const sell = sellINR(deal);
-  const paid = paidINR(deal);
-  const balance = sell - paid;
+  const dayIconV2 = (t) => {
+    const s = (t || '').toLowerCase();
+    if (/beach|island|boat|snorkel|cruise|speed/.test(s)) return '🏖️';
+    if (/temple|pagoda|heritage|fort|palace|museum|ancient/.test(s)) return '🛕';
+    if (/cable|hill|mountain|trek|peak/.test(s)) return '🚡';
+    if (/safari|wildlife|zoo|national park/.test(s)) return '🦁';
+    if (/arrival|airport pickup|check-in|welcome/.test(s)) return '🛬';
+    if (/departure|check-out|drop/.test(s)) return '🛫';
+    if (/shopping|market|city tour|downtown/.test(s)) return '🏙️';
+    if (/leisure|relax|free day|own/.test(s)) return '🌴';
+    return '📍';
+  };
 
-  const statCard = (val, label) => `<div style="flex:1;min-width:100px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${val}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">${label}</div></div>`;
-  const statsRibbon = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px">
-    ${nightsTotal ? statCard(nightsTotal, 'NIGHTS') : ''}
-    ${hotels.length ? statCard(hotels.length, `STAY${hotels.length > 1 ? 'S' : ''}`) : ''}
-    ${flights.length ? statCard(flights.reduce((s, f) => s + (f.sectors || []).length + (f.returnSectors || []).length, 0), 'FLIGHT SECTORS') : ''}
-    ${allDayLines.length ? statCard(allDayLines.length, 'CURATED DAYS') : ''}
-    ${statCard(totalPax || '–', `TRAVELLER${totalPax > 1 ? 'S' : ''}`)}
+  const statsRibbon = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px">
+    ${nightsTotal ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${nightsTotal}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">NIGHTS</div></div>` : ''}
+    ${_tiers.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${_tiers.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">STAY OPTIONS</div></div>`
+      : (showH && hotels.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${hotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${hotels.length > 1 ? 'S' : ''}</div></div>` : '')}
+    ${showF && flights.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${flights.reduce((s, f) => s + ((f.sectors || []).filter((x) => x.from || x.to).length) + ((f.returnSectors || []).filter((x) => x.from || x.to).length), 0)}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">FLIGHT SECTORS</div></div>` : ''}
+    ${allDayLines.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${allDayLines.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">CURATED DAYS</div></div>` : ''}
+    <div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${totalPax || '–'}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">TRAVELLER${totalPax > 1 ? 'S' : ''}</div></div>
   </div>`;
 
-  const priceBlock = sell > 0 ? `<div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;margin-bottom:18px;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-    <div><div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">PACKAGE PRICE</div><div style="font-size:30px;font-weight:800;margin-top:4px">₹${sell.toLocaleString('en-IN')}</div><div style="font-size:11px;opacity:.75;margin-top:2px">For ${pax}</div></div>
-    <div style="text-align:right;font-size:11px;opacity:.85">Ref: ${escHtml(ref)}<br>Valid for 7 days from today</div>
+  const hlItems = [];
+  if (showF && flights.length) hlItems.push('✈️ Flights handpicked for the best timings & baggage');
+  if (showH && hotels.length) hlItems.push(`🏨 ${hotels.length} premium stay${hotels.length > 1 ? 's' : ''} with breakfast included`);
+  if (allDayLines.length) hlItems.push(`🗺️ ${allDayLines.length}-day fully curated experience — zero planning stress`);
+  hlItems.push('🤝 Dedicated Voyage-Ed trip manager on WhatsApp, before & during your trip');
+  const highlightsHTML = `<div style="background:linear-gradient(135deg,#fdf9ee,#fff);border-left:4px solid #c9961a;border-radius:0 14px 14px 0;padding:16px 20px;margin:0 0 18px">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">WHY YOU'LL LOVE THIS TRIP</div>
+    <div style="font-size:12.5px;line-height:2.1;color:#33415e">${hlItems.join('<br>')}</div>
+  </div>`;
+
+  const timelineHTML = allDayLines.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 16px;margin-bottom:16px">
+    ${allDayLines.map((d, i) => `<div style="text-align:center;min-width:50px"><div style="font-size:19px">${dayIconV2(d)}</div><div style="font-size:8.5px;color:#7d8bab;font-weight:800;letter-spacing:.5px">DAY ${i + 1}</div></div>`).join('<div style="color:#c9961a;font-weight:800">›</div>')}
   </div>` : '';
 
-  const payBlock = (sell > 0 && paid > 0) ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:18px">
+  const totRec = sumBy(deal.clientPayments, 'amount');
+  const totRef = sumBy(deal.refunds, 'amount');
+  const payBlock = (sell > 0 && totRec > 0) ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-top:16px">
     <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT SUMMARY</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">
-      <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${paid.toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED — thank you! 🙏</div></div>
-      <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0, balance).toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
+      <div style="flex:1;min-width:130px;background:#f0faf4;border-radius:10px;padding:10px 14px"><div style="color:#15803d;font-weight:800;font-size:16px">₹${totRec.toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">RECEIVED — thank you! 🙏</div></div>
+      ${totRef > 0 ? `<div style="flex:1;min-width:130px;background:#fdf1f1;border-radius:10px;padding:10px 14px"><div style="color:#b91c1c;font-weight:800;font-size:16px">− ₹${totRef.toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">REFUNDED</div></div>` : ''}
+      <div style="flex:1;min-width:130px;background:#fff7ed;border-radius:10px;padding:10px 14px"><div style="color:#c2660a;font-weight:800;font-size:16px">₹${Math.max(0, (sell - totRef) - (totRec - totRef)).toLocaleString('en-IN')}</div><div style="color:#5a6b8c;font-size:10px">BALANCE — due before travel</div></div>
     </div>
   </div>` : '';
 
-  const flightBlocks = flights.map((f) => {
-    const legs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
-    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
-      <div style="font-weight:800;color:#0d1b3e;font-size:13px;margin-bottom:10px">${escHtml(f.name || legs[0]?.airlineName || 'Flight')}</div>
-      ${legs.map((s) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #f0f2f7;font-size:12px">
-        <div><b style="color:#0d1b3e">${escHtml((s.from || '').toUpperCase())}</b> ${escHtml(s.fromName || '')} → <b style="color:#0d1b3e">${escHtml((s.to || '').toUpperCase())}</b> ${escHtml(s.toName || '')}</div>
-        <div style="color:#5a6b8c">${escHtml(s.date || '')} · ${escHtml(s.depTime || '')}-${escHtml(s.arrTime || '')}</div>
-      </div>`).join('')}
-    </div>`;
-  }).join('');
+  const acceptMsg = 'I, ' + (deal.clientName || 'the Client') + ', have read and ACCEPT the Booking Policy, Cancellation Policy and Terms & Conditions (Clauses 1-16) of Voyage-Ed proposal Ref: ' + ref + '.';
+  const acceptWA = 'https://wa.me/917009659048?text=' + encodeURIComponent(acceptMsg);
+  const STATIC_CANCEL_TABLE = `<table style="width:100%;border-collapse:collapse;margin:2px 0 8px;font-size:11px">
+      <tr><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left;border-radius:8px 0 0 0">Days Before Departure</th><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left;border-radius:0 8px 0 0">Cancellation Charge</th></tr>
+      <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">30 – 16 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#0d1b3e">50% of the total cost</td></tr>
+      <tr><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd">15 – 8 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd;font-weight:700;color:#0d1b3e">75% of the total cost</td></tr>
+      <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">7 – 0 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#b91c1c">100% of the total cost (no refund)</td></tr>
+    </table>
+    • Visa fee & service charges are <b style="color:#0d1b3e">non-refundable</b>.<br>
+    • No refund, either in part or in full, will be made for any <b style="color:#0d1b3e">unused part of the services</b> provided in the package.<br>
+    • Overseas Insurance Policy after issuance is non-refundable (Travel Insurance Charges: <b style="color:#0d1b3e">₹1,000 per person</b>).`;
 
-  const trainBlocks = trains.map((t) => {
-    const legs = [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to);
-    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
-      <div style="font-weight:800;color:#0d1b3e;font-size:13px;margin-bottom:10px">${escHtml(t.name || 'Train')}</div>
-      ${legs.map((s) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid #f0f2f7;font-size:12px">
-        <div><b style="color:#0d1b3e">${escHtml(s.fromStation || s.from || '')}</b> → <b style="color:#0d1b3e">${escHtml(s.toStation || s.to || '')}</b></div>
-        <div style="color:#5a6b8c">${escHtml(s.date || '')} · ${escHtml(s.classOfTravel || '')}</div>
-      </div>`).join('')}
-    </div>`;
-  }).join('');
-
-  const hotelBlocks = hotels.map((h) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;margin-bottom:12px">
-    ${h.photoUrl ? `<img src="${h.photoUrl}" alt="${escHtml(h.hotelName)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>` : ''}
-    <div style="font-weight:800;color:#0d1b3e;font-size:13px">${escHtml(h.hotelName || 'Hotel')} ${h.starRating ? '★'.repeat(Number(h.starRating) || 0) : ''}</div>
-    <div style="font-size:11.5px;color:#5a6b8c;margin-top:4px">${escHtml(h.roomCategory || 'Room')} · ${escHtml(h.city || '')} ${h.nights ? `· ${h.nights} nights` : ''}</div>
-    <div style="font-size:11px;color:#8a97b5;margin-top:2px">${escHtml(h.checkIn || '')}${h.checkOut ? ` → ${escHtml(h.checkOut)}` : ''}</div>
-  </div>`).join('');
-
-  const visaBlocks = visas.map((v) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 18px;margin-bottom:10px;font-size:12.5px;color:#33415e"><b style="color:#0d1b3e">${escHtml(v.name)}</b> — ${escHtml(v.visaStatus || 'Not Applied')}</div>`).join('');
-
-  const timelineHTML = allDayLines.length ? `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:12px;line-height:1.9;color:#33415e;margin-bottom:16px">
-    ${allDayLines.map((d, i) => `<div style="padding:6px 0;${i < allDayLines.length - 1 ? 'border-bottom:1px solid #f0f2f7' : ''}"><b style="color:#c9961a">Day ${i + 1}:</b> ${escHtml(d.replace(dayHdr, '').replace(/^[:\-–\s]+/, ''))}</div>`).join('')}
-  </div>` : '';
-
-  const incItems = [];
-  if (flights.length) incItems.push('Flights as mentioned above');
-  if (hotels.length) { incItems.push('Hotel stays with breakfast'); incItems.push('All transfers & sightseeing as per itinerary'); }
-  if (visas.some((v) => (Number(v.sellingPrice) || 0) > 0)) incItems.push('Visa fees & visa assistance');
-  incItems.push('Dedicated trip manager on WhatsApp');
-  incItems.push('All taxes included — no hidden charges');
-
-  const excItems = ['Meals other than specified'];
-  if (!visas.some((v) => (Number(v.sellingPrice) || 0) > 0)) excItems.push('Visa fees (unless mentioned)');
-  excItems.push('Travel insurance & personal expenses');
-  excItems.push('Anything not mentioned in inclusions');
-
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${escHtml(clientName(deal))}</title>
-<style>
-  body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#f4f6fb;color:#33415e}
-  @media print{ body{background:#fff} .noprint{display:none} .ve-interactive{display:none!important} .ve-printsign{display:block!important} }
-</style></head><body>
-<div style="max-width:820px;margin:0 auto;background:#fff">
-  <div style="position:relative;background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:44px 40px 30px;color:#fff">
-    <div style="font-size:10px;letter-spacing:3px;color:#f0c842;font-weight:800">VOYAGE-ED TRAVELS · PROPOSAL</div>
-    <div style="font-family:Georgia,serif;font-size:34px;font-weight:700;margin-top:10px">Trip to ${escHtml(destination(deal) || 'Your Destination')}</div>
-    <div style="font-size:13px;opacity:.85;margin-top:8px">${escHtml(pax)} · ${escHtml(deal.travelDates || 'Dates flexible')}</div>
+  const legalTC = `
+  <div style="margin-top:26px">
+    <h2 style="font-size:18px;color:#0d1b3e;margin:0 0 10px">⚖️ Terms &amp; Conditions of Service (Legal)</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:10px;line-height:1.75;color:#4a5772">
+      <b style="color:#0d1b3e">1. Definitions &amp; Parties.</b> In these Terms, "the Company" means <b>Voyage-Ed Travels</b>, having its office at GMADA Aerocity, Mohali, Punjab, India; "the Client" means the person(s) named in this proposal and all travellers on whose behalf the booking is made; "Suppliers" means airlines, hotels, cruise lines, transport operators, insurers and other third-party service providers; "Total Cost" means the total package price stated in this proposal. These Terms constitute a legally binding agreement between the Company and the Client.<br>
+      <b style="color:#0d1b3e">2. Acceptance &amp; Authority.</b> Acceptance of this proposal — by digital acceptance below, written or electronic confirmation, or payment of any deposit — constitutes unconditional acceptance of these Terms by the Client on behalf of all travellers in the booking, and the Client warrants that they have authority to bind all such travellers.<br>
+      <b style="color:#0d1b3e">3. Role of the Company.</b> The Company acts solely as an agent of the Suppliers. All services are additionally governed by the Suppliers' own tariffs, terms and conditions of carriage/service, which are deemed incorporated herein by reference. The Company shall not be liable for any act, omission, default or insolvency of any Supplier.<br>
+      <b style="color:#0d1b3e">4. Booking &amp; Payment.</b> A non-refundable deposit of ₹20,000 per person — or the actual hotel, flight and land component minimum due, whichever is higher — is required to initiate a booking. Where the date of travel is less than 7 (seven) days away, a non-refundable deposit of 50% of the Total Cost shall apply. Full payment is required upon confirmation of all services and prior to departure from India. Time is of the essence: failure to pay any amount by its due date entitles the Company to treat the booking as cancelled by the Client, and the Cancellation Policy shall apply.<br>
+      <b style="color:#0d1b3e">5. Cancellation &amp; Refunds.</b> The Cancellation Policy stated in this proposal (the standard slab: 30–16 days before departure — 50%; 15–8 days — 75%; 7–0 days — 100% of the Total Cost) forms an integral part of this Agreement. All cancellations must be communicated in writing and take effect from the date of receipt by the Company. Visa fees and service charges are non-refundable in all circumstances. No refund shall be payable, in whole or in part, for any unused, partially used or forfeited service. Travel insurance, once issued, is non-refundable (insurance charge: ₹1,000 per person). Failure to travel / no-show shall be treated as a cancellation attracting 100% charges.<br>
+      <b style="color:#0d1b3e">6. Refund Processing.</b> Refunds, where due, shall be processed only after realisation of the corresponding amounts from the respective Suppliers and in accordance with their policies, ordinarily within 30–45 working days of receipt. Refunds shall be made to the same account/instrument from which payment was received.<br>
+      <b style="color:#0d1b3e">7. Amendments &amp; Transfers.</b> Any change requested by the Client (dates, names, itinerary, room category or otherwise) is treated as a fresh booking, subject to availability and revised pricing; changes within the cancellation window attract applicable cancellation charges. Bookings are non-transferable except with the Company's prior written consent and payment of applicable Supplier charges.<br>
+      <b style="color:#0d1b3e">8. Travel Documents, Visas &amp; Permits.</b> The Client is solely responsible for holding valid passports (minimum 6 months' validity from the date of return travel), visas, permits, and health/vaccination documentation for all travellers. Photocopies of passport (first and address page) are mandatory for all destinations. Grant, refusal or delay of any visa is at the sole discretion of the concerned Embassy/authority; the Company assumes no liability therefor, and cancellation charges shall apply in case of visa refusal or delayed issuance.<br>
+      <b style="color:#0d1b3e">9. Prices &amp; Taxes.</b> All prices are subject to availability, rate of exchange, fuel and Supplier surcharges, and statutory levies (including GST as per government norms) prevailing at the time of booking and may be revised accordingly until full payment. Mandatory gala dinner supplements on special dates (24/31 December, 14 February) may be payable by the Client directly at the hotel.<br>
+      <b style="color:#0d1b3e">10. Itinerary Changes by the Company.</b> The Company reserves the right to modify, re-sequence or substitute any part of the itinerary or services due to force majeure, weather, operational requirements, safety considerations or non-availability, with suitable alternatives of comparable standard being provided where reasonably possible; no compensation shall be payable for such modification.<br>
+      <b style="color:#0d1b3e">11. Force Majeure.</b> The Company shall not be liable for any delay, alteration, curtailment, cancellation, loss or damage arising from acts of God, weather, natural calamity, epidemic/pandemic, strikes, riots, civil disturbance, war, terrorism, government or regulatory action, airspace or border closures, technical or operational failure of Suppliers, or any other cause beyond its reasonable control. Any additional cost so arising (including extended stay, re-routing or repatriation) shall be borne by the Client.<br>
+      <b style="color:#0d1b3e">12. Limitation of Liability &amp; Indemnity.</b> To the maximum extent permitted by law, the Company's aggregate liability under or in connection with this Agreement, howsoever arising, shall not exceed the amount actually received by the Company for the booking. The Company shall not be liable for any indirect, incidental or consequential loss, loss of enjoyment, or loss of baggage/personal effects. The Client shall indemnify and hold harmless the Company against all claims, losses and expenses arising from the Client's breach of these Terms, unlawful conduct, or inaccurate information supplied.<br>
+      <b style="color:#0d1b3e">13. Health, Insurance &amp; Conduct.</b> The Client warrants fitness to travel and shall disclose any medical condition relevant to the services booked. Comprehensive travel insurance is strongly recommended and is the Client's responsibility. The Company or its Suppliers may decline or terminate services, without refund, in case of unlawful, unsafe or abusive conduct. Check-in/check-out timings, baggage allowances and on-board rules are as per the respective Suppliers.<br>
+      <b style="color:#0d1b3e">14. Complaints &amp; Notices.</b> Any complaint regarding the services must be notified to the Company in writing at enquiry@voyage-ed.com within 14 (fourteen) days of completion of travel, failing which the claim shall be deemed waived. All notices under this Agreement shall be in writing to the addresses/e-mail stated in this proposal.<br>
+      <b style="color:#0d1b3e">15. Severability &amp; Waiver.</b> If any provision of these Terms is held invalid or unenforceable, the remaining provisions shall continue in full force. No failure or delay by the Company in exercising any right shall operate as a waiver thereof.<br>
+      <b style="color:#0d1b3e">16. Governing Law, Jurisdiction &amp; Entire Agreement.</b> This Agreement shall be governed by and construed in accordance with the laws of India. Subject to an attempt at amicable resolution, all disputes shall be subject to the exclusive jurisdiction of the competent courts at Mohali / Chandigarh, Punjab, India. This proposal together with these Terms constitutes the entire agreement between the parties and supersedes all prior communications relating to this booking.
+    </div>
   </div>
-  <div style="background:rgba(10,21,48,.9);padding:12px 40px;color:#fff;font-size:12px">Specially crafted for <b style="color:#f0c842">${escHtml(clientName(deal)) || 'our valued guest'}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
+  <div id="ve-accept" style="margin-top:16px;background:linear-gradient(135deg,#fdf9ee,#fff);border:2px solid #c9961a;border-radius:16px;padding:18px 22px">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">✍️ CLIENT ACCEPTANCE</div>
+    <div class="ve-interactive">
+      <label style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:#33415e;cursor:pointer;line-height:1.6">
+        <input type="checkbox" id="veAgree" style="width:18px;height:18px;margin-top:2px;accent-color:#c9961a"/>
+        <span>I, <b style="color:#0d1b3e">${escHtml(deal.clientName) || 'the undersigned Client'}</b>, confirm that I have read, understood and unconditionally accept the Booking &amp; Payment Policy, the Cancellation Policy and the Terms &amp; Conditions of Service (Clauses 1–16) stated in this proposal (Ref: <b>${escHtml(ref)}</b>). I understand that my submission constitutes a legally binding acceptance of these terms.</span>
+      </label>
+      <button id="veAccBtn" style="margin-top:12px;background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;font-size:13px;font-weight:800;cursor:pointer">✅ Accept &amp; Submit</button>
+      <div id="veAccMsg" style="font-size:12px;margin-top:10px;font-weight:700"></div>
+      <div style="font-size:10.5px;color:#7d8bab;margin-top:8px">Ya ek tap me: <a href="${acceptWA}" style="color:#15803d;font-weight:800">WhatsApp par accept karein →</a></div>
+    </div>
+    <div class="ve-printsign" style="display:none">
+      <a href="${acceptWA}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);border-radius:14px;padding:16px 20px;text-align:center;margin:4px 0 12px">
+        <span style="color:#fff;font-size:16px;font-weight:800;letter-spacing:.5px">✅ &nbsp;TAP HERE TO ACCEPT THIS PROPOSAL</span><br>
+        <span style="color:#d7f5e0;font-size:10.5px">Ek tap me WhatsApp khulega — ready-typed acceptance message ke saath — bas Send dabayein.<br>By sending, you accept the Booking Policy, Cancellation Policy &amp; Terms (Clauses 1–16) · Ref: ${escHtml(ref)}</span>
+      </a>
+      <div style="font-size:10px;color:#7d8bab;text-align:center;margin-bottom:10px">Ya WhatsApp par likh bhejein: <b style="color:#33415e">"I ACCEPT ${escHtml(ref)}"</b> → <b style="color:#33415e">+91 70096 59048</b> · Ya QR scan karein (footer)</div>
+      <div style="font-size:11px;color:#33415e;line-height:2.2;border-top:1px dashed #e3d9be;padding-top:8px">
+        For physical signing: &nbsp; Client Signature: ______________________________ &nbsp;&nbsp; Name: ${escHtml(deal.clientName) || '____________________'} &nbsp;&nbsp; Date: ________________
+      </div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      var btn=document.getElementById("veAccBtn"); if(!btn) return;
+      var VE_REF=${JSON.stringify(String(ref || ''))}, VE_CLIENT=${JSON.stringify(String(deal.clientName || 'Client'))}, VE_DEST=${JSON.stringify(String(deal.destination || ''))}, VE_PRICE=${JSON.stringify(sell > 0 ? ('Rs. ' + sell.toLocaleString('en-IN')) : 'On request')}, VE_PMODE="STATIC/STANDARD", VE_POLICY=${JSON.stringify('30-16 days before departure: 50% of total cost | 15-8 days: 75% of total cost | 7-0 days: 100% of total cost (no refund) | Visa fee & service charges non-refundable | No refund for unused services | Insurance non-refundable after issuance (Rs.1,000/person)')};
+      btn.addEventListener("click",function(){
+        var chk=document.getElementById("veAgree"), msg=document.getElementById("veAccMsg");
+        if(!chk.checked){ msg.style.color="#b91c1c"; msg.textContent="⚠️ Please tick the acceptance checkbox first."; return; }
+        btn.disabled=true; btn.textContent="Submitting...";
+        var hashP = (window.crypto&&crypto.subtle) ? crypto.subtle.digest("SHA-256", new TextEncoder().encode(VE_POLICY+"|"+VE_REF)).then(function(buf){ return Array.prototype.map.call(new Uint8Array(buf),function(b){return ("0"+b.toString(16)).slice(-2);}).join(""); }).catch(function(){return "unavailable";}) : Promise.resolve("unavailable");
+        hashP.then(function(policyHash){
+        var body={ _subject: "PROPOSAL ACCEPTED - " + VE_REF + " - " + VE_CLIENT,
+          type:"Proposal T&C Acceptance", reference:VE_REF, client:VE_CLIENT, destination:VE_DEST,
+          packagePrice:VE_PRICE, policyMode:VE_PMODE, cancellationPolicyAccepted:VE_POLICY,
+          policyHashSHA256:policyHash,
+          acceptedAtISO:new Date().toISOString(), acceptedFrom:(navigator.userAgent||"").slice(0,120) };
+        return fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify(body)})
+        .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+        .then(function(){ msg.style.color="#15803d"; msg.textContent="✅ Thank you! Your acceptance has been recorded and sent to Voyage-Ed Travels (Ref: "+VE_REF+")."; btn.textContent="✅ Accepted"; }); })
+        .catch(function(){ msg.style.color="#b91c1c";
+          var mailto="mailto:enquiry@voyage-ed.com?subject="+encodeURIComponent("PROPOSAL ACCEPTED - "+VE_REF+" - "+VE_CLIENT)+"&body="+encodeURIComponent("I accept the T&C, Booking Policy and Cancellation Policy of proposal "+VE_REF+".%0ACancellation policy accepted: "+VE_POLICY+"%0AAccepted at: "+new Date().toString());
+          msg.innerHTML="⚠️ Could not auto-submit. <a href='"+mailto+"' style='color:#0d1b3e'>Click here to send your acceptance by email</a>."; btn.disabled=false; btn.textContent="✅ Accept & Submit"; });
+      });
+    })();
+  </script>
+  `;
+  const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=' + encodeURIComponent(acceptWA);
+
+  const sectorRowV2 = (s) => {
+    const _code = String(s.airlineCode || '').trim().toUpperCase();
+    const _name = String(s.airlineName || '').trim();
+    return `
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px dashed #d8e2f3">
+      <div style="min-width:72px;max-width:86px;text-align:center">
+        <div style="font-size:14px;font-weight:800;color:#c9961a;letter-spacing:1px">${escHtml(_code) || (_name ? escHtml(_name.split(' ')[0]) : '✈')}</div>
+        <div style="font-size:9.5px;color:#7d8bab;line-height:1.3">${escHtml(_name)}</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;gap:10px">
+        <div><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.from)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.fromName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.depTime)}</div></div>
+        <div style="flex:1;text-align:center;color:#c9961a;font-size:11px">──────✈──────<div style="font-size:9px;color:#7d8bab">${fmtDV2(s.date)}</div></div>
+        <div style="text-align:right"><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.to)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.toName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.arrTime)}</div></div>
+      </div>
+    </div>`;
+  };
+
+  const detectFlightTypeV2 = (f) => {
+    const norm = (x) => String(x || '').trim().toLowerCase();
+    const secs = (f.sectors || []).filter((s) => s.from || s.to);
+    const rets = (f.returnSectors || []).filter((s) => s.from || s.to);
+    if (rets.length) return 'ROUND TRIP';
+    if (secs.length >= 2) {
+      const first = secs[0], last = secs[secs.length - 1];
+      const returnsHome = norm(first.from) && norm(last.to) === norm(first.from);
+      if (secs.length === 2 && returnsHome && norm(secs[0].to) === norm(secs[1].from)) return 'ROUND TRIP';
+      return returnsHome ? 'MULTI-CITY' : (f.flightType === 'return' ? 'ROUND TRIP' : 'MULTI-CITY');
+    }
+    if (f.flightType === 'return') return 'ROUND TRIP';
+    return 'ONE WAY';
+  };
+
+  const flightBlocks = showF ? flights.map((f) => {
+    const visSecs = (f.sectors || []).filter((s) => s.from || s.to);
+    const visRets = (f.returnSectors || []).filter((s) => s.from || s.to);
+    const noTimes = [...visSecs, ...visRets].every((s) => !s.depTime && !s.arrTime);
+    return `
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;overflow:hidden;margin-bottom:16px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+      <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;padding:10px 18px;font-size:12px;font-weight:700;letter-spacing:1px">✈️ FLIGHT · ${detectFlightTypeV2(f)}</div>
+      ${visSecs.map(sectorRowV2).join('')}
+      ${visRets.map((s) => `<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>` + sectorRowV2(s)).join('')}
+      ${noTimes ? `<div style="background:#fdf9ee;font-size:10px;color:#8a6d1a;padding:7px 18px">🕐 Exact departure &amp; arrival timings will be confirmed on your final ticket.</div>` : ''}
+    </div>`;
+  }).join('') : '';
+
+  const trainBlocks = trains.map((tv) => {
+    const trainSegRow = (s) => `
+      <div style="padding:14px 18px;border-top:1px solid #f0f4fa">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:800;color:#0d1b3e">${escHtml(s.trainNo || '')}${s.trainName ? ` <span style="font-weight:600;color:#5a6b8c">${escHtml(s.trainName)}</span>` : ''}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${s.classOfTravel ? `<span style="background:#eef3fc;color:#334e82;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">${escHtml(s.classOfTravel)}</span>` : ''}
+            ${s.pnr ? `<span style="background:#f0faf4;color:#15803d;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 9px">PNR ${escHtml(s.pnr)}</span>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:96px">
+            <div style="font-size:22px;font-weight:800;color:#0d1b3e;line-height:1">${escHtml(s.from || '—')}</div>
+            <div style="font-size:10.5px;color:#5a6b8c">${escHtml(s.fromStation || '')}</div>
+            <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${escHtml(s.depTime || '—')}</div>
+            <div style="font-size:10px;color:#8b98b4">${escHtml(s.date || '')}</div>
+          </div>
+          <div style="flex:0 0 60px;text-align:center;color:#c9961a;font-size:16px">🚆</div>
+          <div style="flex:1;min-width:96px;text-align:right">
+            <div style="font-size:22px;font-weight:800;color:#0d1b3e;line-height:1">${escHtml(s.to || '—')}</div>
+            <div style="font-size:10.5px;color:#5a6b8c">${escHtml(s.toStation || '')}</div>
+            <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${escHtml(s.arrTime || '—')}</div>
+          </div>
+        </div>
+      </div>`;
+    const outSegs = (tv.segments || []).filter((s) => s.from || s.to);
+    const retSegs = (tv.returnSegments || []).filter((s) => s.from || s.to);
+    const label = tv.tripType === 'return' ? 'RETURN' : tv.tripType === 'multi-city' ? 'MULTI-LEG' : 'ONE WAY';
+    return `
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;overflow:hidden;margin-bottom:16px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+      <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;padding:10px 18px;font-size:12px;font-weight:700;letter-spacing:1px">🚆 TRAIN · ${label}${tv.isInternational ? ' · INTERNATIONAL' : ''}${tv.name ? ` · ${escHtml(tv.name)}` : ''}</div>
+      ${outSegs.map(trainSegRow).join('')}
+      ${retSegs.map((s) => `<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>` + trainSegRow(s)).join('')}
+    </div>`;
+  }).join('');
+
+  const hotelBlocks = showH ? hotels.map((h) => `
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+      ${h.photoUrl ? `<img src="${escHtml(h.photoUrl)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${escHtml((h.city || '').toUpperCase())}${h.country ? ' · ' + escHtml(h.country.toUpperCase()) : ''}</div>
+          <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${escHtml(h.hotelName) || 'Hotel'}</div>
+          <div style="font-size:12px;color:#5a6b8c">${escHtml(h.roomCategory)} · Breakfast included</div>
+          ${h.starRating ? `<div style="font-size:13px;color:#f0c842;margin-top:3px">${'★'.repeat(Number(h.starRating) || 0)}<span style="color:#c9ccd4">${'★'.repeat(Math.max(0, 5 - (Number(h.starRating) || 0)))}</span></div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="background:#f0f5fd;border-radius:10px;padding:8px 14px;font-size:11px;color:#334e82">
+            <b>${(() => { let n = Number(h.nights); if (!n && h.checkIn && h.checkOut) { n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000); } return n > 0 ? n : 1; })()} night${(() => { let n = Number(h.nights); if (!n && h.checkIn && h.checkOut) { n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000); } return n === 1 ? '' : 's'; })()}</b><br>
+            ${h.checkIn ? 'In: ' + fmtDV2(h.checkIn) : ''}<br>${h.checkOut ? 'Out: ' + fmtDV2(h.checkOut) : ''}
+          </div>
+        </div>
+      </div>
+    </div>`).join('') : '';
+
+  const landBlocks = showH ? (function () {
+    const allDays = allDayLines;
+    const N = allDays.length;
+    const _hp = (x) => { const t = Date.parse(x); return isNaN(t) ? null : t; };
+    const _hn = (deal.hotelVendors || []).map((h) => ({ h, ci: _hp(h.checkIn), co: _hp(h.checkOut) })).filter((x) => x.ci !== null && x.co !== null && x.co > x.ci);
+    const _t0 = _hn.length ? Math.min.apply(null, _hn.map((x) => x.ci)) : null;
+    const overnightFor = (i) => { if (_t0 === null) return null; const t = _t0 + i * 86400000; const f = _hn.find((x) => t >= x.ci && t < x.co); return f ? f.h : null; };
+    const mealsOfV2 = (d) => { const c = []; if (/breakfast/i.test(d)) c.push('🍳 Breakfast'); if (/\blunch/i.test(d)) c.push('🥗 Lunch'); if (/dinner/i.test(d)) c.push('🍽 Dinner'); return c; };
+    const tagsOfV2 = (d) => {
+      const t = [];
+      if (/temple|monastery|pagoda|shakti|church|cathedral|mosque|gurudwara/i.test(d)) t.push('🛕 Temples');
+      if (/beach|island/i.test(d)) t.push('🏖 Beach');
+      if (/waterfall|falls\b/i.test(d)) t.push('💦 Waterfalls');
+      if (/trek|hiking|hike\b|canyon/i.test(d)) t.push('🥾 Trek');
+      if (/cruise|boat|ferry|kayak/i.test(d)) t.push('🚤 Boat');
+      if (/safari|wildlife|national park/i.test(d)) t.push('🦁 Wildlife');
+      if (/shopping|bazaar|market/i.test(d)) t.push('🛍 Shopping');
+      if (!t.length && /transfer|proceed to|drive to|drop/i.test(d)) t.push('🚗 Transfer Day');
+      return t.slice(0, 3);
+    };
+    const _bC = allDays.filter((d) => /breakfast/i.test(d)).length, _lC = allDays.filter((d) => /\blunch/i.test(d)).length, _dC = allDays.filter((d) => /dinner/i.test(d)).length;
+    const mealSummary = (_bC || _lC || _dC) ? `<div style="margin:-2px 0 14px;display:flex;gap:8px;flex-wrap:wrap">${[_bC ? `🍳 ${_bC} Breakfast${_bC > 1 ? 's' : ''}` : '', _lC ? `🥗 ${_lC} Lunch${_lC > 1 ? 'es' : ''}` : '', _dC ? `🍽 ${_dC} Dinner${_dC > 1 ? 's' : ''}` : ''].filter(Boolean).map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:10px;font-weight:800;border-radius:20px;padding:5px 12px">${x} included</span>`).join('')}</div>` : '';
+    const _cards = allDays.map((d, i) => {
+      const lines = String(d).split('\n');
+      let head = lines[0] || '';
+      const m = head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);
+      let rest = m ? m[2] : head;
+      let chip = ''; const dm = rest.match(/^\s*\(([^)]{3,30})\)\s*[:\-–]?\s*(.*)$/);
+      if (dm) { chip = dm[1]; rest = dm[2] || rest; }
+      let title = rest, body = lines.slice(1).join(' ');
+      const tSplit = rest.split(/\s[-–—]\s|:\s/);
+      if (tSplit.length > 1 && tSplit[0].length < 70) { title = tSplit[0]; body = (rest.slice(title.length).replace(/^[\s:\-–—]+/, '') + ' ' + body).trim(); }
+      return `
+      <div style="display:flex;gap:0;position:relative">
+        <div style="width:66px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+          <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#c9961a,#f0c842);box-shadow:0 3px 10px rgba(201,150,26,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1b3e;font-weight:800;z-index:1">
+            <div style="font-size:7.5px;letter-spacing:1px">DAY</div><div style="font-size:17px;line-height:1">${i + 1}</div>
+          </div>
+          ${i < N - 1 ? `<div style="flex:1;width:2px;background:linear-gradient(#e8d9a8,#f3ecd2);margin:4px 0"></div>` : ''}
+        </div>
+        <div style="flex:1;background:#fff;border:1px solid #e3eaf7;border-left:3px solid #e8d089;border-radius:14px;padding:13px 17px;margin:0 0 16px 6px;box-shadow:0 2px 10px rgba(13,27,62,.05)">
+          <div style="display:flex;align-items:flex-start;gap:8px 10px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px;font-family:Georgia,'Times New Roman',serif;font-size:14.5px;font-weight:700;color:#0d1b3e;line-height:1.4">${i === 0 && /arriv|pick|airport|welcome/i.test(d) ? '🛬' : i === N - 1 && /depart|drop|airport|onward journey/i.test(d) ? '🛫' : dayIconV2(d)} ${escHtml(title)}</div>
+            ${chip ? `<div style="background:#fdf6e5;border:1px solid #ecd9a0;color:#8a6d1a;font-size:9.5px;font-weight:800;letter-spacing:.5px;border-radius:20px;padding:4px 11px;white-space:nowrap">📅 ${escHtml(chip)}</div>` : ''}
+          </div>
+          ${(function () { const mm = mealsOfV2(d), tt = tagsOfV2(d); if (!mm.length && !tt.length) return ''; return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${mm.map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}${tt.map((x) => `<span style="background:#eef3fc;border:1px solid #d4e0f5;color:#334e82;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}</div>`; })()}
+          ${(function () {
+      if (!body) return '';
+      const hi = (t) => escHtml(t).replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
+      const sents = body.split(/(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.trim()).filter(Boolean);
+      if (body.length > 170 && sents.length >= 3) {
+        return '<div style="margin-top:8px">' + sents.map((x) => {
+          if (/^tips?\s*[:\-–]/i.test(x)) return '<div style="margin:6px 0;background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:9px;padding:7px 11px;font-size:11px;color:#8a6d1a;font-weight:600">💡 <b>Voyage-Ed Tip:</b> ' + hi(x.replace(/^tips?\s*[:\-–]\s*/i, '')) + '</div>';
+          return '<div style="display:flex;gap:8px;font-size:11.5px;line-height:1.65;color:#5a6b8c;margin-bottom:4px"><span style="color:#c9961a;font-weight:800;flex-shrink:0">›</span><span>' + hi(x) + '</span></div>';
+        }).join('') + '</div>';
+      }
+      if (/^tips?\s*[:\-–]/i.test(body)) return '<div style="margin-top:8px;background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:9px;padding:7px 11px;font-size:11px;color:#8a6d1a;font-weight:600">💡 <b>Voyage-Ed Tip:</b> ' + hi(body.replace(/^tips?\s*[:\-–]\s*/i, '')) + '</div>';
+      return '<div style="font-size:12px;line-height:1.7;color:#5a6b8c;margin-top:6px">' + hi(body) + '</div>';
+    })()}
+          ${(function () { const oh = overnightFor(i); if (!oh || !(oh.hotelName || oh.city)) return ''; const st = oh.starRating ? ' ⭐' + escHtml(String(oh.starRating)) : ''; return `<div style="margin-top:9px;background:#f4f7fc;border:1px solid #e0e9f7;border-radius:9px;padding:6px 11px;font-size:10.5px;color:#334e82;font-weight:700">🏨 Overnight: ${escHtml(oh.hotelName || '')}${oh.city ? ', ' + escHtml(oh.city) : ''}${st}${oh.roomCategory ? ` · <span style="font-weight:600;color:#7d8bab">${escHtml(oh.roomCategory)}</span>` : ''}</div>`; })()}
+        </div>
+      </div>`;
+    }).join('');
+    return mealSummary + _cards;
+  })() : '';
+
+  const tierOptionsBlock = _tiers.length ? (() => {
+    const cols = _tiers.map((t, i) => {
+      const tot = Number(t.totalPrice) || 0;
+      const pp = totalPax > 0 && tot > 0 ? Math.round(tot / totalPax) : 0;
+      const feat = t.booked || (_tiers.length === 3 && i === 1);
+      const badge = t.booked ? '✓ YOUR CHOICE' : (_tiers.length === 3 && i === 1 ? 'MOST POPULAR' : '');
+      const hs = (t.hotels || []).filter((h) => h.hotelName || h.photoUrl).map((h) => `
+        <div style="margin-bottom:10px">
+          ${h.photoUrl ? `<img src="${escHtml(h.photoUrl)}" style="width:100%;height:auto;max-height:150px;object-fit:contain;background:#f4f7fc;border-radius:9px;margin-bottom:7px;display:block" onerror="this.style.display='none'"/>` : ''}
+          <div style="font-size:14px;font-weight:800;color:#0d1b3e;line-height:1.3">${escHtml(h.hotelName) || 'Hotel'}</div>
+          <div style="font-size:11px;color:#5a6b8c;margin-top:2px">${escHtml(h.city)}${h.roomCategory ? ' · ' + escHtml(h.roomCategory) : ''}</div>
+        </div>`).join('') || `<div style="color:#9aa7c4;font-size:11px;padding:14px 0">Hotel details on request</div>`;
+      return `
+      <div style="flex:1;min-width:180px;border:${feat ? '2px solid #1a3060' : '1px solid #e3eaf7'};border-radius:14px;overflow:hidden;background:#fff;${feat ? 'box-shadow:0 6px 20px rgba(13,27,62,.14)' : ''}">
+        <div style="background:${t.booked ? 'linear-gradient(135deg,#15803d,#1a9e4b)' : feat ? 'linear-gradient(135deg,#0d1b3e,#1a3060)' : '#0d1b3e'};color:#fff;padding:11px 13px;text-align:center">
+          <div style="font-size:14px;font-weight:800;letter-spacing:.4px">${escHtml(t.label || (t.star + '-Star'))}</div>
+          <div style="color:#f0c842;font-size:12px;margin-top:2px">${'★'.repeat(Number(t.star) || 0)}<span style="color:rgba(255,255,255,.3)">${'★'.repeat(Math.max(0, 5 - (Number(t.star) || 0)))}</span></div>
+          ${badge ? `<div style="font-size:9px;letter-spacing:1px;font-weight:800;margin-top:3px">${badge}</div>` : ''}
+        </div>
+        <div style="padding:13px">${hs}</div>
+        ${tot > 0 ? `<div style="padding:12px 13px;border-top:1px dashed #e3eaf7;text-align:center;background:#f8fafd">
+          <div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PRICE PER PERSON</div>
+          <div style="font-size:23px;font-weight:800;color:#0d1b3e;margin:2px 0;font-family:Georgia,serif">₹${(pp || tot).toLocaleString('en-IN')}</div>
+          <div style="font-size:10.5px;color:#5a6b8c">Total ₹${tot.toLocaleString('en-IN')}${totalPax > 1 ? ' · ' + pax : ''}</div>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+    return `
+    <h2 style="font-size:22px;color:#0d1b3e;margin:22px 0 6px">🏨 Choose Your Stay</h2>
+    <div style="font-size:12px;color:#5a6b8c;margin-bottom:14px">Same itinerary, same inclusions — sirf hotel category aur price alag hai. Jo pasand aaye wo choose kijiye.</div>
+    <div style="display:flex;gap:12px;align-items:stretch;flex-wrap:wrap;margin-bottom:6px">${cols}</div>
+    <div style="font-size:10.5px;color:#8894b0;margin-bottom:16px">* All options include the same flights, transfers and sightseeing. GST extra as applicable.</div>`;
+  })() : '';
+
+  const _perPax = totalPax > 0 ? Math.round(sell / totalPax) : 0;
+  const _tierMin = _tiers.length ? Math.min(...(_tiers.map((t) => Number(t.totalPrice) || 0).filter((v) => v > 0)).concat([Infinity])) : Infinity;
+  const _fromPP = (_tierMin !== Infinity && totalPax > 0) ? Math.round(_tierMin / totalPax) : 0;
+  const quoteVTDisplay = new Date(Date.now() + 7 * 864e5).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const priceBlock = sell > 0 ? `
+    <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:18px;padding:26px 28px;color:#fff;margin:8px 0 18px">
+      <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">${_fromPP ? 'STARTING FROM · PER PERSON' : 'PRICE PER PERSON'}</div>
+      <div style="font-size:34px;font-weight:800">₹${(_fromPP || _perPax || sell).toLocaleString('en-IN')}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
+      ${_fromPP
+      ? `<div style="font-size:12px;opacity:.85;margin-top:4px">${_tiers.length} stay options below${totalPax > 1 ? ' · ' + pax : ''}</div>`
+      : (totalPax > 1 ? `<div style="font-size:12px;opacity:.85;margin-top:4px">Total package ₹${sell.toLocaleString('en-IN')} · ${pax}</div>` : '')}
+      <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till <b>${quoteVTDisplay}</b>.</div>
+    </div>` : `
+    <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
+      <div style="font-size:13px;color:#8a6d1a;font-weight:700">💬 Best price guaranteed — contact us for your personalised quote</div>
+    </div>`;
+
+  const visaIncludedInDealV2 = (deal.visaVendors || []).some((v) => (Number(v.sellingPrice) || 0) > 0 || (Number(v.costPrice) || 0) > 0);
+  const autoIncTextV2 = () => {
+    const L = [];
+    if ((deal.flightVendors || []).some((f) => (f.sectors || []).concat(f.returnSectors || []).some((x) => x.from || x.to))) L.push('Flights as mentioned above');
+    if ((deal.hotelVendors || []).some((h) => h.hotelName || h.city)) { L.push('Hotel stays with breakfast'); L.push('All transfers & sightseeing as per itinerary'); }
+    if (visaIncludedInDealV2) L.push('Visa fees & visa assistance');
+    L.push('Dedicated trip manager on WhatsApp');
+    L.push('All taxes included — no hidden charges');
+    return L.join('\n');
+  };
+  const autoExcTextV2 = () => {
+    const L = ['Meals other than specified'];
+    if (!visaIncludedInDealV2) L.push('Visa fees (unless mentioned)');
+    L.push('Travel insurance & personal expenses');
+    L.push('Anything not mentioned in inclusions');
+    return L.join('\n');
+  };
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${escHtml(deal.destination)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',sans-serif;background:#eef2f9;color:#1a2c52}
+.page{max-width:820px;margin:0 auto;background:#f7fafd}
+h1,h2,.serif{font-family:'Playfair Display',serif}
+@media print{ body{background:#fff} .noprint{display:none} .ve-interactive{display:none!important} .ve-printsign{display:block!important} }
+</style></head><body>
+<div class="page">
+  <div id="veHero" style="position:relative;height:96vh;min-height:640px;background:url('${cover}') center/cover no-repeat;display:flex;flex-direction:column;justify-content:flex-end">
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,21,48,.25),rgba(10,21,48,.78) 75%)"></div>
+    <div style="position:absolute;top:26px;left:28px;background:#fff;border-radius:12px;padding:8px 16px"><img src="${VE_LOGO}" style="height:42px;display:block" alt="Voyage-Ed Travels"/></div>
+    <div style="position:relative;padding:34px 40px 40px;color:#fff">
+      <h1 style="font-size:52px;line-height:1.05;margin-bottom:8px">Trip to ${escHtml(deal.destination) || 'Your Dream Destination'}</h1>
+      <div style="font-size:11px;letter-spacing:4px;color:#f0c842;font-weight:700;margin-bottom:8px">LEARN · TRAVEL · EXPLORE</div>
+      <div style="font-size:13px;opacity:.85;margin-bottom:16px">Reference: <b>${ref}</b></div>
+      <div style="border-top:2px solid rgba(255,255,255,.5);padding-top:16px;font-size:14px;line-height:2">
+        📍 <b>${escHtml(deal.destination)}</b>${nightsTotal ? ` — ${nightsTotal} nights / ${nightsTotal + 1} days` : ''}<br>
+        📅 <b>${escHtml(deal.travelDates) || 'Dates to be confirmed'}</b><br>
+        👥 <b>${deal.rooms || 1} room${Number(deal.rooms) === 1 ? '' : 's'}, ${pax}</b>
+      </div>
+    </div>
+    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">Specially crafted for <b style="color:#f0c842">${escHtml(deal.clientName) || 'our valued guest'}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
+  </div>
 
   <div style="padding:34px 36px">
     ${statsRibbon}
     ${priceBlock}
-    ${flights.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}` : ''}
-    ${trains.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
-    ${hotels.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}` : ''}
-    ${allDayLines.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}` : ''}
-    ${visas.length ? `<h2 style="font-size:20px;color:#0d1b3e;margin:20px 0 14px">🛂 Visa</h2>${visaBlocks}` : ''}
+    ${highlightsHTML}
+    ${showF ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}` : ''}
+    ${trains.length ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
+    ${tierOptionsBlock}
+    ${showH && hotels.length && !tierOptionsBlock ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}` : ''}
+    ${landBlocks ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}` : ''}
 
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
       <div style="flex:1;min-width:250px">
-        <h2 style="font-size:15px;color:#15803d;margin:0 0 8px">✅ What's Included</h2>
+        <h2 style="font-size:16px;color:#15803d;margin:0 0 8px">✅ What's Included</h2>
         <div style="background:#fff;border:1px solid #d3ecd9;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
-          ${incItems.map((x) => '✅ ' + escHtml(x)).join('<br>')}
+          ${autoIncTextV2().split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => '✅ ' + escHtml(x)).join('<br>')}
         </div>
       </div>
       <div style="flex:1;min-width:250px">
-        <h2 style="font-size:15px;color:#b4540a;margin:0 0 8px">ℹ️ Not Included</h2>
+        <h2 style="font-size:16px;color:#b4540a;margin:0 0 8px">ℹ️ Not Included</h2>
         <div style="background:#fff;border:1px solid #f3e3cf;border-radius:14px;padding:14px 18px;font-size:12px;line-height:2;color:#33415e">
-          ${excItems.map((x) => '✖ ' + escHtml(x)).join('<br>')}
+          ${autoExcTextV2().split(/\n+/).map((x) => x.trim()).filter(Boolean).map((x) => '✖ ' + escHtml(x)).join('<br>')}
         </div>
       </div>
     </div>
-
-    <h2 style="font-size:17px;color:#0d1b3e;margin:24px 0 10px">📋 Booking Terms &amp; Cancellation Policy</h2>
+    <h2 style="font-size:18px;color:#0d1b3e;margin:24px 0 10px">📋 Booking Terms &amp; Cancellation Policy</h2>
     <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:11.5px;line-height:1.9;color:#4a5772">
       <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">BOOKING &amp; PAYMENT POLICY</div>
       • A <b style="color:#0d1b3e">non-refundable deposit of ₹20,000 per person</b> is required to initiate a booking, OR the actual hotel, flight &amp; land component minimum due — whichever is higher.<br>
       • If the date of travel is <b style="color:#0d1b3e">less than 7 days</b> away, a non-refundable deposit of <b style="color:#0d1b3e">50% of the total cost</b> shall be applicable.<br>
       • <b style="color:#0d1b3e">Full payment</b> is required on confirmation of all services and before departure from India.<br>
+      • Payments accepted via bank transfer, UPI, or card — we never ask for payments to personal accounts.<br>
       • Photocopies of the passport (<b style="color:#0d1b3e">first &amp; address page</b>) are mandatory for all destinations.<br>
       <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin:12px 0 6px">CANCELLATION POLICY</div>
-      <table style="width:100%;border-collapse:collapse;margin:2px 0 8px;font-size:11px">
-        <tr><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left">Days Before Departure</th><th style="background:#0d1b3e;color:#fff;padding:7px 12px;text-align:left">Cancellation Charge</th></tr>
-        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">30 – 16 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#0d1b3e">50% of the total cost</td></tr>
-        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd">15 – 8 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;background:#f8fafd;font-weight:700;color:#0d1b3e">75% of the total cost</td></tr>
-        <tr><td style="padding:7px 12px;border:1px solid #e3eaf7">7 – 0 days</td><td style="padding:7px 12px;border:1px solid #e3eaf7;font-weight:700;color:#b91c1c">100% of the total cost (no refund)</td></tr>
-      </table>
-      • Visa fee &amp; service charges are <b style="color:#0d1b3e">non-refundable</b>.<br>
-      • No refund for any <b style="color:#0d1b3e">unused part of the services</b> provided in the package.<br>
-      • Overseas Insurance Policy after issuance is non-refundable (Travel Insurance Charges: <b style="color:#0d1b3e">₹1,000 per person</b>).
+      ${STATIC_CANCEL_TABLE}<br>
+      <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin:12px 0 6px">AMENDMENTS &amp; IMPORTANT</div>
+      • Any change is treated as a new booking, subject to availability and revised pricing. Changes within the cancellation window attract applicable charges.<br>
+      • Passport must be valid for at least 6 months from travel date. Visa granting is at the Embassy's discretion; rejection/delay is not our liability.<br>
+      • Gala dinner charges on special dates (24/31 Dec, 14 Feb) may be payable directly at the hotel. Itinerary may be modified due to force majeure, weather, or availability — suitable alternatives will be arranged.
     </div>
     <div style="font-size:10px;color:#8a97b5;margin-top:12px;line-height:1.7">This itinerary is a preliminary proposal. All services &amp; prices are subject to availability and currency fluctuation at the time of booking. GST is applicable as per government norms.</div>
 
     ${payBlock}
-
-    <div style="margin-top:26px">
-      <h2 style="font-size:16px;color:#0d1b3e;margin:0 0 10px">⚖️ Terms &amp; Conditions of Service (Legal)</h2>
-      <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:16px 20px;font-size:10px;line-height:1.75;color:#4a5772">
-        <b style="color:#0d1b3e">1. Definitions &amp; Parties.</b> In these Terms, "the Company" means <b>Voyage-Ed Travels</b>, having its office at GMADA Aerocity, Mohali, Punjab, India; "the Client" means the person(s) named in this proposal and all travellers on whose behalf the booking is made; "Suppliers" means airlines, hotels, cruise lines, transport operators, insurers and other third-party service providers; "Total Cost" means the total package price stated in this proposal. These Terms constitute a legally binding agreement between the Company and the Client.<br>
-        <b style="color:#0d1b3e">2. Acceptance &amp; Authority.</b> Acceptance of this proposal — by digital acceptance below, written or electronic confirmation, or payment of any deposit — constitutes unconditional acceptance of these Terms by the Client on behalf of all travellers in the booking, and the Client warrants that they have authority to bind all such travellers.<br>
-        <b style="color:#0d1b3e">3. Role of the Company.</b> The Company acts solely as an agent of the Suppliers. All services are additionally governed by the Suppliers' own tariffs, terms and conditions of carriage/service, which are deemed incorporated herein by reference. The Company shall not be liable for any act, omission, default or insolvency of any Supplier.<br>
-        <b style="color:#0d1b3e">4. Booking &amp; Payment.</b> A non-refundable deposit of ₹20,000 per person — or the actual hotel, flight and land component minimum due, whichever is higher — is required to initiate a booking. Where the date of travel is less than 7 (seven) days away, a non-refundable deposit of 50% of the Total Cost shall apply. Full payment is required upon confirmation of all services and prior to departure from India. Time is of the essence: failure to pay any amount by its due date entitles the Company to treat the booking as cancelled by the Client, and the Cancellation Policy shall apply.<br>
-        <b style="color:#0d1b3e">5. Cancellation &amp; Refunds.</b> The Cancellation Policy stated in this proposal (the standard slab: 30–16 days before departure — 50%; 15–8 days — 75%; 7–0 days — 100% of the Total Cost) forms an integral part of this Agreement. All cancellations must be communicated in writing and take effect from the date of receipt by the Company. Visa fees and service charges are non-refundable in all circumstances. No refund shall be payable, in whole or in part, for any unused, partially used or forfeited service. Travel insurance, once issued, is non-refundable (insurance charge: ₹1,000 per person). Failure to travel / no-show shall be treated as a cancellation attracting 100% charges.<br>
-        <b style="color:#0d1b3e">6. Refund Processing.</b> Refunds, where due, shall be processed only after realisation of the corresponding amounts from the respective Suppliers and in accordance with their policies, ordinarily within 30–45 working days of receipt. Refunds shall be made to the same account/instrument from which payment was received.<br>
-        <b style="color:#0d1b3e">7. Amendments &amp; Transfers.</b> Any change requested by the Client (dates, names, itinerary, room category or otherwise) is treated as a fresh booking, subject to availability and revised pricing; changes within the cancellation window attract applicable cancellation charges. Bookings are non-transferable except with the Company's prior written consent and payment of applicable Supplier charges.<br>
-        <b style="color:#0d1b3e">8. Travel Documents, Visas &amp; Permits.</b> The Client is solely responsible for holding valid passports (minimum 6 months' validity from the date of return travel), visas, permits, and health/vaccination documentation for all travellers. Photocopies of passport (first and address page) are mandatory for all destinations. Grant, refusal or delay of any visa is at the sole discretion of the concerned Embassy/authority; the Company assumes no liability therefor, and cancellation charges shall apply in case of visa refusal or delayed issuance.<br>
-        <b style="color:#0d1b3e">9. Prices &amp; Taxes.</b> All prices are subject to availability, rate of exchange, fuel and Supplier surcharges, and statutory levies (including GST as per government norms) prevailing at the time of booking and may be revised accordingly until full payment. Mandatory gala dinner supplements on special dates (24/31 December, 14 February) may be payable by the Client directly at the hotel.<br>
-        <b style="color:#0d1b3e">10. Itinerary Changes by the Company.</b> The Company reserves the right to modify, re-sequence or substitute any part of the itinerary or services due to force majeure, weather, operational requirements, safety considerations or non-availability, with suitable alternatives of comparable standard being provided where reasonably possible; no compensation shall be payable for such modification.<br>
-        <b style="color:#0d1b3e">11. Force Majeure.</b> The Company shall not be liable for any delay, alteration, curtailment, cancellation, loss or damage arising from acts of God, weather, natural calamity, epidemic/pandemic, strikes, riots, civil disturbance, war, terrorism, government or regulatory action, airspace or border closures, technical or operational failure of Suppliers, or any other cause beyond its reasonable control. Any additional cost so arising (including extended stay, re-routing or repatriation) shall be borne by the Client.<br>
-        <b style="color:#0d1b3e">12. Limitation of Liability &amp; Indemnity.</b> To the maximum extent permitted by law, the Company's aggregate liability under or in connection with this Agreement, howsoever arising, shall not exceed the amount actually received by the Company for the booking. The Company shall not be liable for any indirect, incidental or consequential loss, loss of enjoyment, or loss of baggage/personal effects. The Client shall indemnify and hold harmless the Company against all claims, losses and expenses arising from the Client's breach of these Terms, unlawful conduct, or inaccurate information supplied.<br>
-        <b style="color:#0d1b3e">13. Health, Insurance &amp; Conduct.</b> The Client warrants fitness to travel and shall disclose any medical condition relevant to the services booked. Comprehensive travel insurance is strongly recommended and is the Client's responsibility. The Company or its Suppliers may decline or terminate services, without refund, in case of unlawful, unsafe or abusive conduct. Check-in/check-out timings, baggage allowances and on-board rules are as per the respective Suppliers.<br>
-        <b style="color:#0d1b3e">14. Complaints &amp; Notices.</b> Any complaint regarding the services must be notified to the Company in writing at enquiry@voyage-ed.com within 14 (fourteen) days of completion of travel, failing which the claim shall be deemed waived. All notices under this Agreement shall be in writing to the addresses/e-mail stated in this proposal.<br>
-        <b style="color:#0d1b3e">15. Severability &amp; Waiver.</b> If any provision of these Terms is held invalid or unenforceable, the remaining provisions shall continue in full force. No failure or delay by the Company in exercising any right shall operate as a waiver thereof.<br>
-        <b style="color:#0d1b3e">16. Governing Law, Jurisdiction &amp; Entire Agreement.</b> This Agreement shall be governed by and construed in accordance with the laws of India. Subject to an attempt at amicable resolution, all disputes shall be subject to the exclusive jurisdiction of the competent courts at Mohali / Chandigarh, Punjab, India. This proposal together with these Terms constitutes the entire agreement between the parties and supersedes all prior communications relating to this booking.
-      </div>
-    </div>
-
-    <div id="ve-accept" style="margin-top:16px;background:linear-gradient(135deg,#fdf9ee,#fff);border:2px solid #c9961a;border-radius:16px;padding:18px 22px">
-      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">✍️ CLIENT ACCEPTANCE</div>
-      <div class="ve-interactive">
-        <label style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:#33415e;cursor:pointer;line-height:1.6">
-          <input type="checkbox" id="veAgree" style="width:18px;height:18px;margin-top:2px;accent-color:#c9961a"/>
-          <span>I, <b style="color:#0d1b3e">${escHtml(clientName(deal)) || 'the undersigned Client'}</b>, confirm that I have read, understood and unconditionally accept the Booking &amp; Payment Policy, the Cancellation Policy and the Terms &amp; Conditions of Service (Clauses 1–16) stated in this proposal (Ref: <b>${escHtml(ref)}</b>). I understand that my submission constitutes a legally binding acceptance of these terms.</span>
-        </label>
-        <button id="veAccBtn" style="margin-top:12px;background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;font-size:13px;font-weight:800;cursor:pointer">✅ Accept &amp; Submit</button>
-        <div id="veAccMsg" style="font-size:12px;margin-top:10px;font-weight:700"></div>
-        <div style="font-size:10.5px;color:#7d8bab;margin-top:8px">Or in one tap: <a href="${acceptWA}" style="color:#15803d;font-weight:800">Accept on WhatsApp →</a></div>
-      </div>
-      <div class="ve-printsign" style="display:none">
-        <a href="${acceptWA}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);border-radius:14px;padding:16px 20px;text-align:center;margin:4px 0 12px">
-          <span style="color:#fff;font-size:16px;font-weight:800;letter-spacing:.5px">✅ &nbsp;TAP HERE TO ACCEPT THIS PROPOSAL</span><br>
-          <span style="color:#d7f5e0;font-size:10.5px">One tap opens WhatsApp with a ready-typed acceptance message — just press Send.<br>By sending, you accept the Booking Policy, Cancellation Policy &amp; Terms (Clauses 1–16) · Ref: ${escHtml(ref)}</span>
-        </a>
-        <div style="font-size:10px;color:#7d8bab;text-align:center;margin-bottom:10px">Or WhatsApp us directly: <b style="color:#33415e">"I ACCEPT ${escHtml(ref)}"</b> → <b style="color:#33415e">+91 70096 59048</b> · Or scan the QR code below</div>
-        <div style="text-align:center;margin-bottom:10px"><img src="${qrURL}" style="height:76px;width:76px;border-radius:8px;background:#fff;padding:4px" alt="QR"/></div>
-        <div style="font-size:11px;color:#33415e;line-height:2.2;border-top:1px dashed #e3d9be;padding-top:8px">
-          For physical signing: &nbsp; Client Signature: ______________________________ &nbsp;&nbsp; Name: ${escHtml(clientName(deal)) || '____________________'} &nbsp;&nbsp; Date: ________________
-        </div>
-      </div>
-    </div>
-    <script>
-      (function(){
-        var btn=document.getElementById("veAccBtn"); if(!btn) return;
-        var VE_REF=${JSON.stringify(String(ref || ''))}, VE_CLIENT=${JSON.stringify(String(clientName(deal) || 'Client'))}, VE_DEST=${JSON.stringify(String(destination(deal) || ''))}, VE_PRICE=${JSON.stringify(sell > 0 ? ('Rs. ' + sell.toLocaleString('en-IN')) : 'On request')};
-        btn.addEventListener("click",function(){
-          var chk=document.getElementById("veAgree"), msg=document.getElementById("veAccMsg");
-          if(!chk.checked){ msg.style.color="#b91c1c"; msg.textContent="⚠️ Please tick the acceptance checkbox first."; return; }
-          btn.disabled=true; btn.textContent="Submitting...";
-          var body={ _subject: "PROPOSAL ACCEPTED - " + VE_REF + " - " + VE_CLIENT,
-            type:"Proposal T&C Acceptance", reference:VE_REF, client:VE_CLIENT, destination:VE_DEST,
-            packagePrice:VE_PRICE, acceptedAtISO:new Date().toISOString(), acceptedFrom:(navigator.userAgent||"").slice(0,120) };
-          fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify(body)})
-          .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-          .then(function(){ msg.style.color="#15803d"; msg.textContent="✅ Thank you! Your acceptance has been recorded and sent to Voyage-Ed Travels (Ref: "+VE_REF+")."; btn.textContent="✅ Accepted"; })
-          .catch(function(){ msg.style.color="#b91c1c";
-            var mailto="mailto:enquiry@voyage-ed.com?subject="+encodeURIComponent("PROPOSAL ACCEPTED - "+VE_REF+" - "+VE_CLIENT)+"&body="+encodeURIComponent("I accept the T&C, Booking Policy and Cancellation Policy of proposal "+VE_REF+".");
-            msg.innerHTML="⚠️ Could not auto-submit. <a href='"+mailto+"' style='color:#0d1b3e'>Click here to send your acceptance by email</a>."; btn.disabled=false; btn.textContent="✅ Accept & Submit"; });
-        });
-      })();
-    </script>
-
+    ${legalTC}
     <div style="margin-top:22px;display:flex;justify-content:flex-end"><div style="text-align:right">
-      <div style="font-family:Georgia,serif;font-size:16px;color:#0d1b3e;font-style:italic">Warm regards,</div>
+      <div style="font-family:'Playfair Display',serif;font-size:17px;color:#0d1b3e;font-style:italic">Warm regards,</div>
       <div style="font-size:12.5px;font-weight:800;color:#0d1b3e;margin-top:2px">Vishal Sharma &amp; Sahitya Singh</div>
       <div style="font-size:10.5px;color:#7d8bab">Founders · Voyage-Ed Travels</div>
     </div></div>
-    <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;color:#fff">
-      <b style="color:#f0c842">Ready to make it happen?</b><br>
-      <span style="font-size:12px">📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com<br>GMADA Aerocity, Mohali · Learn · Travel · Explore</span>
+    <div style="margin-top:26px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:16px;padding:20px 24px;display:flex;align-items:center;gap:16px;color:#fff;flex-wrap:wrap">
+      <div style="background:#fff;border-radius:10px;padding:6px 12px"><img src="${VE_LOGO}" style="height:34px;display:block"/></div>
+      <div style="flex:1;font-size:12px;line-height:1.8"><b style="color:#f0c842">Ready to make it happen?</b><br>📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com<br>GMADA Aerocity, Mohali · Learn · Travel · Explore</div>
+      <div style="text-align:center"><img src="${qrURL}" style="height:76px;width:76px;border-radius:8px;background:#fff;padding:4px;display:block"/><div style="font-size:8.5px;opacity:.85;margin-top:4px">Scan to confirm<br>on WhatsApp</div></div>
     </div>
   </div>
 </div>
 <div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
 </body></html>`;
 }
+
 
 function openProposalV2(deal) {
   const w = window.open('', '_blank');
