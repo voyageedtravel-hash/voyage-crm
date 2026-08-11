@@ -2819,6 +2819,69 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
 }
 
 const REFUND_MODES = ['Bank Transfer', 'UPI', 'Cash'];
+const VENDOR_MODES = ['UPI', 'Bank Transfer', 'Cash collected by vendor', 'Cash deposited by us in vendor account', 'Cheque', 'Other'];
+
+// ─── Add a payment to ONE specific vendor line item (e.g. this
+// exact hotel booking, not the whole deal). Matches V1: each vendor
+// component (flightVendors[i], hotelVendors[i], etc) carries its
+// own payments[] array, and "vendor due" = that component's cost
+// price minus what's been paid from THIS array — separate from
+// deal.clientPayments[] (money FROM the client) which was already
+// wired earlier. This is money WE pay OUT to the supplier. ───────
+
+function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose, onSaved }) {
+  const [form, setForm] = useState({ amount: '', mode: VENDOR_MODES[0], date: new Date().toISOString().slice(0, 10), note: '' });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.amount || Number(form.amount) <= 0) { setErr('Enter a valid amount'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const newPayment = { amount: Number(form.amount), mode: form.mode, date: form.date, note: form.note };
+      const updatedList = (deal[arrayKey] || []).map((v) =>
+        v.id === vendorId ? { ...v, payments: [...(v.payments || []), newPayment] } : v
+      );
+      const updated = await patchDeal(deal._id, {
+        [arrayKey]: updatedList,
+        auditLog: [...(deal.auditLog || []), logEntryStatic(`Paid ${vendorLabel}: ₹${Number(form.amount).toLocaleString('en-IN')}`)],
+      });
+      window.veToast && window.veToast('Vendor payment recorded ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title={`💸 Pay ${vendorLabel}`} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Record Payment">
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Paid (₹) *</div>
+        <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Mode</div>
+          <select value={form.mode} onChange={set('mode')} style={inputStyle}>
+            {VENDOR_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+          <input type="date" value={form.date} onChange={set('date')} style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
+        <input value={form.note} onChange={set('note')} placeholder="e.g. Advance to confirm booking" style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 const REFUND_REASONS = ['Service Issue', 'Visa Rejection', 'Travel Plan Cancelled', 'Goodwill / Adjustment', 'Other'];
 const REFUND_APPROVERS = ['Vishal Sharma', 'Sahitya Singh'];
 
@@ -3283,6 +3346,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
   const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
+  const [payingVendor, setPayingVendor] = useState(null); // { arrayKey, vendorId, label } for the Pay Vendor modal
   const [editingClient, setEditingClient] = useState(false);
   const [clientForm, setClientForm] = useState(null);
   const [savingClient, setSavingClient] = useState(false);
@@ -3318,6 +3382,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     setDeal(updated);
     setModal(null);
     setEditingVendor(null);
+    setPayingVendor(null);
     onDealUpdated && onDealUpdated(updated);
 
     if (label) {
@@ -3993,6 +4058,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                 {flights.map((f, i) => {
                   const allSectors = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
                   const fSell = toINR(f.sellingPrice, f.currency, f.exchangeRate);
+                  const fCost = toINR(f.costPrice, f.currency, f.exchangeRate);
                   const fPaid = sumBy(f.payments, 'amount');
                   return (
                     <div key={f.id || i} className="v2-flight-card">
@@ -4040,16 +4106,21 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       ))}
-                      {fSell > 0 && (
+                      {fCost > 0 && (
                         <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
                           <div className="v2-pay-progress">
-                            <div className={`v2-pay-progress-fill ${fPaid >= fSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (fPaid / fSell) * 100)}%` }}></div>
+                            <div className={`v2-pay-progress-fill ${fPaid >= fCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (fPaid / fCost) * 100)}%` }}></div>
                           </div>
                           <div className="v2-pay-row">
-                            <span>Paid: <b>{fmtINRFull(fPaid)}</b> / {fmtINRFull(fSell)}</span>
-                            <span className={`v2-pay-status ${fPaid >= fSell ? 'paid' : 'due'}`}>
-                              {fPaid >= fSell ? '✓ Fully Paid' : `${fmtINRFull(fSell - fPaid)} due`}
+                            <span>Paid to vendor: <b>{fmtINRFull(fPaid)}</b> / {fmtINRFull(fCost)}</span>
+                            <span className={`v2-pay-status ${fPaid >= fCost ? 'paid' : 'due'}`}>
+                              {fPaid >= fCost ? '✓ Fully Paid' : `${fmtINRFull(fCost - fPaid)} due`}
                             </span>
+                            <button
+                              className="v2-acc-btn-sm"
+                              onClick={() => { setPayingVendor({ arrayKey: 'flightVendors', vendorId: f.id, label: f.name || 'Flight' }); setModal('payVendor'); }}
+                            >💸 Pay</button>
                           </div>
                         </div>
                       )}
@@ -4079,6 +4150,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                 {trains.map((t, i) => {
                   const allSegs = [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to);
                   const tSell = toINR(t.sellingPrice, t.currency, t.exchangeRate);
+                  const tCost = toINR(t.costPrice, t.currency, t.exchangeRate);
                   const tPaid = sumBy(t.payments, 'amount');
                   return (
                     <div key={t.id || i} className="v2-flight-card">
@@ -4125,16 +4197,21 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       ))}
-                      {tSell > 0 && (
+                      {tCost > 0 && (
                         <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
                           <div className="v2-pay-progress">
-                            <div className={`v2-pay-progress-fill ${tPaid >= tSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (tPaid / tSell) * 100)}%` }}></div>
+                            <div className={`v2-pay-progress-fill ${tPaid >= tCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (tPaid / tCost) * 100)}%` }}></div>
                           </div>
                           <div className="v2-pay-row">
-                            <span>Paid: <b>{fmtINRFull(tPaid)}</b> / {fmtINRFull(tSell)}</span>
-                            <span className={`v2-pay-status ${tPaid >= tSell ? 'paid' : 'due'}`}>
-                              {tPaid >= tSell ? '✓ Fully Paid' : `${fmtINRFull(tSell - tPaid)} due`}
+                            <span>Paid to vendor: <b>{fmtINRFull(tPaid)}</b> / {fmtINRFull(tCost)}</span>
+                            <span className={`v2-pay-status ${tPaid >= tCost ? 'paid' : 'due'}`}>
+                              {tPaid >= tCost ? '✓ Fully Paid' : `${fmtINRFull(tCost - tPaid)} due`}
                             </span>
+                            <button
+                              className="v2-acc-btn-sm"
+                              onClick={() => { setPayingVendor({ arrayKey: 'trainVendors', vendorId: t.id, label: t.name || 'Train' }); setModal('payVendor'); }}
+                            >💸 Pay</button>
                           </div>
                         </div>
                       )}
@@ -4163,6 +4240,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <div className="v2-acc-body">
                 {hotels.map((h, i) => {
                   const hSell = toINR(h.sellingPrice, h.currency, h.exchangeRate);
+                  const hCost = toINR(h.costPrice, h.currency, h.exchangeRate);
                   const hPaid = sumBy(h.payments, 'amount');
                   return (
                     <div key={h.id || i} className="v2-hotel-card">
@@ -4218,16 +4296,21 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           <div className="v2-hotel-fact-val">{h.country || '—'}</div>
                         </div>
                       </div>
-                      {hSell > 0 && (
+                      {hCost > 0 && (
                         <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
                           <div className="v2-pay-progress">
-                            <div className={`v2-pay-progress-fill ${hPaid >= hSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (hPaid / hSell) * 100)}%` }}></div>
+                            <div className={`v2-pay-progress-fill ${hPaid >= hCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (hPaid / hCost) * 100)}%` }}></div>
                           </div>
                           <div className="v2-pay-row">
-                            <span>Paid: <b>{fmtINRFull(hPaid)}</b> / {fmtINRFull(hSell)}</span>
-                            <span className={`v2-pay-status ${hPaid >= hSell ? 'paid' : 'due'}`}>
-                              {hPaid >= hSell ? '✓ Fully Paid' : `${fmtINRFull(hSell - hPaid)} due`}
+                            <span>Paid to vendor: <b>{fmtINRFull(hPaid)}</b> / {fmtINRFull(hCost)}</span>
+                            <span className={`v2-pay-status ${hPaid >= hCost ? 'paid' : 'due'}`}>
+                              {hPaid >= hCost ? '✓ Fully Paid' : `${fmtINRFull(hCost - hPaid)} due`}
                             </span>
+                            <button
+                              className="v2-acc-btn-sm"
+                              onClick={() => { setPayingVendor({ arrayKey: 'hotelVendors', vendorId: h.id, label: h.hotelName || 'Hotel' }); setModal('payVendor'); }}
+                            >💸 Pay</button>
                           </div>
                         </div>
                       )}
@@ -4256,6 +4339,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <div className="v2-acc-body">
                 {visas.map((v, i) => {
                   const vSell = toINR(v.sellingPrice, v.currency, v.exchangeRate);
+                  const vCost = toINR(v.costPrice, v.currency, v.exchangeRate);
+                  const vPaid = sumBy(v.payments, 'amount');
                   return (
                     <div key={v.id || i} className="v2-hotel-card">
                       <div className="v2-hotel-head">
@@ -4280,6 +4365,24 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                         >✕</button>
                       </div>
+                      {vCost > 0 && (
+                        <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${vPaid >= vCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (vPaid / vCost) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid to vendor: <b>{fmtINRFull(vPaid)}</b> / {fmtINRFull(vCost)}</span>
+                            <span className={`v2-pay-status ${vPaid >= vCost ? 'paid' : 'due'}`}>
+                              {vPaid >= vCost ? '✓ Fully Paid' : `${fmtINRFull(vCost - vPaid)} due`}
+                            </span>
+                            <button
+                              className="v2-acc-btn-sm"
+                              onClick={() => { setPayingVendor({ arrayKey: 'visaVendors', vendorId: v.id, label: v.name || 'Visa' }); setModal('payVendor'); }}
+                            >💸 Pay</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -4305,6 +4408,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <div className="v2-acc-body">
                 {landPackages.map((l, i) => {
                   const lSell = toINR(l.sellingPrice, l.currency, l.exchangeRate);
+                  const lCost = toINR(l.costPrice, l.currency, l.exchangeRate);
                   const lPaid = sumBy(l.payments, 'amount');
                   return (
                     <div key={l.id || i} className="v2-hotel-card">
@@ -4335,16 +4439,21 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           {l.itinerary}
                         </div>
                       )}
-                      {lSell > 0 && (
+                      {lCost > 0 && (
                         <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
                           <div className="v2-pay-progress">
-                            <div className={`v2-pay-progress-fill ${lPaid >= lSell ? '' : 'amber'}`} style={{ width: `${Math.min(100, (lPaid / lSell) * 100)}%` }}></div>
+                            <div className={`v2-pay-progress-fill ${lPaid >= lCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (lPaid / lCost) * 100)}%` }}></div>
                           </div>
                           <div className="v2-pay-row">
-                            <span>Paid: <b>{fmtINRFull(lPaid)}</b> / {fmtINRFull(lSell)}</span>
-                            <span className={`v2-pay-status ${lPaid >= lSell ? 'paid' : 'due'}`}>
-                              {lPaid >= lSell ? '✓ Fully Paid' : `${fmtINRFull(lSell - lPaid)} due`}
+                            <span>Paid to vendor: <b>{fmtINRFull(lPaid)}</b> / {fmtINRFull(lCost)}</span>
+                            <span className={`v2-pay-status ${lPaid >= lCost ? 'paid' : 'due'}`}>
+                              {lPaid >= lCost ? '✓ Fully Paid' : `${fmtINRFull(lCost - lPaid)} due`}
                             </span>
+                            <button
+                              className="v2-acc-btn-sm"
+                              onClick={() => { setPayingVendor({ arrayKey: 'landVendors', vendorId: l.id, label: l.name || 'Land Package' }); setModal('payVendor'); }}
+                            >💸 Pay</button>
                           </div>
                         </div>
                       )}
@@ -4399,6 +4508,16 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'payVendor' && payingVendor && (
+            <AddVendorPaymentModal
+              deal={deal}
+              arrayKey={payingVendor.arrayKey}
+              vendorId={payingVendor.vendorId}
+              vendorLabel={payingVendor.label}
+              onClose={() => { setModal(null); setPayingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
         </div>
@@ -4828,15 +4947,19 @@ function VendorsV2({ leads }) {
         (l[key] || []).forEach((v) => {
           const name = (v.name || v.hotelName || 'Unnamed').trim();
           const mapKey = label + '|' + name;
-          if (!map.has(mapKey)) map.set(mapKey, { name, category: label, cost: 0, bookings: 0 });
+          if (!map.has(mapKey)) map.set(mapKey, { name, category: label, cost: 0, paid: 0, bookings: 0 });
           const entry = map.get(mapKey);
           entry.cost += toINR(v.costPrice, v.currency, v.exchangeRate);
+          entry.paid += sumBy(v.payments, 'amount');
           entry.bookings += 1;
         });
       });
     });
-    return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
+    return Array.from(map.values()).map((v) => ({ ...v, due: Math.max(0, v.cost - v.paid) })).sort((a, b) => b.due - a.due);
   }, [leads]);
+
+  const totalDue = vendors.reduce((s, v) => s + v.due, 0);
+  const totalPaidOut = vendors.reduce((s, v) => s + v.paid, 0);
 
   const openNote = (vendorName) => {
     setEditingVendorNote(vendorName);
@@ -4860,15 +4983,33 @@ function VendorsV2({ leads }) {
         </div>
       </div>
 
+      <div className="v2-leads-kpis" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        <div className="v2-lead-kpi converted">
+          <div className="v2-lead-kpi-label">Total Vendors</div>
+          <div className="v2-lead-kpi-value">{vendors.length}</div>
+          <div className="v2-lead-kpi-sub">Used across all deals</div>
+        </div>
+        <div className="v2-lead-kpi hot" style={{ borderLeftColor: '#059669' }}>
+          <div className="v2-lead-kpi-label">Paid Out</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalPaidOut)}</div>
+          <div className="v2-lead-kpi-sub">Across all vendors</div>
+        </div>
+        <div className="v2-lead-kpi warm">
+          <div className="v2-lead-kpi-label">Still Owed</div>
+          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalDue)}</div>
+          <div className="v2-lead-kpi-sub">Pending to suppliers</div>
+        </div>
+      </div>
+
       <div className="v2-panel">
         <div className="v2-panel-header">
           <h3 className="v2-panel-title">All Vendors <span style={{ fontWeight: 400, fontSize: 13, color: '#6b7a99' }}>({vendors.length})</span></h3>
           {vendors.length > 0 && (
             <button className="v2-view-all" onClick={() => downloadCSV('vendors.csv', [
-              ['Vendor', 'Category', 'Bookings', 'Total Cost (INR)', 'Phone', 'Email', 'Notes'],
+              ['Vendor', 'Category', 'Bookings', 'Total Cost (INR)', 'Paid (INR)', 'Due (INR)', 'Phone', 'Email', 'Notes'],
               ...vendors.map((v) => {
                 const n = notes[v.name] || {};
-                return [v.name, v.category, v.bookings, v.cost, n.phone || '', n.email || '', n.notes || ''];
+                return [v.name, v.category, v.bookings, v.cost, v.paid, v.due, n.phone || '', n.email || '', n.notes || ''];
               }),
             ])}>⬇ Export CSV</button>
           )}
@@ -4878,7 +5019,7 @@ function VendorsV2({ leads }) {
         ) : (
           <table className="info" style={{ width: '100%' }}>
             <thead>
-              <tr><th>Vendor</th><th>Category</th><th style={{ textAlign: 'center' }}>Bookings</th><th style={{ textAlign: 'right' }}>Total Cost</th><th>Contact</th><th></th></tr>
+              <tr><th>Vendor</th><th>Category</th><th style={{ textAlign: 'center' }}>Bookings</th><th style={{ textAlign: 'right' }}>Cost</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Due</th><th>Contact</th><th></th></tr>
             </thead>
             <tbody>
               {vendors.map((v, i) => {
@@ -4888,7 +5029,9 @@ function VendorsV2({ leads }) {
                     <td style={{ fontWeight: 600, color: '#0d1b3e' }}>{v.name}</td>
                     <td><span className="v2-detail-tag" style={{ background: '#f4f6fb', color: '#33446b' }}>{v.category}</span></td>
                     <td style={{ textAlign: 'center' }}>{v.bookings}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtINR(v.cost)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtINR(v.cost)}</td>
+                    <td style={{ textAlign: 'right', color: '#059669' }}>{fmtINR(v.paid)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: v.due > 0 ? '#dc2626' : '#9aa7c4' }}>{v.due > 0 ? fmtINR(v.due) : 'Settled'}</td>
                     <td style={{ fontSize: 12, color: '#6b7a99' }}>
                       {n ? (<>{n.phone && <div>{n.phone}</div>}{n.email && <div>{n.email}</div>}</>) : <span style={{ color: '#c4cede' }}>—</span>}
                     </td>
