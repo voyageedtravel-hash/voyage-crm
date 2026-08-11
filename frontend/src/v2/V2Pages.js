@@ -1568,7 +1568,16 @@ function buildProposalHTMLV2(deal) {
           ${(function () {
       if (!body) return '';
       const hi = (t) => escHtml(t).replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
-      const sents = body.split(/(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.trim()).filter(Boolean);
+      // Lookbehind regex support in Safari only landed in 16.4 (Mar 2023) —
+      // on an older iOS/Safari this would throw a SyntaxError the moment
+      // the script parses, breaking the entire page (not just this one
+      // proposal). Rewritten with a capturing split + lookahead only,
+      // which has been safe in every JS engine since ES3.
+      const sents = body.split(/([.!?]\s+(?=[A-Z]))/).reduce((acc, cur, idx) => {
+        if (idx % 2 === 1) { acc[acc.length - 1] = (acc[acc.length - 1] || '') + cur; }
+        else if (cur) { acc.push(cur); }
+        return acc;
+      }, []).map((x) => x.trim()).filter(Boolean);
       if (body.length > 170 && sents.length >= 3) {
         return '<div style="margin-top:8px">' + sents.map((x) => {
           if (/^tips?\s*[:\-–]/i.test(x)) return '<div style="margin:6px 0;background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:9px;padding:7px 11px;font-size:11px;color:#8a6d1a;font-weight:600">💡 <b>Voyage-Ed Tip:</b> ' + hi(x.replace(/^tips?\s*[:\-–]\s*/i, '')) + '</div>';
@@ -1742,8 +1751,26 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 function openProposalV2(deal) {
   const w = window.open('', '_blank');
   if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
-  w.document.write(buildProposalHTMLV2(deal));
-  w.document.close();
+  try {
+    const html = buildProposalHTMLV2(deal);
+    w.document.write(html);
+    w.document.close();
+  } catch (err) {
+    // Surface the real error instead of leaving a silent blank tab —
+    // this is exactly what was happening before: any exception inside
+    // buildProposalHTMLV2 meant document.write() never ran at all.
+    w.document.write(
+      '<div style="font-family:monospace;padding:40px;max-width:700px;margin:0 auto">' +
+      '<h2 style="color:#b91c1c">Proposal generation failed</h2>' +
+      '<p style="color:#4a5772">Something in this deal\'s data broke the proposal builder. Please share this with support:</p>' +
+      '<pre style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;white-space:pre-wrap;font-size:12px;color:#7f1d1d">' +
+      String((err && err.stack) || err) +
+      '</pre></div>'
+    );
+    w.document.close();
+    window.veToast && window.veToast('Could not generate proposal — see the error in the new tab', 'warning');
+    console.error('buildProposalHTMLV2 failed:', err);
+  }
 }
 
 /* ─── COMBINED PROPOSAL — one PDF spanning several destinations
@@ -1845,8 +1872,22 @@ function buildCombinedProposalHTMLV2(deals) {
 function openCombinedProposalV2(deals) {
   const w = window.open('', '_blank');
   if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
-  w.document.write(buildCombinedProposalHTMLV2(deals));
-  w.document.close();
+  try {
+    const html = buildCombinedProposalHTMLV2(deals);
+    w.document.write(html);
+    w.document.close();
+  } catch (err) {
+    w.document.write(
+      '<div style="font-family:monospace;padding:40px;max-width:700px;margin:0 auto">' +
+      '<h2 style="color:#b91c1c">Combined proposal generation failed</h2>' +
+      '<pre style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;white-space:pre-wrap;font-size:12px;color:#7f1d1d">' +
+      String((err && err.stack) || err) +
+      '</pre></div>'
+    );
+    w.document.close();
+    window.veToast && window.veToast('Could not generate combined proposal — see the error in the new tab', 'warning');
+    console.error('buildCombinedProposalHTMLV2 failed:', err);
+  }
 }
 
 function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
