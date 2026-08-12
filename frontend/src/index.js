@@ -51,7 +51,24 @@ function initVoyagePages() {
   togglePages.onclick = () => {
     const on = isV2Pages();
     localStorage.setItem('voyage:v2pages', on ? 'off' : 'on');
-    render();
+    // Force a full reload on every toggle, not just a re-render.
+    //
+    // V2 Pages is an overlay mounted on top of V1's already-running React
+    // app (V1 never unmounts — this container just shows/hides on top of
+    // it). That meant switching V2 -> V1 left V1 showing whatever it had
+    // in memory from when the page first loaded, completely ignoring any
+    // changes just made in V2 (a payment recorded, a component added,
+    // etc.) until the person happened to hit a manual browser refresh.
+    // V1 and V2 read/write the SAME MongoDB data — the data itself was
+    // never out of sync, only V1's in-memory snapshot of it was stale.
+    //
+    // A full reload is the simplest and safest fix without touching V1's
+    // internal state management (a ~7000-line file) — it guarantees
+    // whichever side loads next always fetches fresh from the server.
+    // This is a deliberate stopgap for while both UIs are actively used
+    // side by side; once V2 fully replaces V1 this toggle (and this
+    // reload) goes away entirely.
+    window.location.reload();
   };
   document.body.appendChild(togglePages);
 
