@@ -5492,6 +5492,10 @@ function AccountsV2({ leads }) {
   const [accounts, setAccounts] = useState(loadAccountsV2);
   const [showLedgerForm, setShowLedgerForm] = useState(false);
   const [ledgerForm, setLedgerForm] = useState({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
+  const [showAdvisor, setShowAdvisor] = useState(false);
+  const [advChat, setAdvChat] = useState([]); // {role:'user'|'assistant', content, suggestData?}
+  const [advInput, setAdvInput] = useState('');
+  const [advBusy, setAdvBusy] = useState(false);
 
   const persist = (updater) => {
     setAccounts((prev) => {
@@ -5642,12 +5646,119 @@ function AccountsV2({ leads }) {
   const removeCommitment = (id) => persist((a) => ({ ...a, commitments: (a.commitments || []).filter((c) => c.id !== id) }));
   const openCommitments = (accounts.commitments || []).filter((c) => c.status === 'open');
 
+  // ── AI Salary/Close Advisor — same exact system prompt and context
+  // shape as V1's ADV_SYS, rebuilt against V2's data (bookedDeals via
+  // isBookedStage, balanceINR for receivables, cost-per-vendor-minus-
+  // paid for payables). Ported verbatim rather than paraphrased: the
+  // rules about ONLY paying salary from cash+bank (never unarrived
+  // client money), always checking urgent vendor payments and open
+  // commitments first, are the actual financial-safety logic — not
+  // something to risk rewording.
+  const ADV_SYS = `You are the financial advisor for Voyage-Ed Travels, a two-founder travel agency. You help Vishal decide monthly salary safely.
+
+You are given a JSON context with: cashInHand (total cash across locations), bankBalance, receivablesTotal (money coming from booked clients), payablesTotal (money going to vendors on booked deals), payablesByDeal (each upcoming vendor payment with dealNumber, client, vendor, amount), thisMonthCommitted (already spent this month), openCommitments (previous urgent items you asked about, with their status), today.
+
+RULES:
+- Salary ONLY comes from cash-in-hand and bank — NEVER from money that hasn't arrived yet from clients.
+- Before suggesting salary amounts, ALWAYS ask if there are any urgent vendor payments due in the next 3 days. List candidate vendors from payablesByDeal so the user can confirm.
+- When user answers, note which of those are urgent + how they'll be arranged (client payment coming, use cash, delay, etc.) and echo back: "Yaad rakhunga: [list]".
+- If openCommitments is non-empty and any status is 'open', ASK FIRST about those before anything else: "Pichli baar aapne bola tha X — wo sort hua? kese?".
+- Only after urgent-vendor and open-commitments check, propose salary split: Vishal ₹___, Sahitya ₹___, Balance in Company ₹___. Base on cash+bank minus urgent-vendor need. Be conservative.
+- Speak Hinglish, short and clear. Ask ONE thing at a time.
+
+Reply ONLY in these two shapes:
+{"type":"ask","reply":"Hinglish question","newCommitments":[{"kind":"urgent-vendor|other","note":"","dealNumber":"","amount":0,"status":"open"}]}
+{"type":"suggest","summary":"one line","vishalSalary":number,"sahityaSalary":number,"balance":number,"reasoning":"1-2 line why","newCommitments":[...]}
+
+If it's the first turn, ALWAYS start with type "ask" — never suggest salary until you've confirmed there are no urgent vendor payments and no open commitments.`;
+
+  const advSend = async (msg) => {
+    const text = (msg || advInput || '').trim();
+    if (!text) return;
+    const history = [...advChat, { role: 'user', content: text }];
+    setAdvChat(history);
+    setAdvInput('');
+    setAdvBusy(true);
+    try {
+      const bookedDeals = leads.filter(isBookedStage);
+      const cashInHand = (accounts.cashLocations || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const bankBalance = Number(accounts.bankBalance) || 0;
+      const receivablesTotal = bookedDeals.reduce((s, d) => s + Math.max(0, balanceINR(d)), 0);
+      const payablesByDeal = [];
+      bookedDeals.forEach((d) => {
+        const vs = [
+          ...(d.hotelVendors || []).map((v) => ({ ...v, _k: 'Hotel', _n: v.hotelName || v.name })),
+          ...(d.flightVendors || []).map((v) => ({ ...v, _k: 'Flight', _n: v.name })),
+          ...(d.trainVendors || []).map((v) => ({ ...v, _k: 'Train', _n: v.name })),
+          ...(d.landVendors || []).map((v) => ({ ...v, _k: 'Land', _n: v.name })),
+          ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
+        ];
+        vs.forEach((v) => {
+          const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
+          const paid = sumBy(v.payments, 'amount');
+          const bal = cost - paid;
+          if (bal > 0.5) payablesByDeal.push({ dealNumber: d.dealNumber, client: clientName(d), vendor: v._n, kind: v._k, amount: Math.round(bal), travelDate: d.travelDates || '' });
+        });
+      });
+      const payablesTotal = payablesByDeal.reduce((s, p) => s + p.amount, 0);
+      const now3 = new Date();
+      const mkNow = `${now3.getFullYear()}-${String(now3.getMonth() + 1).padStart(2, '0')}`;
+      const thisMonthCommitted = (accounts.ledger || []).filter((r) => String(r.date).startsWith(mkNow) && ['expense', 'salary', 'gst'].includes(r.kind)).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+      const ctx = { today: now3.toISOString().slice(0, 10), cashInHand, bankBalance, receivablesTotal, payablesTotal, payablesByDeal, thisMonthCommitted, openCommitments };
+
+      const msgs = [{ role: 'user', content: 'CONTEXT:\n' + JSON.stringify(ctx) }, ...history.map((m) => ({ role: m.role, content: m.content }))];
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: ADV_SYS, messages: msgs }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
+      const raw = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
+      let j;
+      try { j = JSON.parse(raw); } catch { throw new Error("AI ka jawab samajh nahi aaya"); }
+
+      if (Array.isArray(j.newCommitments) && j.newCommitments.length) {
+        persist((a) => ({
+          ...a,
+          commitments: [...(a.commitments || []), ...j.newCommitments.map((nc) => ({ id: 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), date: new Date().toISOString().slice(0, 10), status: 'open', ...nc }))],
+        }));
+      }
+
+      if (j.type === 'suggest') {
+        setAdvChat((h) => [...h, {
+          role: 'assistant',
+          content: `💡 ${j.summary || 'Suggestion'}\n\nVishal salary: ₹${(j.vishalSalary || 0).toLocaleString('en-IN')}\nSahitya salary: ₹${(j.sahityaSalary || 0).toLocaleString('en-IN')}\nBalance in company: ₹${(j.balance || 0).toLocaleString('en-IN')}\n\n${j.reasoning || ''}`,
+          suggestData: { vishalSalary: j.vishalSalary || 0, sahityaSalary: j.sahityaSalary || 0 },
+        }]);
+      } else {
+        setAdvChat((h) => [...h, { role: 'assistant', content: j.reply || '...' }]);
+      }
+    } catch (e) {
+      setAdvChat((h) => [...h, { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'gadbad') }]);
+    }
+    setAdvBusy(false);
+  };
+
+  const advPostToLedger = (suggestData) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const entries = [];
+    if (suggestData.vishalSalary > 0) entries.push({ id: 'lg_' + Date.now() + '_1', date: today, kind: 'salary', party: 'Vishal Sharma', amount: suggestData.vishalSalary, note: 'AI Advisor — monthly salary', source: 'advisor' });
+    if (suggestData.sahityaSalary > 0) entries.push({ id: 'lg_' + Date.now() + '_2', date: today, kind: 'salary', party: 'Sahitya Singh', amount: suggestData.sahityaSalary, note: 'AI Advisor — monthly salary', source: 'advisor' });
+    if (!entries.length) return;
+    persist((a) => ({ ...a, ledger: [...(a.ledger || []), ...entries] }));
+    window.veToast && window.veToast('Posted to ledger ✓', 'success');
+  };
+
   return (
     <main className="v2-page">
       <div className="v2-page-header">
         <div>
           <h1 className="v2-page-title">Accounts</h1>
           <p className="v2-page-sub">Cash on hand, bank balance, and ledger — synced with V1 on this device</p>
+        </div>
+        <div className="v2-header-actions">
+          <button className="v2-cta" onClick={() => setShowAdvisor(true)}>🤖 AI Salary Advisor</button>
         </div>
       </div>
 
@@ -5849,6 +5960,58 @@ function AccountsV2({ leads }) {
             </div>
           </div>
         </ModalShell>
+      )}
+
+      {showAdvisor && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAdvisor(false); }}
+        >
+          <div style={{ background: '#fff', borderRadius: 18, width: 520, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🤖 AI Salary Advisor</h3>
+                <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Checks urgent vendor payments &amp; open commitments before suggesting a split</div>
+              </div>
+              <button onClick={() => setShowAdvisor(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {advChat.length === 0 && (
+                <div style={{ fontSize: 12.5, color: '#6b7a99', textAlign: 'center', padding: '20px 10px' }}>
+                  Type anything to start — e.g. "Is mahine kitni salary nikal sakte hain?"
+                </div>
+              )}
+              {advChat.map((m, i) => (
+                <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                  <div style={{
+                    background: m.role === 'user' ? '#0d1b3e' : '#f4f6fb',
+                    color: m.role === 'user' ? '#fff' : '#1a2c52',
+                    borderRadius: 12, padding: '10px 14px', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-line',
+                  }}>
+                    {m.content}
+                  </div>
+                  {m.suggestData && (
+                    <button className="v2-acc-btn-primary" style={{ marginTop: 8 }} onClick={() => advPostToLedger(m.suggestData)}>
+                      ✓ Post to Ledger
+                    </button>
+                  )}
+                </div>
+              ))}
+              {advBusy && <div style={{ fontSize: 12.5, color: '#9aa7c4' }}>⏳ Thinking…</div>}
+            </div>
+            <div style={{ padding: '14px 24px', borderTop: '1px solid #e8ecf5', display: 'flex', gap: 10 }}>
+              <input
+                value={advInput}
+                onChange={(e) => setAdvInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !advBusy) advSend(); }}
+                placeholder="Type your reply…"
+                style={{ ...inputStyle, flex: 1 }}
+                disabled={advBusy}
+              />
+              <button className="v2-acc-btn-primary" onClick={() => advSend()} disabled={advBusy || !advInput.trim()}>Send</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showLedgerForm && (
