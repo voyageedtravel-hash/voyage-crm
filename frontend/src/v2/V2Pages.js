@@ -3244,6 +3244,111 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
   );
 }
 
+function AddTravellerModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    firstName: editing.firstName || '', lastName: editing.lastName || '',
+    salutation: editing.salutation || 'Mr', type: editing.type || 'Adult', dob: editing.dob || '',
+    idType: editing.idType || 'Passport', passportNo: editing.passportNo || '',
+    passportIssue: editing.passportIssue || '', passportExpiry: editing.passportExpiry || '',
+    nationality: editing.nationality || 'Indian',
+  } : {
+    firstName: '', lastName: '', salutation: 'Mr', type: 'Adult', dob: '',
+    idType: 'Passport', passportNo: '', passportIssue: '', passportExpiry: '', nationality: 'Indian',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    if (!form.firstName.trim()) { setErr('First name is required'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      if (editing) {
+        const updatedList = (deal.travellers || []).map((t) => t.id === editing.id ? { ...t, ...form } : t);
+        const updated = await patchDeal(deal._id, {
+          travellers: updatedList,
+          auditLog: [...(deal.auditLog || []), logEntryStatic(`Traveller updated: ${form.firstName} ${form.lastName}`)],
+        });
+        window.veToast && window.veToast('Traveller updated ✓', 'success');
+        onSaved(updated);
+        return;
+      }
+      const newTraveller = { id: 'tv_' + Date.now(), isLead: false, ...form };
+      const updated = await patchDeal(deal._id, {
+        travellers: [...(deal.travellers || []), newTraveller],
+        auditLog: [...(deal.auditLog || []), logEntryStatic(`Traveller added: ${form.firstName} ${form.lastName}`)],
+      });
+      window.veToast && window.veToast('Traveller added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title={editing ? '✎ Edit Traveller' : '+ Add Traveller'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Title</div>
+          <select value={form.salutation} onChange={set('salutation')} style={inputStyle}>
+            {['Mr', 'Mrs', 'Ms', 'Mstr', 'Miss'].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>First Name *</div>
+          <input value={form.firstName} onChange={set('firstName')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Last Name</div>
+          <input value={form.lastName} onChange={set('lastName')} placeholder="LNU if none" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Type</div>
+          <select value={form.type} onChange={set('type')} style={inputStyle}>
+            {['Adult', 'Child', 'Infant'].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date of Birth</div>
+          <input type="date" value={form.dob} onChange={set('dob')} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>ID Type</div>
+          <select value={form.idType} onChange={set('idType')} style={inputStyle}>
+            {['Passport', 'Aadhaar', 'Other'].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>{form.idType} No.</div>
+          <input value={form.passportNo} onChange={set('passportNo')} style={inputStyle} />
+        </div>
+      </div>
+      {form.idType === 'Passport' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Issue Date</div>
+            <input type="date" value={form.passportIssue} onChange={set('passportIssue')} style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Expiry Date</div>
+            <input type="date" value={form.passportExpiry} onChange={set('passportExpiry')} style={inputStyle} />
+          </div>
+        </div>
+      )}
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Nationality</div>
+        <input value={form.nationality} onChange={set('nationality')} style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 function ScanTravellerModal({ deal, onClose, onSaved }) {
   const [extracting, setExtracting] = useState(false);
   const [preview, setPreview] = useState(null); // travellers array pending confirmation
@@ -3373,7 +3478,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
       land: isEdit ? 'Land package updated' : 'Land package added',
       payment: 'Payment recorded',
       refund: 'Refund recorded',
-      traveller: 'Traveller(s) added',
+      scanTraveller: 'Traveller(s) scanned from passport/ID',
       ticket: 'E-ticket scanned',
       attachment: 'Document uploaded',
     };
@@ -3504,6 +3609,25 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
       setDeal(updated);
       onDealUpdated && onDealUpdated(updated);
       window.veToast && window.veToast('Refund deleted', 'success');
+    } catch (ex) {
+      window.veToast && window.veToast('Could not delete — try again', 'warning');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteCancellation = async (cancellation) => {
+    if (!window.confirm('Delete this cancellation record? This is just a recording tool — deleting it does not change anything already booked, refunded, or charged.')) return;
+    setBusy(true);
+    try {
+      const filtered = (deal.cancellations || []).filter((c) => c.id !== cancellation.id);
+      const updated = await patchDeal(deal._id, {
+        cancellations: filtered,
+        auditLog: [...(deal.auditLog || []), logEntry('Cancellation record deleted')],
+      });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Cancellation record deleted', 'success');
     } catch (ex) {
       window.veToast && window.veToast('Could not delete — try again', 'warning');
     } finally {
@@ -3974,7 +4098,10 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                   <div className="v2-detail-field-label" style={{ marginBottom: 0 }}>
                     Travellers ({travellers.length})
                   </div>
-                  <button className="v2-acc-btn-sm" onClick={() => setModal('traveller')}>🛂 Scan Passport / ID</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="v2-acc-btn-sm" onClick={() => { setEditingVendor(null); setModal('traveller'); }}>+ Add</button>
+                    <button className="v2-acc-btn-sm" onClick={() => setModal('scanTraveller')}>🛂 Scan Passport / ID</button>
+                  </div>
                 </div>
                 {travellers.length === 0 ? (
                   <div style={{ fontSize: 12, color: '#6b7a99' }}>No travellers added yet.</div>
@@ -3988,11 +4115,18 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                             {t.type} · {t.idType} {t.passportNo || ''}
                           </span>
                         </div>
-                        <button
-                          onClick={() => deleteVendor('travellers', t.id, 'traveller')}
-                          disabled={busy}
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 13 }}
-                        >✕</button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            onClick={() => { setEditingVendor(t); setModal('traveller'); }}
+                            disabled={busy}
+                            style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 13 }}
+                          >✎</button>
+                          <button
+                            onClick={() => deleteVendor('travellers', t.id, 'traveller')}
+                            disabled={busy}
+                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 13 }}
+                          >✕</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -4489,7 +4623,15 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               onSaved={handleSaved}
             />
           )}
-          {modal === 'traveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'traveller' && (
+            <AddTravellerModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
+          {modal === 'scanTraveller' && <ScanTravellerModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'hotel' && (
             <AddHotelModal
               deal={deal}
@@ -4563,10 +4705,18 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                 const refund = (c.lines || []).reduce((s, l) => s + (Number(l.clientRefund) || 0), 0);
                 return (
                   <div key={c.id} style={{ padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{c.reason}</div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: netProfit >= 0 ? '#059669' : '#dc2626' }}>
-                        {netProfit >= 0 ? '+' : '−'} {fmtINR(Math.abs(netProfit))}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: netProfit >= 0 ? '#059669' : '#dc2626' }}>
+                          {netProfit >= 0 ? '+' : '−'} {fmtINR(Math.abs(netProfit))}
+                        </div>
+                        <button
+                          onClick={() => deleteCancellation(c)}
+                          disabled={busy}
+                          title="Delete this record"
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                        >✕</button>
                       </div>
                     </div>
                     <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>
