@@ -51,6 +51,12 @@ const NAV_SECTIONS = [
       { key: 'reports', label: 'Reports', icon: '◕', match: /report|analytic/i },
     ],
   },
+  {
+    title: 'Admin',
+    items: [
+      { key: 'users', label: 'Team Members', icon: '◍', match: /team|user/i },
+    ],
+  },
 ];
 
 /**
@@ -122,7 +128,7 @@ function Sidebar() {
       const v2Routable = {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
         clients: 'clients', proposals: 'proposals', vendors: 'vendors',
-        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports',
+        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', users: 'users',
       };
       if (v2Routable[key]) {
         // Primary path: direct imperative call, no event/listener race possible.

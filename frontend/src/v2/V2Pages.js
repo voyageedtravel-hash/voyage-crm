@@ -1098,6 +1098,61 @@ function CurrencyCostRow({ form, setForm }) {
   );
 }
 
+// ─── Per-traveller pricing (paxRates) ──────────────────────
+// V1 has 4 traveller types (Adult / Child with bed / Child without bed /
+// Infant), each with its own Cost + Sell rate per vendor component —
+// used so cancelling "2 of 4 travellers" on a component can prorate the
+// refund/loss by who's actually cancelling, not just a flat split.
+// V2's traveller records only distinguish Adult / Child / Infant (no
+// with-bed/without-bed split) — matching that exactly, this is a
+// deliberate, documented simplification: 3 rate tiers instead of 4.
+// Everything else (the Cost+Sell-per-type shape, how it's used to
+// prorate a cancellation) is the same idea as V1, just simpler data.
+const PAX_RATE_TYPES = [['adult', 'Adult'], ['child', 'Child'], ['infant', 'Infant']];
+
+function PaxRatesFields({ form, setForm }) {
+  const rates = form.paxRates || {};
+  const setRate = (key, val) => setForm((f) => ({ ...f, paxRates: { ...(f.paxRates || {}), [key]: val } }));
+  return (
+    <div style={{ background: '#f9fafc', borderRadius: 10, padding: 12 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#33446b', cursor: 'pointer', marginBottom: form.paxPricing ? 10 : 0 }}>
+        <input
+          type="checkbox"
+          checked={!!form.paxPricing}
+          onChange={(e) => setForm((f) => ({ ...f, paxPricing: e.target.checked }))}
+        />
+        Use per-traveller rates (for accurate cancellation proration)
+      </label>
+      {form.paxPricing && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5 }}></div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>COST</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>SELL</div>
+          {PAX_RATE_TYPES.map(([key, label]) => (
+            <React.Fragment key={key}>
+              <div style={{ fontSize: 12, color: '#33446b', alignSelf: 'center' }}>{label}</div>
+              <input
+                type="number"
+                value={rates[key + 'C'] || ''}
+                onChange={(e) => setRate(key + 'C', e.target.value)}
+                placeholder="0"
+                style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}
+              />
+              <input
+                type="number"
+                value={rates[key + 'S'] || ''}
+                onChange={(e) => setRate(key + 'S', e.target.value)}
+                placeholder="0"
+                style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}
+              />
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModalShell({ title, onClose, onSubmit, saving, err, children, submitLabel }) {
   return (
     <div
@@ -1966,11 +2021,13 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
         from: first.from || '', fromName: first.fromName || '', to: first.to || '', toName: first.toName || '',
         date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
+        paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
       };
     }
     return {
       name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
       from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
+      paxPricing: false, paxRates: {},
     };
   });
   // Pre-seed with the existing multi-sector data when editing, so a
@@ -2063,6 +2120,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         flightType: aiReturnSectors && aiReturnSectors.length ? 'return' : 'oneway',
         sectors: finalSectors,
         returnSectors: aiReturnSectors || [],
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
       if (editing) {
@@ -2141,6 +2199,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
     </ModalShell>
   );
 }
@@ -2158,12 +2217,14 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         from: first.from || '', fromStation: first.fromStation || '', to: first.to || '', toStation: first.toStation || '',
         date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
         classOfTravel: first.classOfTravel || '3A', pnr: first.pnr || '',
+        paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
       };
     }
     return {
       name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
       trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '',
       date: '', depTime: '', arrTime: '', classOfTravel: '3A', pnr: '',
+      paxPricing: false, paxRates: {},
     };
   });
   const [aiSegments, setAiSegments] = useState(() => editing ? (editing.segments || null) : null);
@@ -2255,6 +2316,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         isInternational: false,
         segments: finalSegments,
         returnSegments: aiReturnSegments || [],
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
       if (editing) {
@@ -2346,6 +2408,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
     </ModalShell>
   );
 }
@@ -2359,10 +2422,11 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
     country: editing.country || '', city: editing.city || '', starRating: editing.starRating || '4',
     roomCategory: editing.roomCategory || '', checkIn: editing.checkIn || '', checkOut: editing.checkOut || '',
     confirmationNo: editing.confirmationNo || '', photoUrl: editing.photoUrl || '',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
-    photoUrl: '',
+    photoUrl: '', paxPricing: false, paxRates: {},
   });
   const [extraHotels, setExtraHotels] = useState([]); // any additional hotels found beyond the first
   const [aiSummary, setAiSummary] = useState('');
@@ -2437,6 +2501,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
         starRating: form.starRating, roomCategory: form.roomCategory,
         checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
         photoUrl: form.photoUrl,
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
       if (editing) {
@@ -2568,6 +2633,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
         />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
     </ModalShell>
   );
 }
@@ -2579,9 +2645,10 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
     sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
     exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
     confirmationNo: editing.confirmationNo || '', itinerary: editing.itinerary || '',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-    confirmationNo: '', itinerary: '',
+    confirmationNo: '', itinerary: '', paxPricing: false, paxRates: {},
   });
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
@@ -2642,6 +2709,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         itinerary: form.itinerary,
         confirmationNo: form.confirmationNo,
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
       if (editing) {
@@ -2699,6 +2767,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
         />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
     </ModalShell>
   );
 }
@@ -2710,8 +2779,10 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
     sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
     exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
     visaStatus: editing.visaStatus || 'Not Applied',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '', visaStatus: 'Not Applied',
+    paxPricing: false, paxRates: {},
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -2729,6 +2800,7 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         visaStatus: form.visaStatus,
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
       if (editing) {
@@ -2762,6 +2834,7 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
         </select>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
     </ModalShell>
   );
 }
@@ -2961,13 +3034,20 @@ const CANCEL_REASONS = ['Client Request', 'Visa Rejection', 'Medical Emergency',
 function AddCancellationModal({ deal, onClose, onSaved }) {
   const allComponents = useMemo(() => {
     const list = [];
-    (deal.flightVendors || []).forEach((v) => list.push({ kind: 'flight', id: v.id, label: `✈ ${v.name || 'Flight'}` }));
-    (deal.trainVendors || []).forEach((v) => list.push({ kind: 'train', id: v.id, label: `🚆 ${v.name || 'Train'}` }));
-    (deal.hotelVendors || []).forEach((v) => list.push({ kind: 'hotel', id: v.id, label: `🏨 ${v.hotelName || 'Hotel'}` }));
-    (deal.visaVendors || []).forEach((v) => list.push({ kind: 'visa', id: v.id, label: `🛂 ${v.name || 'Visa'}` }));
-    (deal.landVendors || []).forEach((v) => list.push({ kind: 'land', id: v.id, label: `🗺 ${v.name || 'Land Package'}` }));
+    (deal.flightVendors || []).forEach((v) => list.push({ kind: 'flight', id: v.id, label: `✈ ${v.name || 'Flight'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.trainVendors || []).forEach((v) => list.push({ kind: 'train', id: v.id, label: `🚆 ${v.name || 'Train'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.hotelVendors || []).forEach((v) => list.push({ kind: 'hotel', id: v.id, label: `🏨 ${v.hotelName || 'Hotel'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.visaVendors || []).forEach((v) => list.push({ kind: 'visa', id: v.id, label: `🛂 ${v.name || 'Visa'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.landVendors || []).forEach((v) => list.push({ kind: 'land', id: v.id, label: `🗺 ${v.name || 'Land Package'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
     return list;
   }, [deal]);
+
+  const travellerRateKey = (t) => {
+    const type = (t.type || 'Adult').toLowerCase();
+    if (type.startsWith('child')) return 'child';
+    if (type.startsWith('infant')) return 'infant';
+    return 'adult';
+  };
 
   const [scope, setScope] = useState('components'); // 'full' | 'components'
   const [reason, setReason] = useState(CANCEL_REASONS[0]);
@@ -2982,11 +3062,36 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
 
   const addLine = () => setLines((ls) => [...ls, {
     id: 'cl_' + Date.now() + '_' + ls.length,
-    compKind: '', compId: '', label: '',
+    compKind: '', compId: '', label: '', travellerIds: [],
     vendorRetained: '', vendorPenaltyToClient: '', myProfit: '', clientRefund: '',
   }]);
   const updateLine = (id, key, val) => setLines((ls) => ls.map((l) => l.id === id ? { ...l, [key]: val } : l));
   const removeLine = (id) => setLines((ls) => ls.filter((l) => l.id !== id));
+  const toggleLineTraveller = (id, tid) => setLines((ls) => ls.map((l) =>
+    l.id === id ? { ...l, travellerIds: (l.travellerIds || []).includes(tid) ? l.travellerIds.filter((x) => x !== tid) : [...(l.travellerIds || []), tid] } : l
+  ));
+
+  // Suggest vendor-loss / client-refund from the selected travellers'
+  // per-type rates (same lookup V1 uses: traveller.type -> paxRates
+  // {adultC/S, childC/S, infantC/S}). This only FILLS the two fields —
+  // the person can still adjust before saving, so a misjudged rate
+  // never silently becomes the final number.
+  const suggestFromPaxRates = (line) => {
+    const comp = allComponents.find((c) => c.kind === line.compKind && c.id === line.compId);
+    if (!comp || !comp.paxPricing || !(line.travellerIds || []).length) return;
+    const travellers = (deal.travellers || []).filter((t) => line.travellerIds.includes(t.id));
+    let costSum = 0, sellSum = 0;
+    travellers.forEach((t) => {
+      const key = travellerRateKey(t);
+      costSum += Number((comp.paxRates || {})[key + 'C']) || 0;
+      sellSum += Number((comp.paxRates || {})[key + 'S']) || 0;
+    });
+    const costINRVal = toINR(costSum, comp.currency, comp.exchangeRate);
+    const sellINRVal = toINR(sellSum, comp.currency, comp.exchangeRate);
+    updateLine(line.id, 'vendorRetained', String(costINRVal));
+    updateLine(line.id, 'clientRefund', String(sellINRVal));
+    window.veToast && window.veToast(`Suggested from ${travellers.length} traveller rate${travellers.length !== 1 ? 's' : ''} — review before saving`, 'info');
+  };
 
   // Exact same formula as V1's cancelCompute(): what we keep from the
   // client (penalty + our extra profit) minus what we lose to the vendor.
@@ -3093,6 +3198,33 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
               </select>
               <button onClick={() => removeLine(l.id)} type="button" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
             </div>
+            {(() => {
+              const comp = allComponents.find((c) => c.kind === l.compKind && c.id === l.compId);
+              if (!comp || !comp.paxPricing) return null;
+              return (
+                <div style={{ background: '#fff', border: '1px solid #e8ecf5', borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: '#c9a84c', marginBottom: 6, letterSpacing: 0.5 }}>WHO'S CANCELLING? (per-traveller rates set on this vendor)</div>
+                  {(deal.travellers || []).length === 0 ? (
+                    <div style={{ fontSize: 11, color: '#9aa7c4' }}>No travellers added to this deal yet.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                      {(deal.travellers || []).map((t) => (
+                        <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, background: (l.travellerIds || []).includes(t.id) ? '#fdf6e5' : '#f4f6fb', border: '1px solid ' + ((l.travellerIds || []).includes(t.id) ? '#ecd9a0' : '#e8ecf5'), borderRadius: 20, padding: '4px 10px', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={(l.travellerIds || []).includes(t.id)} onChange={() => toggleLineTraveller(l.id, t.id)} style={{ margin: 0 }} />
+                          {t.firstName || t.salutation || 'Traveller'} ({t.type || 'Adult'})
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="v2-acc-btn-sm"
+                    disabled={!(l.travellerIds || []).length}
+                    onClick={() => suggestFromPaxRates(l)}
+                  >✨ Suggest Vendor Loss / Refund from rates</button>
+                </div>
+              );
+            })()}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div>
                 <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4 }}>Vendor Loss (₹)</div>
@@ -6215,9 +6347,153 @@ function ReportsV2({ leads }) {
   );
 }
 
+/* ─── TEAM MEMBERS — same /api/users endpoints V1 already
+   uses (admin-only create/delete, matches backend exactly). Role
+   ENFORCEMENT elsewhere in the app (who can see costs, approve
+   refunds, etc.) is a separate, bigger decision V1 itself never
+   built either — this page only covers what V1's Users screen
+   actually does: create/list/delete team accounts with a role
+   label attached. ─────────────────────────────────────────── */
+
+const USER_ROLES = ['admin', 'sales_manager', 'consultant', 'agent', 'accounts', 'viewer'];
+
+function UsersV2() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'agent' });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const currentUser = (() => { try { return JSON.parse(localStorage.getItem('ve_user') || '{}'); } catch { return {}; } })();
+  const isAdmin = currentUser.role === 'admin';
+
+  const loadUsers = () => {
+    setLoading(true);
+    fetch(`${apiBase()}/api/users`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((data) => { setUsers(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  useEffect(() => { loadUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createUser = async () => {
+    if (!newUser.email || !newUser.password) { setErr('Email and password are required'); return; }
+    if (newUser.password.length < 6) { setErr('Password must be at least 6 characters'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await fetch(`${apiBase()}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(newUser),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not create user');
+      window.veToast && window.veToast('User created ✓', 'success');
+      setNewUser({ email: '', password: '', name: '', role: 'agent' });
+      setShowNew(false);
+      loadUsers();
+    } catch (e) {
+      setErr(e.message || 'Could not create user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteUser = async (u) => {
+    if (!window.confirm(`Delete ${u.name || u.email}? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`${apiBase()}/api/users/${u._id}`, { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not delete user');
+      window.veToast && window.veToast('User deleted', 'success');
+      loadUsers();
+    } catch (e) {
+      window.veToast && window.veToast(e.message || 'Could not delete user', 'warning');
+    }
+  };
+
+  if (!isAdmin) {
+    return (
+      <main className="v2-page">
+        <div style={{ textAlign: 'center', padding: '80px 20px', color: '#6b7a99' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#0d1b3e' }}>Admin access only</div>
+          <div style={{ fontSize: 12.5, marginTop: 6 }}>Your account ({currentUser.role || 'unknown role'}) can't manage team members.</div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header">
+        <div>
+          <h1 className="v2-page-title">Team Members</h1>
+          <p className="v2-page-sub">Create and manage CRM logins — same accounts V1 uses</p>
+        </div>
+        <div className="v2-header-actions">
+          <button className="v2-cta" onClick={() => setShowNew(true)}>+ Create User</button>
+        </div>
+      </div>
+
+      <div className="v2-panel">
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">All Users <span style={{ fontWeight: 400, fontSize: 13, color: '#6b7a99' }}>({users.length})</span></h3>
+        </div>
+        {loading ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>Loading…</div>
+        ) : users.length === 0 ? (
+          <div style={{ padding: '32px 0', color: '#6b7a99', fontSize: 13, textAlign: 'center' }}>No users loaded.</div>
+        ) : (
+          users.map((u) => (
+            <div key={u._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f4f7fc' }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0d1b3e' }}>
+                  {u.name || u.email} {u.email === currentUser.email && <span style={{ fontSize: 10, color: '#c9a84c', fontWeight: 700 }}>(you)</span>}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7a99', marginTop: 2 }}>{u.email} · <span className="v2-detail-tag" style={{ background: '#f4f6fb', color: '#33446b' }}>{u.role}</span></div>
+              </div>
+              {u.email !== currentUser.email && (
+                <button onClick={() => deleteUser(u)} className="v2-acc-btn-sm" style={{ color: '#dc2626' }}>Delete</button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {showNew && (
+        <ModalShell title="+ Create New User" onClose={() => setShowNew(false)} onSubmit={createUser} saving={saving} err={err} submitLabel="✓ Create">
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Email *</div>
+            <input value={newUser.email} onChange={(e) => setNewUser((f) => ({ ...f, email: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Password * (min 6 characters)</div>
+            <input type="password" value={newUser.password} onChange={(e) => setNewUser((f) => ({ ...f, password: e.target.value }))} style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Name</div>
+              <input value={newUser.name} onChange={(e) => setNewUser((f) => ({ ...f, name: e.target.value }))} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Role</div>
+              <select value={newUser.role} onChange={(e) => setNewUser((f) => ({ ...f, role: e.target.value }))} style={inputStyle}>
+                {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+    </main>
+  );
+}
+
 /* ─── ROUTER ─────────────────────────────────────────── */
 
-const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports'];
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'users'];
 
 export default function V2Pages() {
   const [route, setRoute] = useState('dashboard');
@@ -6321,6 +6597,9 @@ export default function V2Pages() {
   }
   if (route === 'reports') {
     return <ReportsV2 leads={items} />;
+  }
+  if (route === 'users') {
+    return <UsersV2 />;
   }
   return <DashboardV2 leads={items} onDealClick={openDeal} />;
 }
