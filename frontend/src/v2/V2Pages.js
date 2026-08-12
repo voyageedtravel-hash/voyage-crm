@@ -5475,6 +5475,8 @@ const defaultAccountsV2 = () => ({
   cashLocations: [],
   ledger: [],
   recurring: [], // {id, name, amount, kind, dayOfMonth, lastMaterialized: 'YYYY-MM'}
+  frozenMonths: {}, // {"2026-07": {unlocked:true, unlockedAt, unlockedBy}} — same shape as V1
+  commitments: [], // {id, date, note, amount, status:'open'|'done', resolvedAt}
 });
 const loadAccountsV2 = () => {
   try {
@@ -5519,6 +5521,10 @@ function AccountsV2({ leads }) {
 
   const addLedgerEntry = () => {
     if (!ledgerForm.amount || Number(ledgerForm.amount) <= 0) { window.veToast && window.veToast('Enter a valid amount', 'warning'); return; }
+    const mk = ledgerForm.date ? ledgerForm.date.slice(0, 7) : '';
+    const nowKeyCheck = new Date().toISOString().slice(0, 7);
+    const lockedCheck = mk && mk < nowKeyCheck && !((accounts.frozenMonths || {})[mk] || {}).unlocked;
+    if (lockedCheck) { window.veToast && window.veToast(`${mk} is locked — unlock it first (below) to add entries there`, 'warning'); return; }
     persist((a) => ({
       ...a,
       ledger: [...(a.ledger || []), { id: 'lg_' + Date.now(), ...ledgerForm, amount: Number(ledgerForm.amount), source: 'manual' }],
@@ -5567,6 +5573,74 @@ function AccountsV2({ leads }) {
   };
 
   const sortedLedger = [...(accounts.ledger || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  // ── Frozen months — same concept as V1: any ledger row dated in a
+  // PAST month (before the current calendar month) is locked/read-only
+  // by default, so closed books can't be silently edited later. Unlike
+  // V1 (which re-checks the login password to unlock), V2 uses a plain
+  // confirm() — V1 itself is single-login (admin/admin123) so that
+  // re-check was already more of a deliberate "are you sure" pause than
+  // a real access-control barrier; a confirm dialog achieves the same
+  // friction without wiring a fresh auth round-trip.
+  const monthKeyOf = (dateStr) => {
+    if (!dateStr) return '';
+    const [y, m] = String(dateStr).split('-');
+    return y && m ? `${y}-${m}` : '';
+  };
+  const nowKey = new Date().toISOString().slice(0, 7);
+  const isPastMonth = (mk) => !!mk && mk < nowKey;
+  const isRowLocked = (row) => {
+    const mk = monthKeyOf(row.date);
+    if (!isPastMonth(mk)) return false;
+    const st = (accounts.frozenMonths || {})[mk];
+    return !st || !st.unlocked;
+  };
+  const unlockMonth = (mk) => {
+    if (!window.confirm(`Unlock ${mk}? Past-month ledger entries become editable again until you re-lock it.`)) return;
+    persist((a) => ({
+      ...a,
+      frozenMonths: { ...(a.frozenMonths || {}), [mk]: { unlocked: true, unlockedAt: new Date().toISOString() } },
+    }));
+    window.veToast && window.veToast(`${mk} unlocked ✓`, 'success');
+  };
+  const relockMonth = (mk) => {
+    persist((a) => {
+      const f = { ...(a.frozenMonths || {}) };
+      delete f[mk];
+      return { ...a, frozenMonths: f };
+    });
+    window.veToast && window.veToast(`${mk} re-locked`, 'success');
+  };
+  const lockedPastMonths = Array.from(new Set(
+    (accounts.ledger || []).map((l) => monthKeyOf(l.date)).filter(isPastMonth)
+  )).sort().reverse();
+
+  // ── Commitments — a plain running list of financial to-dos/promises
+  // ("pay the Bali DMC balance", "return security deposit to X") so
+  // nothing gets forgotten between now and when it's actually settled.
+  // V1 pairs this with a conversational AI salary-advisor that reads
+  // this list before suggesting a founder salary split — that chat
+  // flow is a fair bit more machinery for a fairly personal decision;
+  // the tracking list itself (the part with clear, safe, everyday
+  // value) is what's built here.
+  const [showCommitForm, setShowCommitForm] = useState(false);
+  const [commitForm, setCommitForm] = useState({ note: '', amount: '', date: new Date().toISOString().slice(0, 10) });
+  const addCommitment = () => {
+    if (!commitForm.note.trim()) { window.veToast && window.veToast('Enter what this commitment is', 'warning'); return; }
+    persist((a) => ({
+      ...a,
+      commitments: [...(a.commitments || []), { id: 'cm_' + Date.now(), ...commitForm, amount: Number(commitForm.amount) || 0, status: 'open' }],
+    }));
+    setCommitForm({ note: '', amount: '', date: new Date().toISOString().slice(0, 10) });
+    setShowCommitForm(false);
+    window.veToast && window.veToast('Commitment added ✓', 'success');
+  };
+  const resolveCommitment = (id) => persist((a) => ({
+    ...a,
+    commitments: (a.commitments || []).map((c) => c.id === id ? { ...c, status: 'done', resolvedAt: new Date().toISOString() } : c),
+  }));
+  const removeCommitment = (id) => persist((a) => ({ ...a, commitments: (a.commitments || []).filter((c) => c.id !== id) }));
+  const openCommitments = (accounts.commitments || []).filter((c) => c.status === 'open');
 
   return (
     <main className="v2-page">
@@ -5637,20 +5711,28 @@ function AccountsV2({ leads }) {
           {sortedLedger.length === 0 ? (
             <div style={{ fontSize: 13, color: '#6b7a99' }}>No ledger entries yet.</div>
           ) : (
-            sortedLedger.slice(0, 15).map((l) => (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{l.party || l.kind}</div>
-                  <div style={{ fontSize: 11, color: '#6b7a99' }}>{l.date} · {l.kind}{l.note ? ` · ${l.note}` : ''}</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: l.kind === 'income' ? '#059669' : '#dc2626' }}>
-                    {l.kind === 'income' ? '+' : '−'} {fmtINR(l.amount)}
+            sortedLedger.slice(0, 15).map((l) => {
+              const locked = isRowLocked(l);
+              return (
+                <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc', opacity: locked ? 0.65 : 1 }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>
+                      {locked && <span title="Past month — locked" style={{ marginRight: 5 }}>🔒</span>}
+                      {l.party || l.kind}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7a99' }}>{l.date} · {l.kind}{l.note ? ` · ${l.note}` : ''}</div>
                   </div>
-                  <button onClick={() => rmLedgerEntry(l.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: l.kind === 'income' ? '#059669' : '#dc2626' }}>
+                      {l.kind === 'income' ? '+' : '−'} {fmtINR(l.amount)}
+                    </div>
+                    {!locked && (
+                      <button onClick={() => rmLedgerEntry(l.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -5693,6 +5775,81 @@ function AccountsV2({ leads }) {
           </div>
         )}
       </div>
+
+      <div className="v2-two-col">
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">🔒 Locked Past Months</h3>
+          </div>
+          <p style={{ fontSize: 11.5, color: '#6b7a99', marginTop: -10, marginBottom: 12 }}>
+            Any ledger entry dated in a past month is read-only by default, so closed books can't be edited by accident. Unlock a month only if you genuinely need to fix something in it.
+          </p>
+          {lockedPastMonths.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#6b7a99' }}>No past-month entries yet.</div>
+          ) : (
+            lockedPastMonths.map((mk) => {
+              const unlocked = !!((accounts.frozenMonths || {})[mk] || {}).unlocked;
+              return (
+                <div key={mk} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f7fc' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0d1b3e' }}>
+                    {unlocked ? '🔓' : '🔒'} {mk}
+                  </div>
+                  {unlocked ? (
+                    <button className="v2-acc-btn-sm" onClick={() => relockMonth(mk)}>Re-lock</button>
+                  ) : (
+                    <button className="v2-acc-btn-sm" onClick={() => unlockMonth(mk)}>Unlock</button>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">📌 Open Commitments</h3>
+            <button className="v2-view-all" onClick={() => setShowCommitForm(true)}>+ Add</button>
+          </div>
+          <p style={{ fontSize: 11.5, color: '#6b7a99', marginTop: -10, marginBottom: 12 }}>
+            Financial to-dos that don't belong in the ledger yet — "pay the Bali DMC balance", "return X's deposit" — so nothing slips through.
+          </p>
+          {openCommitments.length === 0 ? (
+            <div style={{ fontSize: 13, color: '#6b7a99' }}>Nothing open — you're caught up.</div>
+          ) : (
+            openCommitments.map((c) => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f7fc' }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{c.note}</div>
+                  <div style={{ fontSize: 11, color: '#6b7a99' }}>{c.date}{c.amount ? ` · ${fmtINR(c.amount)}` : ''}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="v2-acc-btn-sm" onClick={() => resolveCommitment(c.id)}>✓ Done</button>
+                  <button onClick={() => removeCommitment(c.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {showCommitForm && (
+        <ModalShell title="+ Add Commitment" onClose={() => setShowCommitForm(false)} onSubmit={addCommitment} saving={false} err="">
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>What's the commitment? *</div>
+            <input value={commitForm.note} onChange={(e) => setCommitForm((f) => ({ ...f, note: e.target.value }))} placeholder="e.g. Pay Bali DMC balance" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount (₹, optional)</div>
+              <input type="number" value={commitForm.amount} onChange={(e) => setCommitForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
+              <input type="date" value={commitForm.date} onChange={(e) => setCommitForm((f) => ({ ...f, date: e.target.value }))} style={inputStyle} />
+            </div>
+          </div>
+        </ModalShell>
+      )}
 
       {showLedgerForm && (
         <ModalShell title="+ Add Ledger Entry" onClose={() => setShowLedgerForm(false)} onSubmit={addLedgerEntry} saving={false} err="">
