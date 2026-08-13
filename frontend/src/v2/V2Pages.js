@@ -198,6 +198,8 @@ const dealVendors = (d) => [
   ...(d.trainVendors || []),
   ...(d.landVendors || []),
   ...(d.visaVendors || []),
+  ...(d.cruiseVendors || []),
+  ...(d.insuranceVendors || []),
 ];
 
 const bookedTierOf = (d) => {
@@ -1203,6 +1205,8 @@ const AIX_SYS = {
   ticket: 'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed. (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
   passport: 'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ when available — it is the most reliable source.',
   land: 'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
+  cruise: 'You extract cruise booking details for a travel agency CRM. From the given image(s)/text (cruise line confirmations, booking screenshots, emails, quotes), output ONLY valid JSON, no markdown: {"vendorName":string,"shipName":string,"cruiseLine":string,"deckNumber":string,"cabinCategory":string,"cabinNumber":string,"portOfEmbarkation":string,"portOfDisembarkation":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null,"itinerary":string}. cabinCategory must be one of: Inside Stateroom, Oceanview (Window), Oceanview (Porthole), Balcony, Veranda, Mini Suite, Suite, Grand Suite — pick the closest match. itinerary = port-by-port day-wise plan as plain text ("Day 1: Embarkation at Barcelona\\nDay 2: At Sea\\nDay 3: Marseille, France" etc). Missing fields = empty string or null.',
+  insurance: 'You extract travel insurance policy details for a travel agency CRM. From the given image(s)/text (policy documents, insurance certificates, screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"policyNumber":string,"policyType":string,"coverageAmount":number|null,"premium":number|null,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","coveredTravellers":number|null,"sumInsured":string,"costPrice":number|null}. policyType examples: Comprehensive Travel, Trip Cancellation, Medical Only, Baggage Loss, Adventure Sports Cover. premium = the amount charged. costPrice = same as premium if visible. Missing fields = empty string or null.',
 };
 
 // Compress a pasted/selected image to a resized JPEG data URL — same
@@ -2891,6 +2895,303 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
   );
 }
 
+const CRUISE_CABIN_CATEGORIES = [
+  'Inside Stateroom', 'Oceanview (Window)', 'Oceanview (Porthole)',
+  'Balcony', 'Veranda', 'Mini Suite', 'Suite', 'Grand Suite', 'Other',
+];
+
+function AddCruiseModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    name: editing.name || '', shipName: editing.shipName || '', cruiseLine: editing.cruiseLine || '',
+    deckNumber: editing.deckNumber || '', cabinCategory: editing.cabinCategory || CRUISE_CABIN_CATEGORIES[0],
+    cabinNumber: editing.cabinNumber || '', portOfEmbarkation: editing.portOfEmbarkation || '',
+    portOfDisembarkation: editing.portOfDisembarkation || '',
+    checkIn: editing.checkIn || '', checkOut: editing.checkOut || '',
+    currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    itinerary: editing.itinerary || '',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
+  } : {
+    name: '', shipName: '', cruiseLine: '', deckNumber: '', cabinCategory: CRUISE_CABIN_CATEGORIES[0],
+    cabinNumber: '', portOfEmbarkation: '', portOfDisembarkation: '',
+    checkIn: '', checkOut: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    itinerary: '', paxPricing: false, paxRates: {},
+  });
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true); setErr('');
+    try {
+      const j = await runAIExtract('cruise', files);
+      setForm((f) => ({
+        ...f,
+        name: j.vendorName || j.cruiseLine || f.name,
+        shipName: j.shipName || f.shipName,
+        cruiseLine: j.cruiseLine || f.cruiseLine,
+        deckNumber: j.deckNumber || f.deckNumber,
+        cabinCategory: j.cabinCategory || f.cabinCategory,
+        cabinNumber: j.cabinNumber || f.cabinNumber,
+        portOfEmbarkation: j.portOfEmbarkation || f.portOfEmbarkation,
+        portOfDisembarkation: j.portOfDisembarkation || f.portOfDisembarkation,
+        checkIn: j.checkIn || f.checkIn,
+        checkOut: j.checkOut || f.checkOut,
+        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
+        itinerary: j.itinerary || f.itinerary,
+      }));
+      setAiSummary('✓ Cruise details extracted — review before saving.');
+      window.veToast && window.veToast('Cruise booking extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read — try a clearer scan');
+    } finally { setExtracting(false); e.target.value = ''; }
+  };
+
+  const submit = async () => {
+    if (!form.name.trim() && !form.shipName.trim()) { setErr('Cruise line or ship name required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const vendorFields = {
+        name: form.name || form.cruiseLine || form.shipName, shipName: form.shipName, cruiseLine: form.cruiseLine,
+        deckNumber: form.deckNumber, cabinCategory: form.cabinCategory, cabinNumber: form.cabinNumber,
+        portOfEmbarkation: form.portOfEmbarkation, portOfDisembarkation: form.portOfDisembarkation,
+        checkIn: form.checkIn, checkOut: form.checkOut, itinerary: form.itinerary,
+        currency: form.currency, costPrice: Number(form.costPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+      };
+      if (editing) {
+        const updatedList = (deal.cruiseVendors || []).map((c) => c.id === editing.id ? { ...c, ...vendorFields } : c);
+        const updated = await patchDeal(deal._id, { cruiseVendors: updatedList });
+        window.veToast && window.veToast('Cruise updated ✓', 'success'); onSaved(updated); return;
+      }
+      const newVendor = { id: 'cr_' + Date.now(), ...vendorFields, payments: [] };
+      const updated = await patchDeal(deal._id, { cruiseVendors: [...(deal.cruiseVendors || []), newVendor] });
+      window.veToast && window.veToast('Cruise added ✓', 'success'); onSaved(updated);
+    } catch (e) { setErr('Could not save — check connection.'); setSaving(false); }
+  };
+
+  return (
+    <ModalShell title={editing ? '✎ Edit Cruise' : '+ Add Cruise'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading file…' : 'Scan a cruise booking confirmation — AI fills the form below'}
+            </span>
+            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Cruise Line *</div>
+          <input value={form.cruiseLine} onChange={set('cruiseLine')} placeholder="e.g. MSC Cruises" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Ship Name</div>
+          <input value={form.shipName} onChange={set('shipName')} placeholder="e.g. MSC World Europa" style={inputStyle} />
+        </div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Agent Name</div>
+        <input value={form.name} onChange={set('name')} placeholder="e.g. Akbar Travels" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Cabin Category</div>
+          <select value={form.cabinCategory} onChange={set('cabinCategory')} style={inputStyle}>
+            {CRUISE_CABIN_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Deck Number</div>
+          <input value={form.deckNumber} onChange={set('deckNumber')} placeholder="e.g. Deck 12" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Cabin Number</div>
+          <input value={form.cabinNumber} onChange={set('cabinNumber')} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port of Embarkation</div>
+          <input value={form.portOfEmbarkation} onChange={set('portOfEmbarkation')} placeholder="e.g. Barcelona" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port of Disembarkation</div>
+          <input value={form.portOfDisembarkation} onChange={set('portOfDisembarkation')} placeholder="e.g. Genoa" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Embarkation Date</div>
+          <input type="date" value={form.checkIn} onChange={set('checkIn')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Disembarkation Date</div>
+          <input type="date" value={form.checkOut} onChange={set('checkOut')} style={inputStyle} />
+        </div>
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port-by-Port Itinerary</div>
+        <textarea value={form.itinerary} onChange={set('itinerary')} rows={4} placeholder="Day 1: Embarkation at Barcelona&#10;Day 2: At Sea&#10;Day 3: Marseille, France" style={{ ...inputStyle, resize: 'vertical' }} />
+      </div>
+    </ModalShell>
+  );
+}
+
+const INSURANCE_POLICY_TYPES = [
+  'Comprehensive Travel', 'Trip Cancellation', 'Medical Only',
+  'Baggage Loss', 'Adventure Sports Cover', 'Student Travel', 'Senior Citizen', 'Other',
+];
+
+function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    name: editing.name || '', policyNumber: editing.policyNumber || '',
+    policyType: editing.policyType || INSURANCE_POLICY_TYPES[0],
+    coverageAmount: editing.coverageAmount != null ? String(editing.coverageAmount) : '',
+    sumInsured: editing.sumInsured || '',
+    startDate: editing.startDate || '', endDate: editing.endDate || '',
+    coveredTravellers: editing.coveredTravellers != null ? String(editing.coveredTravellers) : '',
+    currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
+  } : {
+    name: '', policyNumber: '', policyType: INSURANCE_POLICY_TYPES[0],
+    coverageAmount: '', sumInsured: '', startDate: '', endDate: '',
+    coveredTravellers: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
+    paxPricing: false, paxRates: {},
+  });
+  const [aiSummary, setAiSummary] = useState('');
+  const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true); setErr('');
+    try {
+      const j = await runAIExtract('insurance', files);
+      setForm((f) => ({
+        ...f,
+        name: j.vendorName || f.name,
+        policyNumber: j.policyNumber || f.policyNumber,
+        policyType: j.policyType || f.policyType,
+        coverageAmount: j.coverageAmount != null ? String(j.coverageAmount) : f.coverageAmount,
+        sumInsured: j.sumInsured || f.sumInsured,
+        startDate: j.startDate || f.startDate,
+        endDate: j.endDate || f.endDate,
+        coveredTravellers: j.coveredTravellers != null ? String(j.coveredTravellers) : f.coveredTravellers,
+        costPrice: (j.costPrice || j.premium) != null ? String(j.costPrice || j.premium) : f.costPrice,
+      }));
+      setAiSummary('✓ Policy details extracted — review before saving.');
+      window.veToast && window.veToast('Insurance details extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read — try a clearer scan');
+    } finally { setExtracting(false); e.target.value = ''; }
+  };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setErr('Insurance provider name required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const vendorFields = {
+        name: form.name, policyNumber: form.policyNumber, policyType: form.policyType,
+        coverageAmount: Number(form.coverageAmount) || 0, sumInsured: form.sumInsured,
+        startDate: form.startDate, endDate: form.endDate,
+        coveredTravellers: Number(form.coveredTravellers) || 0,
+        currency: form.currency, costPrice: Number(form.costPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+      };
+      if (editing) {
+        const updatedList = (deal.insuranceVendors || []).map((i) => i.id === editing.id ? { ...i, ...vendorFields } : i);
+        const updated = await patchDeal(deal._id, { insuranceVendors: updatedList });
+        window.veToast && window.veToast('Insurance updated ✓', 'success'); onSaved(updated); return;
+      }
+      const newVendor = { id: 'ins_' + Date.now(), ...vendorFields, payments: [] };
+      const updated = await patchDeal(deal._id, { insuranceVendors: [...(deal.insuranceVendors || []), newVendor] });
+      window.veToast && window.veToast('Insurance added ✓', 'success'); onSaved(updated);
+    } catch (e) { setErr('Could not save — check connection.'); setSaving(false); }
+  };
+
+  return (
+    <ModalShell title={editing ? '✎ Edit Insurance' : '+ Add Insurance'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      {!editing && (
+        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+              {extracting ? 'Reading file…' : 'Scan an insurance policy document — AI fills the form below'}
+            </span>
+            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+          </label>
+          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Insurance Provider *</div>
+          <input value={form.name} onChange={set('name')} placeholder="e.g. TATA AIG" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Policy Number</div>
+          <input value={form.policyNumber} onChange={set('policyNumber')} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Policy Type</div>
+          <select value={form.policyType} onChange={set('policyType')} style={inputStyle}>
+            {INSURANCE_POLICY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Covered Travellers</div>
+          <input type="number" value={form.coveredTravellers} onChange={set('coveredTravellers')} placeholder="e.g. 4" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Sum Insured</div>
+          <input value={form.sumInsured} onChange={set('sumInsured')} placeholder="e.g. USD 50,000" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Coverage / Claim Limit</div>
+          <input type="number" value={form.coverageAmount} onChange={set('coverageAmount')} placeholder="0" style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Coverage Start</div>
+          <input type="date" value={form.startDate} onChange={set('startDate')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Coverage End</div>
+          <input type="date" value={form.endDate} onChange={set('endDate')} style={inputStyle} />
+        </div>
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} />
+    </ModalShell>
+  );
+}
+
 const REFUND_MODES = ['Bank Transfer', 'UPI', 'Cash'];
 const VENDOR_MODES = ['UPI', 'Bank Transfer', 'Cash collected by vendor', 'Cash deposited by us in vendor account', 'Cheque', 'Other'];
 
@@ -3039,6 +3340,9 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
     (deal.hotelVendors || []).forEach((v) => list.push({ kind: 'hotel', id: v.id, label: `🏨 ${v.hotelName || 'Hotel'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
     (deal.visaVendors || []).forEach((v) => list.push({ kind: 'visa', id: v.id, label: `🛂 ${v.name || 'Visa'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
     (deal.landVendors || []).forEach((v) => list.push({ kind: 'land', id: v.id, label: `🗺 ${v.name || 'Land Package'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.cruiseVendors || []).forEach((v) => list.push({ kind: 'cruise', id: v.id, label: `🚢 ${v.shipName || v.cruiseLine || 'Cruise'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+    (deal.insuranceVendors || []).forEach((v) => list.push({ kind: 'insurance', id: v.id, label: `🛡 ${v.name || 'Insurance'}`, paxPricing: v.paxPricing, paxRates: v.paxRates, currency: v.currency, exchangeRate: v.exchangeRate }));
+
     return list;
   }, [deal]);
 
@@ -3608,6 +3912,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
       hotel: isEdit ? 'Hotel updated' : 'Hotel added',
       visa: isEdit ? 'Visa updated' : 'Visa added',
       land: isEdit ? 'Land package updated' : 'Land package added',
+      cruise: isEdit ? 'Cruise updated' : 'Cruise added',
+      insurance: isEdit ? 'Insurance updated' : 'Insurance added',
       payment: 'Payment recorded',
       refund: 'Refund recorded',
       scanTraveller: 'Traveller(s) scanned from passport/ID',
@@ -3903,6 +4209,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const trains = deal.trainVendors || [];
   const hotels = deal.hotelVendors || [];
   const visas = deal.visaVendors || [];
+  const cruises = deal.cruiseVendors || [];
+  const insurances = deal.insuranceVendors || [];
   const payments = deal.clientPayments || [];
   const refunds = deal.refunds || [];
   const travellers = deal.travellers || [];
@@ -4730,6 +5038,115 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             )}
           </div>
 
+          {/* Cruise */}
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">🚢</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Cruise</h3>
+                <div className="v2-acc-meta">{cruises.length} booking{cruises.length !== 1 ? 's' : ''}</div>
+              </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('cruise')}>+ Add Cruise</button>
+              </div>
+            </div>
+            {cruises.length > 0 && (
+              <div className="v2-acc-body">
+                {cruises.map((c, i) => {
+                  const cCost = toINR(c.costPrice, c.currency, c.exchangeRate);
+                  const cSell = toINR(c.sellingPrice, c.currency, c.exchangeRate);
+                  const cPaid = sumBy(c.payments, 'amount');
+                  return (
+                    <div key={c.id || i} className="v2-hotel-card">
+                      <div className="v2-hotel-head">
+                        <div className="v2-hotel-code" style={{ background: '#0d4f8b' }}>🚢</div>
+                        <div className="v2-hotel-info">
+                          <div className="v2-hotel-name">{c.shipName || c.cruiseLine || 'Cruise Ship'}</div>
+                          <div className="v2-hotel-meta">{c.cabinCategory} · Deck {c.deckNumber || '—'} · Cabin {c.cabinNumber || '—'}</div>
+                          <div className="v2-hotel-meta">{c.portOfEmbarkation || '—'} → {c.portOfDisembarkation || '—'} · {c.checkIn || ''} → {c.checkOut || ''}</div>
+                        </div>
+                        <div className="v2-hotel-price">
+                          <div className="v2-hotel-price-val">{fmtINRFull(cSell)}</div>
+                        </div>
+                        <button onClick={() => { setEditingVendor(c); setModal('cruise'); }} disabled={busy} title="Edit" style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}>✎</button>
+                        <button onClick={() => deleteVendor('cruiseVendors', c.id, 'cruise')} disabled={busy} title="Remove" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}>✕</button>
+                      </div>
+                      {c.itinerary && (
+                        <div style={{ padding: '10px 14px', fontSize: 12, color: '#5a6b8c', borderTop: '1px solid #f0f2f7', whiteSpace: 'pre-line', lineHeight: 1.7 }}>{c.itinerary}</div>
+                      )}
+                      {cCost > 0 && (
+                        <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${cPaid >= cCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (cPaid / cCost) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid to vendor: <b>{fmtINRFull(cPaid)}</b> / {fmtINRFull(cCost)}</span>
+                            <span className={`v2-pay-status ${cPaid >= cCost ? 'paid' : 'due'}`}>{cPaid >= cCost ? '✓ Fully Paid' : `${fmtINRFull(cCost - cPaid)} due`}</span>
+                            <button className="v2-acc-btn-sm" onClick={() => { setPayingVendor({ arrayKey: 'cruiseVendors', vendorId: c.id, label: c.shipName || 'Cruise' }); setModal('payVendor'); }}>💸 Pay</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Insurance */}
+          <div className="v2-acc">
+            <div className="v2-acc-head">
+              <div className="v2-acc-icon">🛡️</div>
+              <div className="v2-acc-title-block">
+                <h3 className="v2-acc-title">Insurance</h3>
+                <div className="v2-acc-meta">{insurances.length} polic{insurances.length !== 1 ? 'ies' : 'y'}</div>
+              </div>
+              <div className="v2-acc-actions">
+                <button className="v2-acc-btn-primary" onClick={() => setModal('insurance')}>+ Add Insurance</button>
+              </div>
+            </div>
+            {insurances.length > 0 && (
+              <div className="v2-acc-body">
+                {insurances.map((ins, i) => {
+                  const insCost = toINR(ins.costPrice, ins.currency, ins.exchangeRate);
+                  const insSell = toINR(ins.sellingPrice, ins.currency, ins.exchangeRate);
+                  const insPaid = sumBy(ins.payments, 'amount');
+                  return (
+                    <div key={ins.id || i} className="v2-hotel-card">
+                      <div className="v2-hotel-head">
+                        <div className="v2-hotel-code" style={{ background: '#059669' }}>🛡</div>
+                        <div className="v2-hotel-info">
+                          <div className="v2-hotel-name">{ins.name || 'Insurance'}</div>
+                          <div className="v2-hotel-meta">{ins.policyType} · Policy: {ins.policyNumber || '—'}</div>
+                          <div className="v2-hotel-meta">{ins.startDate || '—'} → {ins.endDate || '—'} · {ins.coveredTravellers || '—'} traveller{Number(ins.coveredTravellers) !== 1 ? 's' : ''} · Sum: {ins.sumInsured || '—'}</div>
+                        </div>
+                        <div className="v2-hotel-price">
+                          <div className="v2-hotel-price-val">{fmtINRFull(insSell)}</div>
+                        </div>
+                        <button onClick={() => { setEditingVendor(ins); setModal('insurance'); }} disabled={busy} title="Edit" style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}>✎</button>
+                        <button onClick={() => deleteVendor('insuranceVendors', ins.id, 'insurance')} disabled={busy} title="Remove" style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}>✕</button>
+                      </div>
+                      {insCost > 0 && (
+                        <div className="v2-pay-bar">
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
+                          <div className="v2-pay-progress">
+                            <div className={`v2-pay-progress-fill ${insPaid >= insCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (insPaid / insCost) * 100)}%` }}></div>
+                          </div>
+                          <div className="v2-pay-row">
+                            <span>Paid to vendor: <b>{fmtINRFull(insPaid)}</b> / {fmtINRFull(insCost)}</span>
+                            <span className={`v2-pay-status ${insPaid >= insCost ? 'paid' : 'due'}`}>{insPaid >= insCost ? '✓ Fully Paid' : `${fmtINRFull(insCost - insPaid)} due`}</span>
+                            <button className="v2-acc-btn-sm" onClick={() => { setPayingVendor({ arrayKey: 'insuranceVendors', vendorId: ins.id, label: ins.name || 'Insurance' }); setModal('payVendor'); }}>💸 Pay</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {modal === 'flight' && (
             <AddFlightModal
               deal={deal}
@@ -4740,6 +5157,22 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'land' && (
             <AddLandModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
+          {modal === 'cruise' && (
+            <AddCruiseModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={handleSaved}
+            />
+          )}
+          {modal === 'insurance' && (
+            <AddInsuranceModal
               deal={deal}
               editing={editingVendor}
               onClose={() => { setModal(null); setEditingVendor(null); }}
@@ -5223,6 +5656,7 @@ function VendorsV2({ leads }) {
     const categories = [
       ['flightVendors', 'Flight'], ['hotelVendors', 'Hotel'], ['trainVendors', 'Train'],
       ['landVendors', 'Land'], ['visaVendors', 'Visa'],
+      ['cruiseVendors', 'Cruise'], ['insuranceVendors', 'Insurance'],
     ];
     leads.forEach((l) => {
       categories.forEach(([key, label]) => {
@@ -5824,6 +6258,8 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
           ...(d.trainVendors || []).map((v) => ({ ...v, _k: 'Train', _n: v.name })),
           ...(d.landVendors || []).map((v) => ({ ...v, _k: 'Land', _n: v.name })),
           ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
+          ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.cruiseLine || v.name })),
+          ...(d.insuranceVendors || []).map((v) => ({ ...v, _k: 'Insurance', _n: v.name })),
         ];
         vs.forEach((v) => {
           const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
