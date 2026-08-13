@@ -2912,12 +2912,13 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
     sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
     exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
     itinerary: editing.itinerary || '',
+    photoUrl: editing.photoUrl || '', mapUrl: editing.mapUrl || '',
     paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     name: '', shipName: '', cruiseLine: '', deckNumber: '', cabinCategory: CRUISE_CABIN_CATEGORIES[0],
     cabinNumber: '', portOfEmbarkation: '', portOfDisembarkation: '',
     checkIn: '', checkOut: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-    itinerary: '', paxPricing: false, paxRates: {},
+    itinerary: '', photoUrl: '', mapUrl: '', paxPricing: false, paxRates: {},
   });
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
@@ -2962,6 +2963,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
         deckNumber: form.deckNumber, cabinCategory: form.cabinCategory, cabinNumber: form.cabinNumber,
         portOfEmbarkation: form.portOfEmbarkation, portOfDisembarkation: form.portOfDisembarkation,
         checkIn: form.checkIn, checkOut: form.checkOut, itinerary: form.itinerary,
+        photoUrl: form.photoUrl, mapUrl: form.mapUrl,
         currency: form.currency, costPrice: Number(form.costPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
@@ -3046,6 +3048,60 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port-by-Port Itinerary</div>
         <textarea value={form.itinerary} onChange={set('itinerary')} rows={4} placeholder="Day 1: Embarkation at Barcelona&#10;Day 2: At Sea&#10;Day 3: Marseille, France" style={{ ...inputStyle, resize: 'vertical' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🚢 Ship / Cabin Photo</div>
+          <div
+            onPaste={(e) => {
+              const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+              if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, photoUrl: d }))); }
+            }}
+            style={{ border: '1px dashed #c9a84c', borderRadius: 10, padding: 10, textAlign: 'center', cursor: 'pointer', minHeight: 60, background: '#faf7f0' }}
+            tabIndex={0}
+          >
+            {form.photoUrl ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+                <img src={form.photoUrl} alt="ship" style={{ width: 80, height: 56, objectFit: 'cover', borderRadius: 8 }} />
+                <button type="button" onClick={() => setForm((f) => ({ ...f, photoUrl: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
+              </div>
+            ) : (
+              <div>
+                <label style={{ cursor: 'pointer', fontSize: 11.5, color: '#6b7a99' }}>
+                  Paste (Ctrl+V) or{' '}
+                  <span style={{ color: '#c9a84c', fontWeight: 600 }}>click to upload</span>
+                  <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, photoUrl: d }))); }} style={{ display: 'none' }} />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🗺️ Itinerary / Route Map</div>
+          <div
+            onPaste={(e) => {
+              const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+              if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, mapUrl: d }))); }
+            }}
+            style={{ border: '1px dashed #0d4f8b', borderRadius: 10, padding: 10, textAlign: 'center', cursor: 'pointer', minHeight: 60, background: '#f4f8fc' }}
+            tabIndex={0}
+          >
+            {form.mapUrl ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+                <img src={form.mapUrl} alt="route map" style={{ width: 80, height: 56, objectFit: 'cover', borderRadius: 8 }} />
+                <button type="button" onClick={() => setForm((f) => ({ ...f, mapUrl: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
+              </div>
+            ) : (
+              <div>
+                <label style={{ cursor: 'pointer', fontSize: 11.5, color: '#6b7a99' }}>
+                  Paste (Ctrl+V) or{' '}
+                  <span style={{ color: '#0d4f8b', fontWeight: 600 }}>click to upload</span>
+                  <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, mapUrl: d }))); }} style={{ display: 'none' }} />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </ModalShell>
   );
@@ -5058,6 +5114,12 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                   const cPaid = sumBy(c.payments, 'amount');
                   return (
                     <div key={c.id || i} className="v2-hotel-card">
+                      {(c.photoUrl || c.mapUrl) && (
+                        <div style={{ display: 'flex', gap: 10, padding: '14px 14px 0' }}>
+                          {c.photoUrl && <img src={c.photoUrl} alt={c.shipName || 'Cruise'} style={{ flex: 1, maxHeight: 180, objectFit: 'cover', borderRadius: 10, background: '#f4f7fc' }} onerror="this.style.display='none'" />}
+                          {c.mapUrl && <img src={c.mapUrl} alt="Route map" style={{ flex: 1, maxHeight: 180, objectFit: 'contain', borderRadius: 10, background: '#f4f8fc' }} onerror="this.style.display='none'" />}
+                        </div>
+                      )}
                       <div className="v2-hotel-head">
                         <div className="v2-hotel-code" style={{ background: '#0d4f8b' }}>🚢</div>
                         <div className="v2-hotel-info">
