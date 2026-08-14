@@ -1286,6 +1286,109 @@ function CurrencyCostRow({ form, setForm }) {
 // prorate a cancellation) is the same idea as V1, just simpler data.
 const PAX_RATE_TYPES = [['adult', 'Adult'], ['child', 'Child'], ['infant', 'Infant']];
 
+// ─── Room Assignment — V1-exact logic: each hotel vendor can hold
+// multiple physical rooms (roomsList[]), each with a room type,
+// extra bed toggle, optional per-room cost/sell, and traveller
+// assignment (checkboxes). A traveller sleeps in ONE room only —
+// clicking them into a new room auto-removes from the old one.
+// When roomPricing is on, the hotel's total costPrice/sellingPrice
+// are auto-summed from per-room costs. ────────────────────────────
+
+const travellerName = (t) => {
+  const parts = [t.salutation, t.firstName, t.lastName].filter(Boolean);
+  return parts.length ? parts.join(' ') : t.type || 'Traveller';
+};
+
+function RoomAssignmentBlock({ hotel, deal, onUpdate }) {
+  const h = hotel;
+  const T = (deal.travellers || []).filter((t) => !t.cancelled);
+  const rooms = h.roomsList || [];
+  const assigned = new Set(rooms.flatMap((r) => r.travellerIds || []));
+  const unassigned = T.filter((t) => !assigned.has(t.id));
+
+  const update = (mutator) => {
+    const next = { ...h };
+    mutator(next);
+    if (next.roomPricing) {
+      const c = (next.roomsList || []).reduce((s, r) => s + (Number(r.cost) || 0), 0);
+      const sl = (next.roomsList || []).reduce((s, r) => s + (Number(r.sell) || 0), 0);
+      next.costPrice = c || next.costPrice;
+      next.sellingPrice = sl || next.sellingPrice;
+    }
+    onUpdate(next);
+  };
+
+  const addRoom = () => update((n) => { n.roomsList = [...(n.roomsList || []), { id: 'rm_' + Date.now(), roomType: h.roomCategory || 'Deluxe Room', travellerIds: [], extraBed: false, cost: '', sell: '' }]; });
+  const rmRoom = (rid) => update((n) => { n.roomsList = (n.roomsList || []).filter((r) => r.id !== rid); });
+  const updRoom = (rid, key, val) => update((n) => { n.roomsList = (n.roomsList || []).map((r) => r.id === rid ? { ...r, [key]: val } : r); });
+  const toggleTraveller = (rid, tid) => update((n) => {
+    n.roomsList = (n.roomsList || []).map((r) => {
+      if (r.id !== rid) return { ...r, travellerIds: (r.travellerIds || []).filter((x) => x !== tid) };
+      const on = (r.travellerIds || []).includes(tid);
+      return { ...r, travellerIds: on ? (r.travellerIds || []).filter((x) => x !== tid) : [...(r.travellerIds || []), tid] };
+    });
+  });
+  const toggleRoomPricing = () => update((n) => { n.roomPricing = !n.roomPricing; });
+
+  if (!T.length) return null;
+
+  return (
+    <div style={{ marginTop: 10, border: '1px dashed #c9d6ef', borderRadius: 10, padding: '10px 12px', background: '#fbfdff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: '#334e82' }}>🛏️ Room Allocation ({rooms.length} room{rooms.length === 1 ? '' : 's'})</span>
+        <button onClick={addRoom} style={{ border: 'none', background: '#eef1f7', color: '#334e82', borderRadius: 6, padding: '2px 9px', fontSize: 9.5, fontWeight: 700, cursor: 'pointer' }}>+ Add Room</button>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, color: '#0e7490', cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!h.roomPricing} onChange={toggleRoomPricing} /> Per-room pricing
+        </label>
+      </div>
+      {rooms.length === 0 && <div style={{ fontSize: 11, color: '#94a3b8', padding: '4px 0' }}>Koi room nahi. "+ Add Room" se rooms banao, phir travellers assign karo.</div>}
+      {rooms.map((r, i) => (
+        <div key={r.id} style={{ border: '1px solid #e3eaf7', borderRadius: 9, padding: '9px 11px', marginBottom: 7, background: '#fff' }}>
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginBottom: 7 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: '#c9942a', background: '#faf1dc', borderRadius: 20, padding: '2px 9px' }}>ROOM {i + 1}</span>
+            <select value={r.roomType} onChange={(e) => updRoom(r.id, 'roomType', e.target.value)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '4px 7px', fontSize: 11 }}>
+              {ROOM_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: '#5a6b8c', cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!r.extraBed} onChange={(e) => updRoom(r.id, 'extraBed', e.target.checked)} /> Extra bed
+            </label>
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>{(r.travellerIds || []).length} guest{(r.travellerIds || []).length === 1 ? '' : 's'}</span>
+            {h.roomPricing && (
+              <span style={{ display: 'flex', gap: 5, marginLeft: 'auto' }}>
+                <input type="number" value={r.cost} onChange={(e) => updRoom(r.id, 'cost', e.target.value)} placeholder="Cost" style={{ width: 82, border: '1px solid #d4e0f5', borderRadius: 6, padding: '4px 6px', fontSize: 11 }} />
+                <input type="number" value={r.sell} onChange={(e) => updRoom(r.id, 'sell', e.target.value)} placeholder="Sell" style={{ width: 82, border: '1px solid #d4e0f5', borderRadius: 6, padding: '4px 6px', fontSize: 11 }} />
+              </span>
+            )}
+            <button onClick={() => rmRoom(r.id)} style={{ border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700, marginLeft: h.roomPricing ? 0 : 'auto' }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {T.map((t) => {
+              const here = (r.travellerIds || []).includes(t.id);
+              const elsewhere = !here && assigned.has(t.id);
+              return (
+                <button key={t.id} onClick={() => toggleTraveller(r.id, t.id)}
+                  title={elsewhere ? 'Doosre room mein hai — click karke yahan le aao' : ''}
+                  style={{
+                    border: '1px solid ' + (here ? '#0891b2' : '#e8edf6'),
+                    background: here ? '#e0f7fb' : '#fff',
+                    color: here ? '#0e7490' : elsewhere ? '#c3cddf' : '#94a3b8',
+                    borderRadius: 20, padding: '3px 10px', fontSize: 10, fontWeight: 700,
+                    cursor: 'pointer', opacity: elsewhere ? 0.55 : 1,
+                  }}>
+                  {here ? '✓ ' : ''}{travellerName(t)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {rooms.length > 0 && unassigned.length > 0 && (
+        <div style={{ fontSize: 10.5, color: '#b45309', marginTop: 4 }}>⚠️ {unassigned.length} traveller abhi kisi room mein nahi: {unassigned.map(travellerName).join(', ')}</div>
+      )}
+    </div>
+  );
+}
+
 function PaxRatesFields({ form, setForm }) {
   const rates = form.paxRates || {};
   const setRate = (key, val) => setForm((f) => ({ ...f, paxRates: { ...(f.paxRates || {}), [key]: val } }));
@@ -5346,6 +5449,14 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           <div className="v2-hotel-fact-val">{h.country || '—'}</div>
                         </div>
                       </div>
+                      {/* Room Assignment */}
+                      {(deal.travellers || []).length > 0 && (
+                        <RoomAssignmentBlock hotel={h} deal={deal} onUpdate={async (updatedHotel) => {
+                          const list = (deal.hotelVendors || []).map((hh) => hh.id === updatedHotel.id ? updatedHotel : hh);
+                          const updated = await patchDeal(deal._id, { hotelVendors: list });
+                          setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                        }} />
+                      )}
                       {hCost > 0 && (
                         <div className="v2-pay-bar">
                           <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
