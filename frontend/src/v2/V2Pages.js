@@ -223,6 +223,15 @@ const refundedINR = (d) => sumBy(d.refunds, 'amount');
 // carried over — niche field, not worth the extra complexity here.
 const netSellINR = (d) => sellINR(d) - refundedINR(d);
 const profitINR = (d) => netSellINR(d) - costINR(d);
+const gstINR = (d) => {
+  const mode = d.gstMode || 'profit';
+  if (mode === 'none') return 0;
+  const sell = netSellINR(d), cost = costINR(d), gpm = sell - cost;
+  return mode === 'package' ? sell * GST_RATE_PACKAGE : (gpm > 0 ? gpm * GST_RATE_PROFIT : 0);
+};
+// eslint-disable-next-line no-unused-vars
+const netProfitINR = (d) => profitINR(d) - gstINR(d);
+
 // eslint-disable-next-line no-unused-vars
 const balanceINR = (d) => netSellINR(d) - paidINR(d);
 
@@ -1069,6 +1078,75 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
    out fully inside V2 without switching back to V1. ──────────────── */
 
 const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'THB', 'JPY', 'MYR'];
+
+// ─── V1-exact lookup maps ────────────────────────────
+const AIRLINE_MAP = {
+  "6E":"IndiGo","AI":"Air India","UK":"Vistara","SG":"SpiceJet","G8":"Go First",
+  "IX":"Air India Express","QP":"Akasa Air","EK":"Emirates","EY":"Etihad",
+  "QR":"Qatar Airways","SQ":"Singapore Airlines","TK":"Turkish Airlines",
+  "LH":"Lufthansa","BA":"British Airways","AF":"Air France","KL":"KLM",
+  "WY":"Oman Air","FZ":"flydubai","G9":"Air Arabia","VS":"Virgin Atlantic",
+  "CX":"Cathay Pacific","MH":"Malaysia Airlines","GA":"Garuda Indonesia",
+  "TG":"Thai Airways","VN":"Vietnam Airlines","MU":"China Eastern",
+  "CA":"Air China","NH":"ANA","JL":"Japan Airlines","OZ":"Asiana Airlines",
+  "AK":"AirAsia","FD":"Thai AirAsia","TR":"Scoot","VJ":"VietJet Air","QZ":"Indonesia AirAsia",
+  "PG":"Bangkok Airways","BR":"EVA Air","CI":"China Airlines","CZ":"China Southern",
+  "KE":"Korean Air","UL":"SriLankan Airlines","KC":"Air Astana","HY":"Uzbekistan Airways",
+  "J2":"Azerbaijan Airlines","GF":"Gulf Air","SV":"Saudia","J9":"Jazeera Airways",
+  "LX":"Swiss","OS":"Austrian Airlines","AZ":"ITA Airways","IB":"Iberia","TP":"TAP Air Portugal",
+  "AY":"Finnair","SK":"SAS","EI":"Aer Lingus","SU":"Aeroflot","AC":"Air Canada","WS":"WestJet",
+  "ET":"Ethiopian Airlines","MS":"EgyptAir","KQ":"Kenya Airways",
+};
+const AIRPORT_MAP = {
+  "DEL":"Delhi (IGI)","BOM":"Mumbai (CSIA)","BLR":"Bengaluru (KIA)","MAA":"Chennai",
+  "CCU":"Kolkata","HYD":"Hyderabad","AMD":"Ahmedabad","COK":"Kochi","GOI":"Goa",
+  "JAI":"Jaipur","LKO":"Lucknow","ATQ":"Amritsar","VNS":"Varanasi","IXC":"Chandigarh",
+  "DXB":"Dubai (DXB)","AUH":"Abu Dhabi","DOH":"Doha","SIN":"Singapore",
+  "BKK":"Bangkok (Suvarnabhumi)","DMK":"Bangkok (Don Mueang)","KUL":"Kuala Lumpur",
+  "HKG":"Hong Kong","NRT":"Tokyo (Narita)","HND":"Tokyo (Haneda)","ICN":"Seoul (Incheon)",
+  "LHR":"London Heathrow","LGW":"London Gatwick","CDG":"Paris","FRA":"Frankfurt",
+  "AMS":"Amsterdam","ZUR":"Zurich","VIE":"Vienna","FCO":"Rome","BCN":"Barcelona",
+  "MAD":"Madrid","MXP":"Milan","ATH":"Athens","IST":"Istanbul","CAI":"Cairo",
+  "JNB":"Johannesburg","NBO":"Nairobi","CMB":"Colombo","DAC":"Dhaka","KTM":"Kathmandu",
+  "MLE":"Male","SYD":"Sydney","MEL":"Melbourne","LAX":"Los Angeles","JFK":"New York (JFK)",
+  "ORD":"Chicago","YYZ":"Toronto","YVR":"Vancouver","GRU":"Sao Paulo",
+  "TBS":"Tbilisi","BUS":"Batumi","GYD":"Baku","EVN":"Yerevan","ALA":"Almaty","NQZ":"Astana",
+  "TAS":"Tashkent","HKT":"Phuket","CNX":"Chiang Mai","USM":"Koh Samui","DPS":"Bali (Denpasar)",
+  "CGK":"Jakarta","SGN":"Ho Chi Minh City","HAN":"Hanoi","DAD":"Da Nang","REP":"Siem Reap",
+  "PNH":"Phnom Penh","SHJ":"Sharjah","MCT":"Muscat","BAH":"Bahrain","KWI":"Kuwait","RUH":"Riyadh",
+  "JED":"Jeddah","MUC":"Munich","PRG":"Prague","LIS":"Lisbon","DUB":"Dublin","VCE":"Venice",
+  "GVA":"Geneva","PVG":"Shanghai","PEK":"Beijing","TPE":"Taipei","AKL":"Auckland","SXR":"Srinagar",
+  "IXL":"Leh","PNQ":"Pune","TRV":"Thiruvananthapuram","RGN":"Yangon","PER":"Perth","BNE":"Brisbane",
+  "PQC":"Phu Quoc Island",
+};
+const CITY_COUNTRY = {
+  bangkok:"Thailand",phuket:"Thailand","chiang mai":"Thailand","koh samui":"Thailand",pattaya:"Thailand",krabi:"Thailand",
+  bali:"Indonesia",denpasar:"Indonesia",jakarta:"Indonesia",ubud:"Indonesia",
+  "kuala lumpur":"Malaysia",langkawi:"Malaysia",penang:"Malaysia",singapore:"Singapore",
+  hanoi:"Vietnam","ho chi minh":"Vietnam","ho chi minh city":"Vietnam","da nang":"Vietnam","ha long":"Vietnam","phu quoc":"Vietnam","siem reap":"Cambodia","phnom penh":"Cambodia",
+  dubai:"UAE","abu dhabi":"UAE",sharjah:"UAE",doha:"Qatar",muscat:"Oman",
+  tbilisi:"Georgia",batumi:"Georgia",kazbegi:"Georgia",baku:"Azerbaijan",yerevan:"Armenia",
+  almaty:"Kazakhstan",astana:"Kazakhstan",tashkent:"Uzbekistan",samarkand:"Uzbekistan",
+  male:"Maldives",maldives:"Maldives",colombo:"Sri Lanka",kandy:"Sri Lanka",kathmandu:"Nepal",pokhara:"Nepal",
+  london:"UK",paris:"France",rome:"Italy",venice:"Italy",milan:"Italy",florence:"Italy",
+  barcelona:"Spain",madrid:"Spain",amsterdam:"Netherlands",frankfurt:"Germany",munich:"Germany",
+  zurich:"Switzerland",interlaken:"Switzerland",geneva:"Switzerland",vienna:"Austria",prague:"Czechia",
+  istanbul:"Turkey",athens:"Greece",santorini:"Greece",lisbon:"Portugal",
+  "hong kong":"Hong Kong",tokyo:"Japan",osaka:"Japan",kyoto:"Japan",seoul:"South Korea",
+  shanghai:"China",beijing:"China",taipei:"Taiwan",
+  goa:"India",jaipur:"India",udaipur:"India",manali:"India",shimla:"India",leh:"India",srinagar:"India",
+};
+const ROOM_CATEGORIES = ["Deluxe Room","Superior Room","Standard Room","Junior Suite","Suite","Executive Suite","Presidential Suite","Pool View Room","Sea View Room","Garden View","Mountain View","Studio","Apartment","Villa","Chalet","Bungalow","Tent/Glamping","Other"];
+const VISA_STATUSES = ['Not Applied', 'Not Required', 'In Progress', 'Approved', 'Rejected'];
+const CANCEL_STATUSES = ['Pending', 'Refund Approved', 'Refund Processed', 'No Refund Due', 'Closed'];
+const TRAIN_CLASSES = ['1A','2A','3A','SL','CC','EC','2S','Sleeper','First Class','Business','Standard','Other'];
+// eslint-disable-next-line no-unused-vars
+const OCC_CATS = ['Adult — Twin Sharing','Adult — Single Occupancy','Adult — Triple Sharing','Child With Bed (2–11 yrs)','Child Without Bed (2–11 yrs)','Infant (0–2 yrs)','Extra Adult / Mattress'];
+const GST_RATE_PROFIT = 0.18;
+const GST_RATE_PACKAGE = 0.05;
+const lookupCountry = (city) => CITY_COUNTRY[(city || '').toLowerCase().trim()] || '';
+const lookupAirline = (code) => AIRLINE_MAP[(code || '').toUpperCase().trim()] || '';
+const lookupAirport = (code) => AIRPORT_MAP[(code || '').toUpperCase().trim()] || '';
 
 function CurrencyCostRow({ form, setForm }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -2166,16 +2244,16 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
-        <input value={form.name} onChange={set('name')} placeholder="e.g. Vietnam Airlines" style={inputStyle} />
+        <input value={form.name} onChange={(e) => { const v = e.target.value; const looked = lookupAirline(v.trim()); setForm((f) => ({ ...f, name: looked || v })); }} placeholder="e.g. VN or Vietnam Airlines" style={inputStyle} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (code)</div>
-          <input value={form.from} onChange={set('from')} placeholder="DEL" style={inputStyle} />
+          <input value={form.from} onChange={(e) => { const v = e.target.value.toUpperCase(); setForm((f) => ({ ...f, from: v, fromName: lookupAirport(v) || f.fromName })); }} placeholder="DEL" style={inputStyle} />
         </div>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (code)</div>
-          <input value={form.to} onChange={set('to')} placeholder="SGN" style={inputStyle} />
+          <input value={form.to} onChange={(e) => { const v = e.target.value.toUpperCase(); setForm((f) => ({ ...f, to: v, toName: lookupAirport(v) || f.toName })); }} placeholder="SGN" style={inputStyle} />
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -2403,7 +2481,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Class</div>
           <select value={form.classOfTravel} onChange={set('classOfTravel')} style={inputStyle}>
-            {['1A', '2A', '3A', 'SL', 'CC', 'EC', '2S', 'Sleeper', 'First Class', 'Business', 'Standard'].map((c) => <option key={c} value={c}>{c}</option>)}
+            {TRAIN_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div>
@@ -2567,7 +2645,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>City</div>
-          <input value={form.city} onChange={set('city')} style={inputStyle} />
+          <input value={form.city} onChange={(e) => { const v = e.target.value; const c = lookupCountry(v); setForm((f) => ({ ...f, city: v, country: c || f.country })); }} style={inputStyle} />
         </div>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Country</div>
@@ -2582,7 +2660,10 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
       </div>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Room Category</div>
-        <input value={form.roomCategory} onChange={set('roomCategory')} placeholder="Deluxe Room" style={inputStyle} />
+        <select value={form.roomCategory} onChange={set('roomCategory')} style={inputStyle}>
+          <option value="">Select…</option>
+          {ROOM_CATEGORIES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -2834,7 +2915,7 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Status</div>
         <select value={form.visaStatus} onChange={set('visaStatus')} style={inputStyle}>
-          {['Not Applied', 'Applied', 'Approved', 'Rejected'].map((s) => <option key={s} value={s}>{s}</option>)}
+          {VISA_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
@@ -3411,6 +3492,7 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
 
   const [scope, setScope] = useState('components'); // 'full' | 'components'
   const [reason, setReason] = useState(CANCEL_REASONS[0]);
+  const [cancelStatus, setCancelStatus] = useState(CANCEL_STATUSES[0]);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [refundMode, setRefundMode] = useState(REFUND_MODES[0]);
   const [approvedBy, setApprovedBy] = useState(REFUND_APPROVERS[0]);
@@ -3481,7 +3563,7 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
       }));
       const newCancellation = {
         id: 'cxl_' + Date.now(),
-        scope, reason, date, refundMode, approvedBy, refNo, note,
+        scope, reason, cancelStatus, date, refundMode, approvedBy, refNo, note,
         status: 'Refund Approved',
         lines: finalLines,
       };
@@ -3517,6 +3599,12 @@ function AddCancellationModal({ deal, onClose, onSaved }) {
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reason</div>
           <select value={reason} onChange={(e) => setReason(e.target.value)} style={inputStyle}>
             {CANCEL_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Status</div>
+          <select value={cancelStatus} onChange={(e) => setCancelStatus(e.target.value)} style={inputStyle}>
+            {CANCEL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </div>
@@ -4001,6 +4089,17 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
       modeOfQuery: deal.modeOfQuery || '',
       leadSource: deal.leadSource || '',
       priority: deal.priority || 'Normal',
+      followUpDate: deal.followUpDate || '',
+      remarks: deal.remarks || '',
+      reference: deal.reference || '',
+      gstMode: deal.gstMode || 'profit',
+      quoteValidTill: deal.quoteValidTill || '',
+      forfeitAmount: deal.forfeitAmount != null ? String(deal.forfeitAmount) : '',
+      forfeitNote: deal.forfeitNote || '',
+      adults: deal.adults != null ? String(deal.adults) : '',
+      children: deal.children != null ? String(deal.children) : '',
+      infants: deal.infants != null ? String(deal.infants) : '',
+      rooms: deal.rooms != null ? String(deal.rooms) : '1',
     });
     setEditingClient(true);
   };
@@ -4254,6 +4353,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const refunded = refundedINR(deal);
   const netSell = sell - refunded;
   const profit = netSell - cost;
+  const gst = gstINR(deal);
+  const netProfit = profit - gst;
   const marginPct = netSell > 0 ? Math.round((profit / netSell) * 1000) / 10 : 0;
   const balance = netSell - paid;
   const collectionPct = netSell > 0 ? Math.round((paid / netSell) * 1000) / 10 : 0;
@@ -4396,6 +4497,11 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           <div className="v2-fin-label">GPM (Profit)</div>
           <div className="v2-fin-value gold">{fmtINRFull(profit)}</div>
           <div className="v2-fin-sub green">{marginPct}% margin</div>
+        </div>
+        <div>
+          <div className="v2-fin-label">GST ({(deal.gstMode || 'profit') === 'none' ? 'None' : (deal.gstMode || 'profit') === 'package' ? '5% Pkg' : '18% GPM'})</div>
+          <div className="v2-fin-value" style={{ color: '#4169E1' }}>{fmtINRFull(gst)}</div>
+          <div className="v2-fin-sub">Net: {fmtINRFull(netProfit)}</div>
         </div>
         <div>
           <div className="v2-fin-label">Client Paid</div>
@@ -4557,6 +4663,51 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                       {['Low', 'Normal', 'High', 'Urgent'].map((p) => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Follow-up Date</div>
+                    <input type="date" value={clientForm.followUpDate} onChange={(e) => setClientForm((f) => ({ ...f, followUpDate: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Reference No.</div>
+                    <input value={clientForm.reference} onChange={(e) => setClientForm((f) => ({ ...f, reference: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Remarks / Internal Notes</div>
+                    <textarea value={clientForm.remarks} onChange={(e) => setClientForm((f) => ({ ...f, remarks: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>GST Mode</div>
+                    <select value={clientForm.gstMode} onChange={(e) => setClientForm((f) => ({ ...f, gstMode: e.target.value }))} style={inputStyle}>
+                      <option value="profit">18% on Profit (GPM)</option>
+                      <option value="package">5% on Package</option>
+                      <option value="none">No GST</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Quote Valid Till</div>
+                    <input type="date" value={clientForm.quoteValidTill} onChange={(e) => setClientForm((f) => ({ ...f, quoteValidTill: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Pax (Adults / Children / Infants)</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input type="number" value={clientForm.adults} onChange={(e) => setClientForm((f) => ({ ...f, adults: e.target.value }))} placeholder="Adults" style={{ ...inputStyle, flex: 1, padding: '6px 8px' }} />
+                      <input type="number" value={clientForm.children} onChange={(e) => setClientForm((f) => ({ ...f, children: e.target.value }))} placeholder="Child" style={{ ...inputStyle, flex: 1, padding: '6px 8px' }} />
+                      <input type="number" value={clientForm.infants} onChange={(e) => setClientForm((f) => ({ ...f, infants: e.target.value }))} placeholder="Infant" style={{ ...inputStyle, flex: 1, padding: '6px 8px' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Rooms</div>
+                    <input type="number" value={clientForm.rooms} onChange={(e) => setClientForm((f) => ({ ...f, rooms: e.target.value }))} placeholder="1" style={inputStyle} />
+                  </div>
+                  {deal.forfeitAmount > 0 && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Forfeit Amount / Note</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input type="number" value={clientForm.forfeitAmount} onChange={(e) => setClientForm((f) => ({ ...f, forfeitAmount: e.target.value }))} placeholder="₹0" style={{ ...inputStyle, flex: '0 0 130px' }} />
+                        <input value={clientForm.forfeitNote} onChange={(e) => setClientForm((f) => ({ ...f, forfeitNote: e.target.value }))} placeholder="Why forfeited" style={{ ...inputStyle, flex: 1 }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="v2-client-grid">
