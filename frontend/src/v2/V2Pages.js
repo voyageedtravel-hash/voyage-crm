@@ -273,24 +273,88 @@ const IconSparkle = () => <span style={{ display: 'inline-block' }}>✦</span>;
 
 /* ─── DASHBOARD ──────────────────────────────────────── */
 
+function DailyBriefModal({ leads, booked, stats, onClose }) {
+  const [brief, setBrief] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const followUpsToday = leads.filter((l) => l.followUpDate === today);
+    const hotLeads = leads.filter((l) => categorize(l) === 'hot' && !isBookedStage(l));
+    const vendorDueList = [];
+    booked.forEach((d) => {
+      dealVendors(d).forEach((v) => {
+        const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
+        const paid = sumBy(v.payments, 'amount');
+        if (cost - paid > 0.5) vendorDueList.push({ deal: d.dealNumber || clientName(d), vendor: v.name || v.hotelName || '?', due: Math.round(cost - paid) });
+      });
+    });
+    const ctx = {
+      today, totalLeads: leads.length, bookedDeals: booked.length,
+      collections: stats.collections, clientDue: stats.clientDue,
+      vendorDue: stats.vendorDue, netProfit: stats.netProfit,
+      followUpsToday: followUpsToday.map((l) => ({ client: clientName(l), destination: destination(l), phone: l.contactNo })),
+      hotLeads: hotLeads.slice(0, 5).map((l) => ({ client: clientName(l), destination: destination(l) })),
+      urgentVendorPayments: vendorDueList.sort((a, b) => b.due - a.due).slice(0, 5),
+    };
+    fetch(`${apiBase()}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 1000,
+        system: 'You are the daily business briefing assistant for Voyage-Ed Travels. Generate a short, action-oriented morning brief in Hinglish (mostly English, casual Hindi where natural). Cover: 1) Key numbers today (collections, due, profit) 2) Follow-ups due today (name each client) 3) Hot leads to chase 4) Urgent vendor payments. Keep it under 250 words, punchy, with clear action items. Use emojis sparingly.',
+        messages: [{ role: 'user', content: 'Generate today\'s business brief:\n' + JSON.stringify(ctx) }],
+      }),
+    }).then((r) => r.json()).then((data) => {
+      const text = (data.content || []).map((c) => c.text || '').join('');
+      setBrief(text || 'Could not generate brief.');
+    }).catch(() => setBrief('⚠️ Could not connect to AI — check your internet connection.'))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 560, maxWidth: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>📋 Today's Business Brief</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Generating your daily brief…</div>
+          ) : (
+            <div style={{ whiteSpace: 'pre-line', fontSize: 13.5, lineHeight: 1.8, color: '#1a2c52' }}>{brief}</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardV2({ leads, onDealClick }) {
+  const [drilldown, setDrilldown] = useState(null); // null | {title, deals, columns}
   // Compute KPIs from real data
+  const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
   const stats = useMemo(() => {
-    // Match V1's business logic exactly: vendor cost, profit, and collections
-    // are only meaningful once a deal is actually Booked/Completed. Many
-    // leads have vendor pricing filled in during quoting (before booking),
-    // so summing across ALL leads wildly inflates "Vendor Payments" —
-    // V1's own dashboard rollup filters allDeals.filter(isBookedStage) for
-    // exactly this reason.
-    const booked = leads.filter(isBookedStage);
-    let collections = 0, profit = 0, vendorPmts = 0;
+    let collections = 0, profit = 0, vendorPmts = 0, gst = 0, vendorPaid = 0;
     booked.forEach((l) => {
       collections += paidINR(l);
       vendorPmts += costINR(l);
       profit += profitINR(l);
+      gst += gstINR(l);
+      const vs = dealVendors(l);
+      vendorPaid += vs.reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
     });
-    return { collections, bookings: booked.length, profit, vendorPmts };
-  }, [leads]);
+    const vendorDue = Math.max(0, vendorPmts - vendorPaid);
+    const clientDue = booked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0);
+    return { collections, bookings: booked.length, profit, vendorPmts, gst, netProfit: profit - gst, vendorPaid, vendorDue, clientDue };
+  }, [booked]);
+
+  const openDrilldown = (title, filterFn, valueFn, valueLabel) => {
+    const deals = (filterFn ? booked.filter(filterFn) : booked).map((d) => ({
+      deal: d, value: valueFn(d),
+    })).sort((a, b) => b.value - a.value);
+    setDrilldown({ title, deals, valueLabel });
+  };
 
   // Upcoming departures — booked deals, most recently updated first
   // (travelDates is free-text in this CRM, not a structured date, so we
@@ -348,10 +412,15 @@ function DashboardV2({ leads, onDealClick }) {
         </div>
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
-          <button className="v2-icon-btn" title="AI Insights"><IconSparkle /></button>
+          <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
           <button className="v2-icon-btn" title="Quick add">⊕</button>
         </div>
       </div>
+
+      {/* Daily Brief modal */}
+      {drilldown && drilldown.title === 'daily-brief' && (
+        <DailyBriefModal leads={leads} booked={booked} stats={stats} onClose={() => setDrilldown(null)} />
+      )}
 
       {/* Business Health hero */}
       <div className="v2-health-hero">
@@ -379,31 +448,58 @@ function DashboardV2({ leads, onDealClick }) {
       <p className="v2-section-sub">Live numbers from your CRM</p>
 
       <div className="v2-kpi-grid">
-        <div className="v2-kpi-card">
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Collections Breakdown', null, paidINR, 'Collected')}>
           <div className="v2-kpi-icon green">◐</div>
           <div className="v2-kpi-label">Collections</div>
           <div className="v2-kpi-value">{fmtINR(stats.collections)}</div>
-          <div className="v2-kpi-delta up">▲ Total client paid</div>
+          <div className="v2-kpi-delta up">▲ Click for breakdown</div>
         </div>
-        <div className="v2-kpi-card">
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Balance Due', (d) => netSellINR(d) - paidINR(d) > 0, (d) => netSellINR(d) - paidINR(d), 'Due')}>
           <div className="v2-kpi-icon blue">◈</div>
-          <div className="v2-kpi-label">Confirmed Bookings</div>
-          <div className="v2-kpi-value">{stats.bookings}</div>
-          <div className="v2-kpi-delta up">Active deals</div>
+          <div className="v2-kpi-label">Client Balance Due</div>
+          <div className="v2-kpi-value">{fmtINR(stats.clientDue)}</div>
+          <div className="v2-kpi-delta">{stats.bookings} bookings · Click for deals</div>
         </div>
-        <div className="v2-kpi-card">
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Cost Breakdown', null, costINR, 'Cost')}>
           <div className="v2-kpi-icon amber">◇</div>
           <div className="v2-kpi-label">Vendor Payments</div>
           <div className="v2-kpi-value">{fmtINR(stats.vendorPmts)}</div>
-          <div className="v2-kpi-delta up">Total to suppliers</div>
+          <div className="v2-kpi-delta">Paid: {fmtINR(stats.vendorPaid)} · Due: {fmtINR(stats.vendorDue)}</div>
         </div>
-        <div className="v2-kpi-card">
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Profit Breakdown (GPM − GST)', null, (d) => profitINR(d) - gstINR(d), 'Net Profit')}>
           <div className="v2-kpi-icon gold">◆</div>
-          <div className="v2-kpi-label">Total Profit (GPM)</div>
-          <div className="v2-kpi-value">{fmtINR(stats.profit)}</div>
-          <div className="v2-kpi-delta up">Across all deals</div>
+          <div className="v2-kpi-label">Net Profit</div>
+          <div className="v2-kpi-value">{fmtINR(stats.netProfit)}</div>
+          <div className="v2-kpi-delta">GPM {fmtINR(stats.profit)} − GST {fmtINR(stats.gst)}</div>
         </div>
       </div>
+
+      {/* Drilldown modal */}
+      {drilldown && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={(e) => { if (e.target === e.currentTarget) setDrilldown(null); }}>
+          <div style={{ background: '#fff', borderRadius: 18, width: 660, maxWidth: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>{drilldown.title}</h3>
+              <button onClick={() => setDrilldown(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 18px' }}>
+              <table className="info" style={{ width: '100%' }}>
+                <thead><tr><th>Deal</th><th>Client</th><th>Destination</th><th style={{ textAlign: 'right' }}>{drilldown.valueLabel}</th></tr></thead>
+                <tbody>
+                  {drilldown.deals.map((row, i) => (
+                    <tr key={i} onClick={() => { setDrilldown(null); onDealClick(row.deal); }} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontSize: 11.5, color: '#6b7a99' }}>{row.deal.dealNumber || '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{clientName(row.deal)}</td>
+                      <td>{destination(row.deal) || '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: row.value >= 0 ? '#0d1b3e' : '#dc2626' }}>{fmtINR(row.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Two-column: departures + follow-ups */}
       <div className="v2-two-col">
@@ -2089,6 +2185,83 @@ function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
         </div>
       )}
     </ModalShell>
+  );
+}
+
+function AIItineraryModal({ deal, onClose }) {
+  const [result, setResult] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const generate = async () => {
+    setLoading(true); setErr('');
+    try {
+      const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''})`).join('; ');
+      const flights = (deal.flightVendors || []).map((f) => {
+        const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
+        return secs.map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ');
+      }).join('; ');
+      const land = (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
+      const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
+      const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
+
+      const prompt = `Generate a detailed, compelling day-wise itinerary for this trip. Write in a warm, professional tone that a travel agent would send to a client on WhatsApp.\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nFormat each day as "Day 1: Title\\nDetails..." Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a Voyage-Ed Tip where relevant. Keep it practical and specific, not generic.`;
+
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries. Use Hinglish sparingly (mostly English with occasional Hindi). Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI error');
+      const text = (data.content || []).map((c) => c.text || '').join('');
+      setResult(text);
+    } catch (e) {
+      setErr(e.message || 'Could not generate');
+    }
+    setLoading(false);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(result).then(() => window.veToast && window.veToast('Copied to clipboard ✓', 'success'));
+  };
+  const shareWhatsApp = () => {
+    const phone = (deal.contactNo || '').replace(/[^\d]/g, '');
+    const num = phone.length === 10 ? '91' + phone : phone;
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(result)}`, '_blank');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 640, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>✨ AI Itinerary Builder</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
+          {!result && !loading && (
+            <div style={{ textAlign: 'center', padding: '30px 10px' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>✨</div>
+              <div style={{ fontSize: 14, color: '#33446b', fontWeight: 600, marginBottom: 6 }}>Generate a day-wise itinerary for {destination(deal) || 'this trip'}</div>
+              <div style={{ fontSize: 12, color: '#6b7a99', marginBottom: 20 }}>AI will use this deal's flights, hotels, cruise, and existing land notes to build a detailed, client-ready itinerary.</div>
+              <button className="v2-cta" onClick={generate}>✨ Generate Itinerary</button>
+            </div>
+          )}
+          {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Writing your itinerary… (15-30 seconds)</div>}
+          {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5 }}>{err}</div>}
+          {result && (
+            <>
+              <div style={{ whiteSpace: 'pre-line', fontSize: 13, lineHeight: 1.8, color: '#1a2c52', background: '#f9fafc', borderRadius: 12, padding: '18px 20px', marginBottom: 14 }}>{result}</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="v2-cta" onClick={copyToClipboard}>📋 Copy</button>
+                {deal.contactNo && <button className="v2-cta" onClick={shareWhatsApp} style={{ background: '#15803d' }}>📱 WhatsApp</button>}
+                <button className="v2-cta" onClick={generate} style={{ background: '#6b7a99' }}>🔄 Regenerate</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4336,10 +4509,40 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     return [deal, ...others];
   }, [deal, allLeads]);
 
+  const waPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
+  const waNum = waPhone.length === 10 ? '91' + waPhone : waPhone;
   const waLink = () => {
-    const phone = (deal.contactNo || '').replace(/[^\d]/g, '');
     const msg = encodeURIComponent(`Hi ${clientName(deal)}, following up on your ${destination(deal) || 'trip'} booking with Voyage-Ed.`);
-    return phone ? `https://wa.me/${phone.length === 10 ? '91' + phone : phone}?text=${msg}` : null;
+    return waPhone ? `https://wa.me/${waNum}?text=${msg}` : null;
+  };
+  const waTemplates = {
+    quote: () => {
+      const s = sellINR(deal);
+      return `https://wa.me/${waNum}?text=${encodeURIComponent(
+        `Hi ${clientName(deal)},\n\nYour ${destination(deal)} trip quote is ready!\n\n` +
+        `📍 ${destination(deal)}${deal.travelDates ? '\n📅 ' + deal.travelDates : ''}\n` +
+        (s > 0 ? `💰 Package: ₹${s.toLocaleString('en-IN')} (all inclusive)\n\n` : '\n') +
+        `Shall I send you the detailed itinerary?\n\nVishal Sharma\nVoyage-Ed Travels\n📞 +91 70096 59048`
+      )}`;
+    },
+    followUp: () => `https://wa.me/${waNum}?text=${encodeURIComponent(
+      `Hi ${clientName(deal)},\n\nJust checking in on your ${destination(deal)} trip enquiry. Would you like to proceed with the booking?\n\n` +
+      `Happy to answer any questions or adjust the itinerary.\n\nVishal Sharma\nVoyage-Ed Travels`
+    )}`,
+    paymentReminder: () => {
+      const bal = Math.max(0, netSellINR(deal) - paidINR(deal));
+      return `https://wa.me/${waNum}?text=${encodeURIComponent(
+        `Hi ${clientName(deal)},\n\nGentle reminder — ₹${bal.toLocaleString('en-IN')} is pending for your ${destination(deal)} trip (Ref: ${deal.dealNumber || 'N/A'}).\n\n` +
+        `Please complete the payment at your earliest so we can confirm all services before departure.\n\n` +
+        `Bank: HDFC Bank\nA/c: 50200118915748\nIFSC: HDFC0001556\nName: Voyage-Ed Travels\n\nVishal Sharma\n📞 +91 70096 59048`
+      )}`;
+    },
+    confirm: () => `https://wa.me/${waNum}?text=${encodeURIComponent(
+      `Hi ${clientName(deal)},\n\n✅ Great news! Your ${destination(deal)} trip is CONFIRMED.\n\n` +
+      `📅 ${deal.travelDates || 'Dates as discussed'}\n` +
+      `📄 Ref: ${deal.dealNumber || ''}\n\n` +
+      `We'll share your detailed itinerary & documents shortly. Excited for your trip!\n\nVishal Sharma\nVoyage-Ed Travels`
+    )}`,
   };
   const mailLink = () => {
     if (!deal.email) return null;
@@ -4433,8 +4636,13 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             {!isBooked && <span className="v2-hero-chip dark">◇ {stageOf(deal).toUpperCase()}</span>}
           </div>
           <div className="v2-hero-actions">
-            {waLink() ? (
-              <a href={waLink()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>◆ WhatsApp</a>
+            {waPhone ? (
+              <>
+                <a href={waTemplates.quote()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>💬 Quote</a>
+                <a href={waTemplates.followUp()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>🔔 Follow-up</a>
+                <a href={waTemplates.paymentReminder()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>💰 Pay Reminder</a>
+                <a href={waTemplates.confirm()} target="_blank" rel="noreferrer" className="v2-hero-btn" style={{ textDecoration: 'none' }}>🎉 Confirm</a>
+              </>
             ) : (
               <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No phone number on file', 'warning')}>◆ WhatsApp</button>
             )}
@@ -4448,6 +4656,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
             )}
             <button className="v2-hero-btn gold" onClick={() => openProposalV2(deal)}>📄 Proposal PDF</button>
+            <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -5440,6 +5649,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} />}
         </div>
 
         {/* Right sidebar */}
@@ -5592,6 +5802,51 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="v2-side-card">
+            <div className="v2-side-panel-head">
+              <span className="v2-side-panel-title">Custom Pricing Rows</span>
+              <button
+                style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+                onClick={async () => {
+                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', amount: '', kind: 'add' }];
+                  const updated = await patchDeal(deal._id, { pricingRows: rows });
+                  setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                }}
+              >+ Add Row</button>
+            </div>
+            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance ₹5,000")</div>
+            {(deal.pricingRows || []).map((pr) => (
+              <div key={pr.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f4f7fc' }}>
+                <input
+                  value={pr.label || ''} placeholder="Description"
+                  onChange={async (e) => {
+                    const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, label: e.target.value } : r);
+                    const updated = await patchDeal(deal._id, { pricingRows: rows });
+                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                  }}
+                  style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 12 }}
+                />
+                <input
+                  type="number" value={pr.amount || ''} placeholder="₹"
+                  onChange={async (e) => {
+                    const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, amount: e.target.value } : r);
+                    const updated = await patchDeal(deal._id, { pricingRows: rows });
+                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                  }}
+                  style={{ ...inputStyle, width: 80, padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
+                />
+                <button
+                  onClick={async () => {
+                    const rows = (deal.pricingRows || []).filter((r) => r.id !== pr.id);
+                    const updated = await patchDeal(deal._id, { pricingRows: rows });
+                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                >✕</button>
+              </div>
+            ))}
           </div>
 
           <div className="v2-side-card">
