@@ -2102,6 +2102,55 @@ function buildCombinedProposalHTMLV2(deals) {
 </body></html>`;
 }
 
+// ─── QUOTATION PDF — AI-powered, lighter than Proposal, meant for
+// the quoting stage (before booking). AI generates a day-wise plan
+// from the deal's components, displayed alongside tier options and
+// a clean pricing breakdown. Uses the deal's real flights/hotels/
+// land/cruise data as context, not hardcoded placeholders.
+function buildQuotationHTMLV2(deal, aiItinerary) {
+  const pax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
+  const sell = sellINR(deal);
+  const perPax = pax > 0 ? Math.round(sell / pax) : sell;
+  const ref = deal.dealNumber || 'VE-QUOTE';
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
+  const flights = (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name })));
+  const cruises = (deal.cruiseVendors || []).filter((c) => c.shipName || c.cruiseLine);
+  const _tiers = (deal.useTiers ? (deal.tiers || []) : []).filter((t) => Number(t.totalPrice) > 0);
+
+  const flightRows = flights.map((s) => `<tr><td style="padding:8px;border:1px solid #e3eaf7"><b>${escHtml(s.from)}</b> → <b>${escHtml(s.to)}</b></td><td style="padding:8px;border:1px solid #e3eaf7">${escHtml(s.airline || '')}</td><td style="padding:8px;border:1px solid #e3eaf7">${escHtml(s.date || '')} ${escHtml(s.depTime || '')}–${escHtml(s.arrTime || '')}</td></tr>`).join('');
+  const hotelRows = hotels.map((h) => `<div style="border:1px solid #e3eaf7;border-radius:10px;padding:14px;margin-bottom:10px;background:#fff">${h.photoUrl ? `<img src="${escHtml(h.photoUrl)}" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-bottom:10px" onerror="this.style.display='none'"/>` : ''}<div style="font-size:15px;font-weight:700;color:#0d1b3e">${escHtml(h.hotelName)} ${h.starRating ? '★'.repeat(Number(h.starRating)) : ''}</div><div style="font-size:12px;color:#5a6b8c">${escHtml(h.city || '')} · ${escHtml(h.roomCategory || '')} · ${escHtml(h.checkIn || '')} → ${escHtml(h.checkOut || '')}</div></div>`).join('');
+  const cruiseRows = cruises.map((c) => `<div style="border:1px solid #e3eaf7;border-radius:10px;padding:14px;margin-bottom:10px;background:#fff"><div style="font-size:15px;font-weight:700;color:#0d4f8b">🚢 ${escHtml(c.shipName || c.cruiseLine)}</div><div style="font-size:12px;color:#5a6b8c">${escHtml(c.cabinCategory || '')} · Deck ${escHtml(c.deckNumber || '—')} · ${escHtml(c.portOfEmbarkation || '')} → ${escHtml(c.portOfDisembarkation || '')} · ${escHtml(c.checkIn || '')} → ${escHtml(c.checkOut || '')}</div></div>`).join('');
+  const tierCards = _tiers.length ? `<h3 style="color:#0d1b3e;margin:18px 0 10px">🏨 Stay Options</h3><div style="display:flex;gap:12px;flex-wrap:wrap">${_tiers.map((t) => `<div style="flex:1;min-width:200px;border:${t.booked ? '2px solid #c9a84c' : '1px solid #e3eaf7'};border-radius:12px;padding:14px;background:${t.booked ? '#fdf9ee' : '#fff'}"><div style="font-weight:700;color:#0d1b3e">${'★'.repeat(t.star)} ${escHtml(t.label)}</div>${(t.hotels || []).map((th) => `<div style="font-size:12px;color:#5a6b8c;margin-top:4px">${escHtml(th.hotelName || '—')}${th.city ? ', ' + escHtml(th.city) : ''}</div>`).join('')}<div style="font-size:18px;font-weight:800;color:#c9961a;margin-top:8px">₹${(pax > 0 ? Math.round(Number(t.totalPrice) / pax) : Number(t.totalPrice)).toLocaleString('en-IN')}<span style="font-size:11px;color:#5a6b8c"> /person</span></div>${t.booked ? '<div style="font-size:10px;color:#15803d;font-weight:700;margin-top:4px">✓ YOUR CHOICE</div>' : ''}</div>`).join('')}</div>` : '';
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Quotation — ${escHtml(destination(deal))}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1a2c52}@media print{.noprint{display:none}}</style></head><body>
+<div style="max-width:780px;margin:0 auto;background:#fff;padding:36px 40px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><div style="font-size:10px;letter-spacing:3px;color:#c9961a;font-weight:800">VOYAGE-ED TRAVELS · QUOTATION</div><div style="font-family:Georgia,serif;font-size:28px;font-weight:700;color:#0d1b3e;margin-top:4px">${escHtml(destination(deal) || 'Your Trip')}</div><div style="font-size:12px;color:#5a6b8c;margin-top:4px">${escHtml(deal.travelDates || '')} · ${pax} traveller${pax !== 1 ? 's' : ''} · Ref: ${escHtml(ref)}</div></div>
+    <div style="text-align:right;font-size:11px;color:#5a6b8c">Prepared for <b style="color:#0d1b3e">${escHtml(clientName(deal))}</b><br>Valid 7 days</div>
+  </div>
+
+  <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:14px;padding:20px 24px;color:#fff;margin-bottom:22px">
+    <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">INDICATIVE PRICE${_tiers.length ? ' (starting from)' : ''}</div>
+    <div style="font-size:32px;font-weight:800;margin-top:4px">₹${(_tiers.length ? Math.min(..._tiers.map((t) => pax > 0 ? Math.round(Number(t.totalPrice) / pax) : Number(t.totalPrice))) : perPax).toLocaleString('en-IN')}<span style="font-size:13px;opacity:.8"> /person (all inclusive)</span></div>
+    ${sell > 0 && !_tiers.length ? `<div style="font-size:12px;opacity:.75;margin-top:4px">Total package ₹${sell.toLocaleString('en-IN')}</div>` : ''}
+  </div>
+
+  ${flights.length ? `<h3 style="color:#0d1b3e;margin:0 0 10px">✈️ Flights</h3><table style="width:100%;border-collapse:collapse;margin-bottom:18px"><thead><tr><th style="text-align:left;padding:8px;background:#f4f6fb;border:1px solid #e3eaf7">Route</th><th style="text-align:left;padding:8px;background:#f4f6fb;border:1px solid #e3eaf7">Airline</th><th style="text-align:left;padding:8px;background:#f4f6fb;border:1px solid #e3eaf7">Date & Time</th></tr></thead><tbody>${flightRows}</tbody></table>` : ''}
+  ${hotelRows ? `<h3 style="color:#0d1b3e;margin:0 0 10px">🏨 Hotels</h3>${hotelRows}` : ''}
+  ${cruiseRows ? `<h3 style="color:#0d1b3e;margin:0 0 10px">🚢 Cruise</h3>${cruiseRows}` : ''}
+  ${tierCards}
+  ${aiItinerary ? `<h3 style="color:#0d1b3e;margin:22px 0 10px">🗓️ Day-wise Itinerary</h3><div style="background:#f9fafc;border:1px solid #e3eaf7;border-radius:12px;padding:18px 20px;font-size:12.5px;line-height:1.8;white-space:pre-line;color:#33415e">${escHtml(aiItinerary)}</div>` : ''}
+
+  <div style="margin-top:26px;padding-top:16px;border-top:2px solid #e3eaf7;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div style="font-size:12px;color:#5a6b8c">This is an indicative quotation, not a confirmed booking. Final prices subject to availability at the time of booking.</div>
+    <div style="text-align:right;font-size:12px"><b style="color:#0d1b3e">Voyage-Ed Travels</b><br>📞 +91 70096 59048 · enquiry@voyage-ed.com</div>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
 function openCombinedProposalV2(deals) {
   const w = window.open('', '_blank');
   if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
@@ -4269,6 +4318,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
       quoteValidTill: deal.quoteValidTill || '',
       forfeitAmount: deal.forfeitAmount != null ? String(deal.forfeitAmount) : '',
       forfeitNote: deal.forfeitNote || '',
+      customCancelPolicy: deal.customCancelPolicy || '',
       adults: deal.adults != null ? String(deal.adults) : '',
       children: deal.children != null ? String(deal.children) : '',
       infants: deal.infants != null ? String(deal.infants) : '',
@@ -4656,6 +4706,12 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
             )}
             <button className="v2-hero-btn gold" onClick={() => openProposalV2(deal)}>📄 Proposal PDF</button>
+            <button className="v2-hero-btn" onClick={() => {
+              const w = window.open('', '_blank');
+              if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
+              try { w.document.write(buildQuotationHTMLV2(deal, null)); w.document.close(); }
+              catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
+            }}>📋 Quotation PDF</button>
             <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
           </div>
         </div>
@@ -4917,6 +4973,10 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                       </div>
                     </div>
                   )}
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div className="v2-client-field-label" style={{ marginBottom: 6 }}>Custom Cancellation Policy (leave blank for standard slab)</div>
+                    <textarea value={clientForm.customCancelPolicy} onChange={(e) => setClientForm((f) => ({ ...f, customCancelPolicy: e.target.value }))} rows={2} placeholder="e.g. 100% non-refundable due to peak-season supplier terms" style={{ ...inputStyle, resize: 'vertical' }} />
+                  </div>
                 </div>
               ) : (
                 <div className="v2-client-grid">
