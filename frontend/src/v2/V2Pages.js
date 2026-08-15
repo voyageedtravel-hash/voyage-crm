@@ -2084,6 +2084,134 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
 }
 
 
+// ─── HOTEL VOUCHER T&C — extracted verbatim from TripJack's standard
+// voucher policy (the exact T&C Vishal's clients already receive from
+// the booking platform). These are the DEFAULT terms every hotel
+// voucher should carry. ──────────────────────────────────────────────
+const HOTEL_VOUCHER_TC = [
+  'You must present this confirmation voucher together with photo ID to the hotel receptionist upon check-in.',
+  'If you have any questions regarding your booking, or you require to amend the booking, you must contact us at enquiry@voyage-ed.com or +91 70096 59048.',
+  'For any room facilities, hotel facilities and car parking enquiries, please contact the hotel directly.',
+  'Cancellation or amendment charges applicable as per policy and may differ for each service.',
+  'Hotel may ask for credit card or cash deposit for the extra services at the time of check-in.',
+  'All extra charges should be collected directly from clients prior to departure such as parking, phone calls, room service, city tax, etc.',
+  'We don\'t accept any responsibility for additional expenses due to the changes or delays in air, road, rail, sea or indeed of any other causes; all such expenses will have to be borne by passengers.',
+  'In case of wrong residency & nationality selected by user at the time of booking; the supplement charges may be applicable and need to be paid to the hotel by guest on check-in/checkout.',
+  'Any special request for bed type, early check-in, late checkout, smoking rooms, etc are not guaranteed as subject to availability at the time of check-in.',
+  'Standard check-in time is 1500 hours and check-out time is 1100 hours. Early check-in/late checkout is subject to availability of rooms.',
+  'Request you to be punctual for all tours and transfers. Maximum waiting time shall be 05 minutes for SIC and 10 minutes for Private.',
+  'For any amendment requests in the Itinerary, please advise our manager at least 72 hours in advance and the request shall be subject to availability.',
+  'Please take good care of your personal belongings. We are not responsible for loss, damage or theft of cash, jewellery or any valuables left unattended in our vehicles.',
+  'In case of No Show / Last Minute cancellation or Amendment will be charged under 100% charges and no refund will be made at any situation.',
+  'Full cancellation charges are applicable on early check-out unless otherwise specified.',
+];
+
+function buildVouchersHTMLV2(deal) {
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
+  const flights = (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name })));
+  // eslint-disable-next-line no-unused-vars
+  const trains = (deal.trainVendors || []).flatMap((t) => [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, trainName: t.name })));
+  const ref = deal.dealNumber || 'VE-VOUCHER';
+  const guest = clientName(deal);
+  const pax = `${deal.adults || 0} Adults${Number(deal.children) > 0 ? ', ' + deal.children + ' Children' : ''}`;
+  const fmtD = (d) => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return d; } };
+
+  const hotelCards = hotels.map((h) => {
+    const nights = (() => { let n = Number(h.nights); if (!n && h.checkIn && h.checkOut) { n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000); } return n > 0 ? n : '—'; })();
+    return `
+    <div style="page-break-inside:avoid;border:1px solid #e3eaf7;border-radius:14px;margin-bottom:20px;overflow:hidden;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:#f8fafd;border-bottom:1px solid #e3eaf7">
+        <div><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800">HOTEL VOUCHER</div><div style="font-size:20px;font-weight:700;color:#0d1b3e;margin-top:4px">${escHtml(h.hotelName)}</div></div>
+        <img src="${VE_LOGO}" style="height:36px" onerror="this.style.display='none'"/>
+      </div>
+      <div style="padding:16px 20px">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <tr><td style="padding:8px 0;color:#6b7a99;width:160px">CONFIRMATION NO.</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${escHtml(h.confirmationNo) || '<span style="color:#c9961a">To be advised</span>'}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">CITY</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${escHtml(h.city || '—')}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">ROOM CATEGORY</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${escHtml(h.roomCategory || 'Standard Room')}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">CHECK-IN</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${fmtD(h.checkIn)}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">CHECK-OUT</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${fmtD(h.checkOut)}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">NIGHTS</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${nights}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">GUESTS</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${pax}</td></tr>
+        </table>
+        <div style="border-top:1px dashed #e3eaf7;margin-top:10px;padding-top:10px">
+          <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">GUEST NAMES</div>
+          <div style="font-size:13px;font-weight:600;color:#0d1b3e">${(deal.travellers || []).map((t) => escHtml([t.salutation, t.firstName, t.lastName].filter(Boolean).join(' ') || 'Guest')).join('<br>') || escHtml(guest)}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const landVendors = (deal.landVendors || []).filter((l) => l.itinerary || l.name);
+  const landCards = landVendors.map((l) => `
+    <div style="page-break-inside:avoid;border:1px solid #e3eaf7;border-radius:14px;margin-bottom:20px;overflow:hidden;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:#f8fafd;border-bottom:1px solid #e3eaf7">
+        <div><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800">SERVICE VOUCHER</div><div style="font-size:20px;font-weight:700;color:#0d1b3e;margin-top:4px">Tours &amp; Transfers</div></div>
+        <img src="${VE_LOGO}" style="height:36px" onerror="this.style.display='none'"/>
+      </div>
+      <div style="padding:16px 20px">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:12px">
+          <tr><td style="padding:8px 0;color:#6b7a99;width:160px">CONFIRMATION NO.</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${escHtml(l.confirmationNo) || '<span style="color:#c9961a">To be advised</span>'}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">DESTINATION</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${escHtml(destination(deal) || '—')}</td></tr>
+          <tr><td style="padding:8px 0;color:#6b7a99">GUESTS</td><td style="padding:8px 0;font-weight:700;color:#0d1b3e">${pax}</td></tr>
+        </table>
+        ${l.itinerary ? `<div style="border-top:1px dashed #e3eaf7;padding-top:12px"><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">SERVICES INCLUDED</div><div style="font-size:12.5px;line-height:2;color:#33415e;white-space:pre-line">${escHtml(l.itinerary).replace(/^(Day\s*\d+)/gim, '<b style="color:#c9961a">$1</b>')}</div></div>` : ''}
+        ${l.vendorTC ? `<div style="border-top:1px dashed #e3eaf7;margin-top:12px;padding-top:12px"><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">VENDOR TERMS &amp; CONDITIONS</div><div style="font-size:11px;line-height:1.7;color:#5a6b8c;white-space:pre-line">${escHtml(l.vendorTC)}</div></div>` : ''}
+        ${l.meetingPoints ? `<div style="border-top:1px dashed #e3eaf7;margin-top:12px;padding-top:12px"><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">MEETING POINTS</div><div style="font-size:11.5px;line-height:1.7;color:#33415e;white-space:pre-line">${escHtml(l.meetingPoints)}</div></div>` : ''}
+        ${l.emergencyContact ? `<div style="border-top:1px dashed #e3eaf7;margin-top:12px;padding-top:12px"><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:6px">EMERGENCY CONTACT</div><div style="font-size:12px;color:#0d1b3e;font-weight:600">${escHtml(l.emergencyContact)}</div></div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  const flightRows = flights.length ? `
+    <div style="page-break-inside:avoid;border:1px solid #e3eaf7;border-radius:14px;margin-bottom:20px;overflow:hidden;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:#f8fafd;border-bottom:1px solid #e3eaf7">
+        <div><div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800">FLIGHT DETAILS</div></div>
+      </div>
+      <div style="padding:16px 20px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#f4f6fb"><th style="padding:8px;text-align:left;color:#6b7a99">Route</th><th style="padding:8px;text-align:left;color:#6b7a99">Airline</th><th style="padding:8px;text-align:left;color:#6b7a99">Date</th><th style="padding:8px;text-align:left;color:#6b7a99">Dep → Arr</th></tr></thead>
+          <tbody>${flights.map((s) => `<tr><td style="padding:8px;border-top:1px solid #f0f2f7"><b>${escHtml(s.from)}</b> → <b>${escHtml(s.to)}</b></td><td style="padding:8px;border-top:1px solid #f0f2f7">${escHtml(s.airline || '')}</td><td style="padding:8px;border-top:1px solid #f0f2f7">${fmtD(s.date)}</td><td style="padding:8px;border-top:1px solid #f0f2f7">${escHtml(s.depTime || '')} → ${escHtml(s.arrTime || '')}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
+  const tcHTML = `
+    <div style="page-break-inside:avoid;margin-top:10px">
+      <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">TERMS &amp; CONDITIONS</div>
+      <div style="font-size:10.5px;line-height:1.7;color:#5a6b8c">
+        ${HOTEL_VOUCHER_TC.map((t, i) => `<div style="margin-bottom:4px"><b style="color:#0d1b3e">${i + 1}.</b> ${escHtml(t)}</div>`).join('')}
+      </div>
+    </div>`;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Vouchers — ${escHtml(ref)}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1a2c52}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+<div style="max-width:780px;margin:0 auto;padding:30px 20px">
+  <div style="text-align:center;margin-bottom:28px">
+    <div style="font-size:10px;letter-spacing:4px;color:#c9961a;font-weight:800">VOYAGE-ED TRAVELS</div>
+    <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;color:#0d1b3e;margin-top:4px">Travel Vouchers</div>
+    <div style="font-size:12px;color:#5a6b8c;margin-top:6px">Booking Ref <b style="color:#0d1b3e">${escHtml(ref)}</b> · ${escHtml(guest)} · ${escHtml(destination(deal) || '')}</div>
+  </div>
+  ${hotelCards}
+  ${landCards}
+  ${flightRows}
+  ${tcHTML}
+  <div style="margin-top:28px;text-align:center;border-top:1px solid #e3eaf7;padding-top:16px;font-size:11px;color:#6b7a99">
+    Voyage-Ed Travels · Suite 315, Regus, GMADA Aerocity, Mohali, Punjab 140306<br>
+    enquiry@voyage-ed.com &nbsp;|&nbsp; www.voyage-ed.com &nbsp;|&nbsp; +91 70096 59048
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
+function openVouchersV2(deal) {
+  const w = window.open('', '_blank');
+  if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
+  try { w.document.write(buildVouchersHTMLV2(deal)); w.document.close(); }
+  catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
+}
+
 function openProposalV2(deal) {
   const w = window.open('', '_blank');
   if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
@@ -2337,6 +2465,148 @@ function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
         </div>
       )}
     </ModalShell>
+  );
+}
+
+function LandVoucherAIModal({ deal, onClose }) {
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState(null); // {itinerary, meetingPoints, vendorTC, emergencyContact, pickupTimes}
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setExtracting(true); setErr('');
+    try {
+      const images = [];
+      for (const file of files) {
+        if (file.type === 'application/pdf') {
+          const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+          images.push({ type: 'image', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
+        } else {
+          const compressed = await new Promise((res, rej) => { imgToDataURL(file, (d) => res(d)); });
+          images.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: compressed.split(',')[1] } });
+        }
+      }
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6', max_tokens: 3000,
+          system: 'You extract ALL details from a DMC/vendor land voucher for a travel agency. Output ONLY valid JSON, no markdown: {"vendorName":string,"confirmationNo":string,"itinerary":string,"meetingPoints":string,"vendorTC":string,"emergencyContact":string}. itinerary = day-wise with pickup times and remarks (e.g. "Day 1 (15/08): Arrival at Bangkok Airport, transfer to Pattaya Hotel - PVT CAR, Pickup: 13:50HRS, Meet at Rep Point Only\\nDay 2 (16/08): Coral Island by Speedboat + Lunch - SIC, Pickup: 09:00-09:30HRS, Wait at Hotel Lobby"). meetingPoints = ALL airport meeting points mentioned (gate numbers, terminal info). vendorTC = ALL terms & conditions text, numbered. emergencyContact = contact numbers for local and India office. Extract EVERYTHING — do not summarize or skip any T&C clause.',
+          messages: [{ role: 'user', content: [...images, { type: 'text', text: 'Extract all details from this vendor land/tours voucher. Get every T&C clause, every meeting point, every pickup time, every emergency number.' }] }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI error');
+      const raw = (data.content || []).map((c) => c.text || '').join('').replace(/```json|```/g, '').trim();
+      const j = JSON.parse(raw);
+      setExtracted(j);
+      window.veToast && window.veToast('Vendor voucher extracted ✓', 'success');
+    } catch (ex) {
+      setErr(ex.message || 'Could not read — try a clearer image');
+    }
+    setExtracting(false);
+    e.target.value = '';
+  };
+
+  const saveToLand = async () => {
+    if (!extracted) return;
+    setSaving(true);
+    try {
+      const lands = deal.landVendors || [];
+      if (lands.length > 0) {
+        const updatedLands = lands.map((l, i) => i === 0 ? {
+          ...l,
+          itinerary: extracted.itinerary || l.itinerary,
+          vendorTC: extracted.vendorTC || l.vendorTC || '',
+          meetingPoints: extracted.meetingPoints || l.meetingPoints || '',
+          emergencyContact: extracted.emergencyContact || l.emergencyContact || '',
+          confirmationNo: extracted.confirmationNo || l.confirmationNo || '',
+        } : l);
+        await patchDeal(deal._id, { landVendors: updatedLands });
+      } else {
+        const newLand = {
+          id: 'ld_' + Date.now(), name: extracted.vendorName || 'DMC',
+          currency: 'INR', costPrice: 0, sellingPrice: 0, exchangeRate: 1,
+          itinerary: extracted.itinerary || '', confirmationNo: extracted.confirmationNo || '',
+          vendorTC: extracted.vendorTC || '', meetingPoints: extracted.meetingPoints || '',
+          emergencyContact: extracted.emergencyContact || '', payments: [],
+        };
+        await patchDeal(deal._id, { landVendors: [newLand] });
+      }
+      window.veToast && window.veToast('Saved to land vendor — now click "🎫 Vouchers" to generate', 'success');
+      onClose();
+    } catch (e) {
+      setErr('Could not save');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 680, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🗺️ Scan Vendor Land Voucher</h3>
+            <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Upload the vendor's original voucher (like Asian Roots) — AI extracts itinerary, pickup times, meeting points, T&C, emergency contacts</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
+          {!extracted && (
+            <div style={{ textAlign: 'center', padding: '20px 10px' }}>
+              <div style={{ background: '#faf7f0', border: '2px dashed #c9a84c', borderRadius: 14, padding: 30, cursor: extracting ? 'wait' : 'pointer' }}>
+                <label style={{ cursor: extracting ? 'wait' : 'pointer' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>{extracting ? '⏳' : '📄'}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#0d1b3e' }}>
+                    {extracting ? 'AI reading vendor voucher…' : 'Upload vendor voucher (PDF or screenshot)'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7a99', marginTop: 6 }}>Supports PDF, JPG, PNG — AI will extract everything automatically</div>
+                  <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+                </label>
+              </div>
+            </div>
+          )}
+          {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5, marginBottom: 12 }}>{err}</div>}
+          {extracted && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {extracted.itinerary && (
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 6 }}>ITINERARY (with pickup times)</div>
+                  <div style={{ background: '#f9fafc', borderRadius: 10, padding: 14, fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-line', color: '#33415e' }}>{extracted.itinerary}</div>
+                </div>
+              )}
+              {extracted.meetingPoints && (
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 6 }}>MEETING POINTS</div>
+                  <div style={{ background: '#f9fafc', borderRadius: 10, padding: 14, fontSize: 12.5, lineHeight: 1.8, whiteSpace: 'pre-line', color: '#33415e' }}>{extracted.meetingPoints}</div>
+                </div>
+              )}
+              {extracted.vendorTC && (
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 6 }}>VENDOR T&C ({extracted.vendorTC.split('\n').filter(Boolean).length} clauses)</div>
+                  <div style={{ background: '#f9fafc', borderRadius: 10, padding: 14, fontSize: 11.5, lineHeight: 1.7, whiteSpace: 'pre-line', color: '#5a6b8c', maxHeight: 200, overflowY: 'auto' }}>{extracted.vendorTC}</div>
+                </div>
+              )}
+              {extracted.emergencyContact && (
+                <div>
+                  <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 6 }}>EMERGENCY CONTACTS</div>
+                  <div style={{ background: '#f0faf4', borderRadius: 10, padding: 14, fontSize: 13, fontWeight: 600, color: '#15803d', whiteSpace: 'pre-line' }}>{extracted.emergencyContact}</div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                <button className="v2-cta" onClick={saveToLand} disabled={saving}>{saving ? 'Saving…' : '✓ Save & Generate Vouchers'}</button>
+                <label style={{ cursor: 'pointer' }}>
+                  <button className="v2-cta" onClick={() => setExtracted(null)} style={{ background: '#6b7a99' }}>🔄 Scan Another</button>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4816,6 +5086,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
             }}>📋 Quotation PDF</button>
             <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
+            <button className="v2-hero-btn" onClick={() => openVouchersV2(deal)}>🎫 Vouchers</button>
+            <button className="v2-hero-btn" onClick={() => setModal('landVoucherAI')}>🗺️ Land Voucher (AI)</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -5821,6 +6093,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} />}
+          {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
         </div>
 
         {/* Right sidebar */}
