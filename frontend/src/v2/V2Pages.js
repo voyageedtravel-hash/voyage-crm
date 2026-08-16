@@ -2701,6 +2701,7 @@ function buildInvoiceHTML(deal, billing, isProforma) {
       <div style="font-size:10px;color:#6b7a99;margin-top:2px">B2B TRAVEL · CORPORATE BOOKINGS · VISA SERVICES</div>
     </div>
     <div style="text-align:right">
+      <img src="${VE_LOGO}" style="height:40px;margin-bottom:6px" onerror="this.style.display='none'"/>
       <div style="font-size:28px;font-weight:800;color:#0d1b3e;letter-spacing:1px">${title}</div>
       <div style="font-size:11px;color:#6b7a99;margin-top:4px">${subtitle}</div>
     </div>
