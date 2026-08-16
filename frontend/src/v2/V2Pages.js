@@ -2610,6 +2610,284 @@ function LandVoucherAIModal({ deal, onClose }) {
   );
 }
 
+// ─── INVOICE / PROFORMA — matches Vishal's existing VE-INV format
+// exactly: Voyage-Ed company details pre-filled (GSTIN, address,
+// bank), client billing details editable per-invoice, each component
+// as a line item showing SELLING price (not cost — client never sees
+// cost), total, bank details, cancellation policy. ────────────────
+
+const VE_COMPANY = {
+  name: 'Voyage-Ed Travels — Partnership Firm',
+  shortName: 'VOYAGE-ED',
+  address: 'Ground Floor, SCO 1072-1073, Cabin No. 1, Sector 22-B, Chandigarh - 160022',
+  gstin: '04ABBFV6015A1ZT',
+  email: 'enquiry@voyage-ed.com',
+  phone: '+91 70096 59048',
+  website: 'www.voyage-ed.com',
+  bank: { name: 'HDFC Bank', acName: 'VOYAGE ED', acNumber: '50200118915748', ifsc: 'HDFC0001556', branch: 'Sector 40-D, Chandigarh', type: 'Current Account' },
+};
+
+function buildInvoiceHTML(deal, billing, isProforma) {
+  const title = isProforma ? 'PROFORMA INVOICE' : 'INVOICE';
+  const subtitle = isProforma ? 'Proforma invoice for travel services' : 'Invoice for travel services';
+  const invNo = billing.invoiceNo || (isProforma ? 'VE-PI-' : 'VE-INV-') + (deal.dealNumber || '').replace('VE-', '');
+  const invDate = billing.invoiceDate || new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dueDate = billing.dueDate || '';
+  const pax = (Number(deal.adults) || 0) + (Number(deal.children) || 0) + (Number(deal.infants) || 0);
+  const fmtD = (d) => { if (!d) return ''; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return d; } };
+
+  // Build line items from all components — SELLING price only
+  const items = [];
+  let seq = 0;
+  (deal.flightVendors || []).forEach((f) => {
+    const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
+    if (!secs.length && !f.sellingPrice) return;
+    seq++;
+    const routes = secs.map((s) => `${s.from || '?'} → ${s.to || '?'}`).join(', ');
+    const dates = secs.map((s) => fmtD(s.date)).filter(Boolean).join(' + ');
+    items.push({ seq, desc: `${escHtml(f.name || 'Flight')} — ${escHtml(routes)}`, sub: dates ? `${dates}` : '', paxCount: pax || '', amount: toINR(f.sellingPrice, f.currency, f.exchangeRate) });
+  });
+  (deal.hotelVendors || []).forEach((h) => {
+    if (!h.hotelName && !h.sellingPrice) return;
+    seq++;
+    const nights = (() => { let n = Number(h.nights); if (!n && h.checkIn && h.checkOut) n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000); return n > 0 ? n : ''; })();
+    items.push({ seq, desc: `${escHtml(h.hotelName || 'Hotel')} — Hotel Stay`, sub: `${escHtml(h.roomCategory || '')} · ${nights ? nights + ' Night' + (nights > 1 ? 's' : '') : ''} · ${fmtD(h.checkIn)} → ${fmtD(h.checkOut)}${h.confirmationNo ? ' · Ref: ' + escHtml(h.confirmationNo) : ''}`, paxCount: pax || '', amount: toINR(h.sellingPrice, h.currency, h.exchangeRate) });
+  });
+  (deal.trainVendors || []).forEach((t) => {
+    seq++;
+    items.push({ seq, desc: `${escHtml(t.name || 'Train')} — Rail Travel`, sub: '', paxCount: pax || '', amount: toINR(t.sellingPrice, t.currency, t.exchangeRate) });
+  });
+  (deal.landVendors || []).forEach((l) => {
+    seq++;
+    items.push({ seq, desc: `${escHtml(l.name || 'Land Package')} — Tours & Transfers`, sub: escHtml(destination(deal) || ''), paxCount: pax || '', amount: toINR(l.sellingPrice, l.currency, l.exchangeRate) });
+  });
+  (deal.visaVendors || []).forEach((v) => {
+    seq++;
+    items.push({ seq, desc: `${escHtml(v.name || 'Visa')} — Visa Services`, sub: escHtml(v.visaStatus || ''), paxCount: pax || '', amount: toINR(v.sellingPrice, v.currency, v.exchangeRate) });
+  });
+  (deal.cruiseVendors || []).forEach((c) => {
+    seq++;
+    items.push({ seq, desc: `${escHtml(c.shipName || c.cruiseLine || 'Cruise')} — Cruise`, sub: `${escHtml(c.cabinCategory || '')} · ${fmtD(c.checkIn)} → ${fmtD(c.checkOut)}`, paxCount: pax || '', amount: toINR(c.sellingPrice, c.currency, c.exchangeRate) });
+  });
+  (deal.insuranceVendors || []).forEach((ins) => {
+    seq++;
+    items.push({ seq, desc: `${escHtml(ins.name || 'Insurance')} — Travel Insurance`, sub: escHtml(ins.policyType || ''), paxCount: pax || '', amount: toINR(ins.sellingPrice, ins.currency, ins.exchangeRate) });
+  });
+  (deal.pricingRows || []).forEach((pr) => {
+    if (!pr.label && !pr.amount) return;
+    seq++;
+    items.push({ seq, desc: escHtml(pr.label || 'Additional Service'), sub: '', paxCount: '', amount: Number(pr.amount) || 0 });
+  });
+
+  const total = items.reduce((s, i) => s + (i.amount || 0), 0);
+
+  const itemsHTML = items.map((i) => `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #f0f2f7;color:#6b7a99;text-align:center">${i.seq}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f0f2f7"><div style="font-weight:600;color:#0d1b3e">${i.desc}</div>${i.sub ? `<div style="font-size:11px;color:#6b7a99;margin-top:2px">${i.sub}</div>` : ''}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f0f2f7;text-align:center">${i.paxCount}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f0f2f7;text-align:right;font-weight:700;color:#0d1b3e;white-space:nowrap">₹${(i.amount || 0).toLocaleString('en-IN')}</td>
+    </tr>`).join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed ${title} — ${escHtml(invNo)}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1a2c52}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+<div style="max-width:800px;margin:0 auto;padding:30px 24px;background:#fff">
+
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:3px solid #0d1b3e">
+    <div>
+      <div style="font-size:9px;letter-spacing:3px;color:#c9961a;font-weight:800">V</div>
+      <div style="font-size:18px;font-weight:700;color:#0d1b3e">Voyage-Ed Travels</div>
+      <div style="font-size:10px;color:#6b7a99;margin-top:2px">B2B TRAVEL · CORPORATE BOOKINGS · VISA SERVICES</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:28px;font-weight:800;color:#0d1b3e;letter-spacing:1px">${title}</div>
+      <div style="font-size:11px;color:#6b7a99;margin-top:4px">${subtitle}</div>
+    </div>
+  </div>
+
+  <!-- From / Bill To -->
+  <div style="display:flex;gap:30px;margin-bottom:24px">
+    <div style="flex:1">
+      <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">FROM</div>
+      <div style="font-size:13px;font-weight:700;color:#0d1b3e">${VE_COMPANY.shortName}</div>
+      <div style="font-size:11px;color:#5a6b8c;line-height:1.7;margin-top:4px">
+        (${VE_COMPANY.name})<br>${VE_COMPANY.address}<br>
+        GSTIN <b style="color:#0d1b3e">${VE_COMPANY.gstin}</b><br>
+        Email ${VE_COMPANY.email}<br>Phone ${VE_COMPANY.phone}
+      </div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">BILL TO</div>
+      <div style="font-size:13px;font-weight:700;color:#0d1b3e">${escHtml(billing.billToName || clientName(deal))}</div>
+      <div style="font-size:11px;color:#5a6b8c;line-height:1.7;margin-top:4px">
+        ${billing.billToCompany ? `(${escHtml(billing.billToCompany)})<br>` : ''}
+        ${escHtml(billing.billToAddress || '')}<br>
+        ${billing.billToGSTIN ? `GSTIN <b style="color:#0d1b3e">${escHtml(billing.billToGSTIN)}</b><br>` : ''}
+        ${billing.billToEmail ? `Email ${escHtml(billing.billToEmail)}<br>` : ''}
+        ${billing.billToPhone ? `Phone ${escHtml(billing.billToPhone)}` : ''}
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice Meta -->
+  <div style="display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+    <div style="flex:1;min-width:140px;background:#f8fafd;border:1px solid #e3eaf7;border-radius:10px;padding:10px 14px">
+      <div style="font-size:9px;letter-spacing:1.5px;color:#6b7a99;font-weight:700">${isProforma ? 'PI NO.' : 'INVOICE NO.'}</div>
+      <div style="font-size:14px;font-weight:700;color:#0d1b3e;margin-top:2px">${escHtml(invNo)}</div>
+    </div>
+    <div style="flex:1;min-width:140px;background:#f8fafd;border:1px solid #e3eaf7;border-radius:10px;padding:10px 14px">
+      <div style="font-size:9px;letter-spacing:1.5px;color:#6b7a99;font-weight:700">${isProforma ? 'PI DATE' : 'INVOICE DATE'}</div>
+      <div style="font-size:14px;font-weight:700;color:#0d1b3e;margin-top:2px">${escHtml(invDate)}</div>
+    </div>
+    <div style="flex:1;min-width:140px;background:#f8fafd;border:1px solid #e3eaf7;border-radius:10px;padding:10px 14px">
+      <div style="font-size:9px;letter-spacing:1.5px;color:#6b7a99;font-weight:700">PAYMENT TERMS</div>
+      <div style="font-size:14px;font-weight:700;color:#0d1b3e;margin-top:2px">${escHtml(billing.paymentTerms || '100% Advance')}</div>
+    </div>
+    ${dueDate ? `<div style="flex:1;min-width:140px;background:#f8fafd;border:1px solid #e3eaf7;border-radius:10px;padding:10px 14px">
+      <div style="font-size:9px;letter-spacing:1.5px;color:#6b7a99;font-weight:700">PAYMENT DUE</div>
+      <div style="font-size:14px;font-weight:700;color:#0d1b3e;margin-top:2px">${escHtml(dueDate)}</div>
+    </div>` : ''}
+  </div>
+
+  <!-- Charges Table -->
+  <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">CHARGES</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:16px">
+    <thead><tr style="background:#0d1b3e;color:#fff">
+      <th style="padding:10px 12px;text-align:center;width:40px;font-weight:600">#</th>
+      <th style="padding:10px 12px;text-align:left;font-weight:600">DESCRIPTION</th>
+      <th style="padding:10px 12px;text-align:center;width:60px;font-weight:600">PAX</th>
+      <th style="padding:10px 12px;text-align:right;width:110px;font-weight:600">AMOUNT</th>
+    </tr></thead>
+    <tbody>${itemsHTML}</tbody>
+  </table>
+
+  <!-- Total -->
+  <div style="display:flex;justify-content:flex-end;margin-bottom:24px">
+    <div style="width:280px">
+      <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12.5px;color:#5a6b8c;border-top:1px solid #e3eaf7">
+        <span>Subtotal</span><span style="font-weight:600;color:#0d1b3e">₹${total.toLocaleString('en-IN')}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:11px;color:#6b7a99">
+        <span>GST</span><span>Inclusive</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:12px 0;font-size:16px;font-weight:800;color:#0d1b3e;border-top:2px solid #0d1b3e">
+        <span>TOTAL PAYABLE</span><span>₹${total.toLocaleString('en-IN')}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bank Details -->
+  <div style="background:#f8fafd;border:1px solid #e3eaf7;border-radius:12px;padding:16px 20px;margin-bottom:24px">
+    <div style="font-size:9px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:10px">PAYMENT DETAILS — BANK TRANSFER / NEFT / RTGS</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:12px">
+      <div><div style="color:#6b7a99;font-size:10px">Account Name</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.acName}</div></div>
+      <div><div style="color:#6b7a99;font-size:10px">Account Number</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.acNumber}</div></div>
+      <div><div style="color:#6b7a99;font-size:10px">Bank</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.name}</div></div>
+      <div><div style="color:#6b7a99;font-size:10px">IFSC Code</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.ifsc}</div></div>
+      <div><div style="color:#6b7a99;font-size:10px">Branch</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.branch}</div></div>
+      <div><div style="color:#6b7a99;font-size:10px">Account Type</div><div style="font-weight:700;color:#0d1b3e">${VE_COMPANY.bank.type}</div></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div style="text-align:center;font-size:11px;color:#6b7a99;padding-top:16px;border-top:1px solid #e3eaf7">
+    <div style="font-weight:700;color:#0d1b3e">Voyage-Ed Travels</div>
+    ${VE_COMPANY.website} · ${VE_COMPANY.email} · ${VE_COMPANY.phone}<br>
+    <span style="color:#c9961a;font-style:italic">Thank you for choosing Voyage-Ed for your travel.</span>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:13px 22px;border-radius:12px;cursor:pointer;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
+function InvoiceModal({ deal, onClose }) {
+  const [billing, setBilling] = useState({
+    invoiceNo: '', invoiceDate: new Date().toISOString().slice(0, 10),
+    dueDate: '', paymentTerms: '100% Advance',
+    billToName: clientName(deal), billToCompany: '', billToAddress: '',
+    billToGSTIN: '', billToEmail: deal.email || '', billToPhone: deal.contactNo || '',
+  });
+  const set = (k) => (e) => setBilling((f) => ({ ...f, [k]: e.target.value }));
+
+  const generate = (isProforma) => {
+    const w = window.open('', '_blank');
+    if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
+    try { w.document.write(buildInvoiceHTML(deal, billing, isProforma)); w.document.close(); }
+    catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 560, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🧾 Generate Invoice</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800 }}>BILL TO (CLIENT DETAILS)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Client / Contact Name *</div>
+              <input value={billing.billToName} onChange={set('billToName')} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Company Name</div>
+              <input value={billing.billToCompany} onChange={set('billToCompany')} placeholder="e.g. Ashwani Automobiles Pvt. Ltd." style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Address</div>
+            <input value={billing.billToAddress} onChange={set('billToAddress')} placeholder="Full billing address" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Client GSTIN</div>
+              <input value={billing.billToGSTIN} onChange={set('billToGSTIN')} placeholder="e.g. 04AAECA1757D1Z6" style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Email</div>
+              <input value={billing.billToEmail} onChange={set('billToEmail')} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Phone</div>
+              <input value={billing.billToPhone} onChange={set('billToPhone')} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Invoice No. (auto if blank)</div>
+              <input value={billing.invoiceNo} onChange={set('invoiceNo')} placeholder="VE-INV-..." style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Invoice Date</div>
+              <input type="date" value={billing.invoiceDate} onChange={set('invoiceDate')} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Payment Due</div>
+              <input type="date" value={billing.dueDate} onChange={set('dueDate')} style={inputStyle} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Payment Terms</div>
+              <input value={billing.paymentTerms} onChange={set('paymentTerms')} style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: 10 }}>
+            Voyage-Ed company details, GSTIN, and bank info are pre-filled automatically. Line items are generated from this deal's components (selling prices only — cost is never shown).
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+            <button className="v2-cta" onClick={() => generate(false)} style={{ flex: 1 }}>🧾 Generate Invoice</button>
+            <button className="v2-cta" onClick={() => generate(true)} style={{ flex: 1, background: '#6b7a99' }}>📋 Proforma Invoice</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AIItineraryModal({ deal, onClose }) {
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
@@ -5088,6 +5366,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
             <button className="v2-hero-btn" onClick={() => openVouchersV2(deal)}>🎫 Vouchers</button>
             <button className="v2-hero-btn" onClick={() => setModal('landVoucherAI')}>🗺️ Land Voucher (AI)</button>
+            <button className="v2-hero-btn" onClick={() => setModal('invoice')}>🧾 Invoice</button>
           </div>
         </div>
         <div className="v2-hero-dealnum">{deal.dealNumber}</div>
@@ -6094,6 +6373,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
+          {modal === 'invoice' && <InvoiceModal deal={deal} onClose={() => setModal(null)} />}
         </div>
 
         {/* Right sidebar */}
