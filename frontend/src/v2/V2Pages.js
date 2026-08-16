@@ -2188,6 +2188,7 @@ function buildVouchersHTMLV2(deal) {
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1a2c52}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
 <div style="max-width:780px;margin:0 auto;padding:30px 20px">
   <div style="text-align:center;margin-bottom:28px">
+    <img src="${VE_LOGO}" style="height:48px;margin-bottom:8px" onerror="this.style.display='none'"/>
     <div style="font-size:10px;letter-spacing:4px;color:#c9961a;font-weight:800">VOYAGE-ED TRAVELS</div>
     <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;color:#0d1b3e;margin-top:4px">Travel Vouchers</div>
     <div style="font-size:12px;color:#5a6b8c;margin-top:6px">Booking Ref <b style="color:#0d1b3e">${escHtml(ref)}</b> · ${escHtml(guest)} · ${escHtml(destination(deal) || '')}</div>
