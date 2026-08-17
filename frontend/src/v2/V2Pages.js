@@ -7448,7 +7448,7 @@ const saveAccountsV2 = (a) => {
   try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(a)); } catch { /* ignore */ }
 };
 
-function AccountsV2({ leads }) {
+function AccountsV2({ leads, onDealClick }) {
   const [accounts, setAccounts] = useState(loadAccountsV2);
   const [showLedgerForm, setShowLedgerForm] = useState(false);
   const [ledgerForm, setLedgerForm] = useState({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
@@ -7456,6 +7456,9 @@ function AccountsV2({ leads }) {
   const [advChat, setAdvChat] = useState([]); // {role:'user'|'assistant', content, suggestData?}
   const [advInput, setAdvInput] = useState('');
   const [advBusy, setAdvBusy] = useState(false);
+  const [acctAiInput, setAcctAiInput] = useState('');
+  const [acctAiBusy, setAcctAiBusy] = useState(false);
+  const [acctAiProposal, setAcctAiProposal] = useState(null);
 
   const persist = (updater) => {
     setAccounts((prev) => {
@@ -7478,6 +7481,53 @@ function AccountsV2({ leads }) {
     const cost = vendors.reduce((vs, v) => vs + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
     return s + Math.max(0, cost - paidToVendors);
   }, 0);
+
+  // ── Receivables — every booked deal with a positive client balance,
+  // same formula as the dashboard's "Client Balance Due" KPI. ──
+  const receivables = bookedDeals
+    .map((d) => ({ d, amount: Math.max(0, balanceINR(d)) }))
+    .filter((r) => r.amount > 0.5)
+    .sort((a, b) => b.amount - a.amount);
+  const totalReceivable = receivables.reduce((s, r) => s + r.amount, 0);
+
+  // ── Payables — grouped by vendor NAME + kind across every booked deal,
+  // matching V1's grouping exactly (so "ABC Tours" across 3 deals shows
+  // as one line with a 3-deal breakdown, not three separate lines). ──
+  const payables = (() => {
+    const map = new Map();
+    bookedDeals.forEach((d) => {
+      const vs = [
+        ...(d.hotelVendors || []).map((v) => ({ ...v, _k: 'Hotel', _n: v.hotelName || v.name })),
+        ...(d.flightVendors || []).map((v) => ({ ...v, _k: 'Flight', _n: v.name })),
+        ...(d.trainVendors || []).map((v) => ({ ...v, _k: 'Train', _n: v.name })),
+        ...(d.landVendors || []).map((v) => ({ ...v, _k: 'Land', _n: v.name })),
+        ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
+        ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.cruiseLine || v.name })),
+      ];
+      vs.forEach((v) => {
+        const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
+        const paid = sumBy(v.payments, 'amount');
+        const bal = cost - paid;
+        if (bal <= 0.5) return;
+        const key = `${(v._n || '(vendor)').trim().toLowerCase()}::${v._k}`;
+        if (!map.has(key)) map.set(key, { name: v._n || '(vendor)', kind: v._k, amount: 0, breakdown: [] });
+        const g = map.get(key);
+        g.amount += bal;
+        g.breakdown.push({ d, amount: bal });
+      });
+    });
+    return [...map.values()].sort((a, b) => b.amount - a.amount);
+  })();
+  const totalPayable = payables.reduce((s, p) => s + p.amount, 0);
+
+  // ── Snapshot — booked GPM (all-time) minus this month's committed
+  // expenses/salaries/GST, same as V1's top card. ──
+  const nowSnap = new Date();
+  const thisMonthKeySnap = `${nowSnap.getFullYear()}-${String(nowSnap.getMonth() + 1).padStart(2, '0')}`;
+  const thisMonthExpense = (accounts.ledger || []).filter((r) => String(r.date).startsWith(thisMonthKeySnap) && ['expense', 'salary', 'gst'].includes(r.kind)).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const bookedGpm = bookedDeals.reduce((s, d) => s + profitINR(d), 0);
+  const forfeitTotal = bookedDeals.reduce((s, d) => s + (Number(d.forfeitAmount) || 0), 0);
+  const netAfterExpenses = bookedGpm - forfeitTotal - thisMonthExpense;
 
   const addCashLoc = () => persist((a) => ({ ...a, cashLocations: [...(a.cashLocations || []), { id: 'cl_' + Date.now(), name: 'New location', amount: '', note: '' }] }));
   const updCashLoc = (id, key, val) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).map((c) => c.id === id ? { ...c, [key]: val } : c) }));
@@ -7712,6 +7762,79 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
     window.veToast && window.veToast('Posted to ledger ✓', 'success');
   };
 
+  // ── AI Ledger Input — same system prompt as V1's ACCT_SYS, verbatim.
+  // Person types a plain Hinglish note ("Sahitya ne aaj 200 kharche Bazar
+  // MCC, maine wapas de diye"), AI turns it into one or more structured
+  // ledger rows + cash/bank deltas, shown as a proposal to confirm before
+  // anything is actually written. ──
+  const ACCT_SYS = `You are a bookkeeping helper for an Indian travel agency's ledger. The user types a plain Hinglish note about what happened. You convert it into one or more ledger rows.
+
+Rules:
+- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|gst|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number,"queryTag":"deal number OR client name to tag this row against"}], "summary":"one-line Hinglish"}
+- kind rules: 'expense' for money spent (office kharcha, food, Bazar MCC); 'salary' for salaries paid; 'gst' for GST payment to government; 'income' for money received that isn't a client deal payment; 'transfer' for moving cash between locations.
+- Dates: 'aaj/today' = today; 'kal' = yesterday; specific date otherwise. Default today.
+- If user says "Sahitya ne kharche" and then "wapas de diye" — that's two rows: an expense, then a transfer.
+- Only use cashFrom / cashTo when cash actually moved between tracked cash locations. bankDelta positive = bank up, negative = down.
+- Amounts are numbers only. Never invent numbers not in the text.
+- queryTag: if the user names a client or deal, match against the bookedDeals list in context and put the exact dealNumber in queryTag. If no client mentioned or you can't match, leave queryTag empty.
+
+Cash locations and booked deals list are passed in the user turn.`;
+
+  const acctAiSend = async () => {
+    const text = (acctAiInput || '').trim();
+    if (!text) return;
+    setAcctAiBusy(true); setAcctAiProposal(null);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const bookedDealsCtx = bookedDeals.map((d) => ({ dealNumber: d.dealNumber, client: clientName(d), destination: destination(d) }));
+      const ctx = { today, cashLocations: (accounts.cashLocations || []).map((c) => c.name), bookedDeals: bookedDealsCtx };
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: ACCT_SYS, messages: [{ role: 'user', content: 'CONTEXT:\n' + JSON.stringify(ctx) + '\n\nUser: ' + text }] }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
+      const raw = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
+      let j; try { j = JSON.parse(raw); } catch { throw new Error('AI ka jawab samajh nahi aaya'); }
+      setAcctAiProposal(j);
+    } catch (e) {
+      window.veToast && window.veToast('⚠️ ' + ((e && e.message) || 'gadbad'), 'warning');
+    }
+    setAcctAiBusy(false);
+  };
+
+  const acctAiApply = () => {
+    if (!acctAiProposal || !Array.isArray(acctAiProposal.rows)) return;
+    const rows = acctAiProposal.rows.map((r) => ({
+      id: 'lg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      date: r.date || new Date().toISOString().slice(0, 10),
+      kind: r.kind || 'expense',
+      party: r.party || '',
+      amount: Number(r.amount) || 0,
+      note: r.note || '',
+      queryTag: r.queryTag || '',
+      source: 'ai',
+    }));
+    persist((a) => {
+      let na = { ...a, ledger: [...(a.ledger || []), ...rows] };
+      acctAiProposal.rows.forEach((r) => {
+        const amt = Number(r.amount) || 0;
+        if (r.cashFrom) {
+          na.cashLocations = (na.cashLocations || []).map((c) =>
+            c.name.toLowerCase().includes(String(r.cashFrom).toLowerCase()) ? { ...c, amount: String(Math.max(0, (Number(c.amount) || 0) - amt)) } : c);
+        }
+        if (r.cashTo) {
+          na.cashLocations = (na.cashLocations || []).map((c) =>
+            c.name.toLowerCase().includes(String(r.cashTo).toLowerCase()) ? { ...c, amount: String((Number(c.amount) || 0) + amt) } : c);
+        }
+        if (r.bankDelta) { na.bankBalance = String((Number(na.bankBalance) || 0) + (Number(r.bankDelta) || 0)); }
+      });
+      return na;
+    });
+    setAcctAiInput(''); setAcctAiProposal(null);
+    window.veToast && window.veToast('✅ Ledger update ho gaya', 'success');
+  };
+
   return (
     <main className="v2-page">
       <div className="v2-page-header">
@@ -7721,6 +7844,32 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
         </div>
         <div className="v2-header-actions">
           <button className="v2-cta" onClick={() => setShowAdvisor(true)}>🤖 AI Salary Advisor</button>
+        </div>
+      </div>
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">💼 Snapshot</h3>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}>
+            <span>Booked GPM (before GST, after forfeit)</span>
+            <b style={{ fontFamily: 'monospace', color: '#0f2350' }}>{fmtINR(bookedGpm - forfeitTotal)}</b>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}>
+            <span>− Is month ke expenses + salaries</span>
+            <b style={{ fontFamily: 'monospace', color: '#dc2626' }}>− {fmtINR(thisMonthExpense)}</b>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, paddingTop: 5, fontWeight: 800 }}>
+            <span>Net after expenses (before GST)</span>
+            <b style={{ fontFamily: 'monospace', color: netAfterExpenses >= 0 ? '#15803d' : '#dc2626' }}>{fmtINR(netAfterExpenses)}</b>
+          </div>
+          {forfeitTotal > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#94a3b8', paddingTop: 4 }}>
+              <span>Forfeit written off (all bookings)</span>
+              <b style={{ fontFamily: 'monospace' }}>{fmtINR(forfeitTotal)}</b>
+            </div>
+          )}
         </div>
       </div>
 
@@ -7808,6 +7957,106 @@ If it's the first turn, ALWAYS start with type "ask" — never suggest salary un
             })
           )}
         </div>
+      </div>
+
+      <div className="v2-two-col" style={{ marginTop: 24 }}>
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">📥 Clients se lena hai</h3>
+            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#f59e0b' }}>{fmtINR(totalReceivable)}</b>
+          </div>
+          {receivables.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div>
+          ) : (
+            receivables.map(({ d, amount }) => (
+              <div key={d._id} onClick={() => onDealClick && onDealClick(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px dashed #e3eaf7', cursor: onDealClick ? 'pointer' : 'default', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+                    {clientName(d) || '(no name)'}
+                    {d.dealNumber && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', fontFamily: 'monospace', marginLeft: 6 }}>{d.dealNumber}</span>}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{destination(d) || '—'}</div>
+                </div>
+                <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#f59e0b' }}>{fmtINR(amount)}</b>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="v2-panel">
+          <div className="v2-panel-header">
+            <h3 className="v2-panel-title">📤 Vendors ko dena hai</h3>
+            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#dc2626' }}>{fmtINR(totalPayable)}</b>
+          </div>
+          {payables.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div>
+          ) : (
+            payables.map((p, i) => (
+              <div key={i} style={{ padding: '9px 0', borderBottom: '1px dashed #e3eaf7' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, cursor: p.breakdown.length === 1 && onDealClick ? 'pointer' : 'default' }}
+                  onClick={() => { if (p.breakdown.length === 1 && onDealClick) onDealClick(p.breakdown[0].d); }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+                      {p.name} <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#eef3fc', color: '#334e82', marginLeft: 4 }}>{p.kind}</span>
+                      {p.breakdown.length > 1 && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', marginLeft: 5 }}>{p.breakdown.length} deals</span>}
+                    </div>
+                    {p.breakdown.length === 1 && <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{clientName(p.breakdown[0].d) || '(client)'} · {p.breakdown[0].d.dealNumber || ''}</div>}
+                  </div>
+                  <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#dc2626' }}>{fmtINR(p.amount)}</b>
+                </div>
+                {p.breakdown.length > 1 && (
+                  <div style={{ marginTop: 6, marginLeft: 12, paddingLeft: 10, borderLeft: '2px solid #f1f5f9' }}>
+                    {p.breakdown.map((b, j) => (
+                      <div key={j} onClick={() => onDealClick && onDealClick(b.d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', cursor: onDealClick ? 'pointer' : 'default', fontSize: 11 }}>
+                        <span style={{ color: '#334e82' }}>
+                          {clientName(b.d) || '(client)'}
+                          {b.d.dealNumber && <span style={{ background: '#faf1dc', color: '#8a6d1f', padding: '1px 5px', borderRadius: 4, marginLeft: 5, fontFamily: 'monospace', fontWeight: 700, fontSize: 9.5 }}>{b.d.dealNumber}</span>}
+                        </span>
+                        <b style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>{fmtINR(b.amount)}</b>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="v2-panel" style={{ marginTop: 24, background: 'linear-gradient(180deg,#faf8ff,#fff)', border: '1px solid #c4b5fd' }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title" style={{ color: '#5b21b6' }}>🤖 AI Ledger Entry</h3>
+        </div>
+        <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 12 }}>
+          Seedha likho — <i>"Sahitya ne aaj 200 kharche Bazar MCC, maine wapas de diye"</i>, <i>"Nikhil ne 16000 diye cash mein"</i>, <i>"Bank se 5000 nikale Sahitya ke pass"</i>. AI parse karke ledger mein daal dega, cash locations bhi update ho jayengi.
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <input
+            value={acctAiInput}
+            onChange={(e) => setAcctAiInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !acctAiBusy) acctAiSend(); }}
+            placeholder="Plain Hinglish me likho…"
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <button disabled={acctAiBusy || !acctAiInput.trim()} onClick={acctAiSend} className="v2-cta" style={{ background: acctAiBusy ? '#c4b5fd' : 'linear-gradient(135deg,#6d28d9,#8b5cf6)' }}>
+            {acctAiBusy ? '...' : 'Send'}
+          </button>
+        </div>
+        {acctAiProposal && (
+          <div style={{ background: '#fff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#5b21b6', marginBottom: 8 }}>{acctAiProposal.summary || 'Proposed ledger rows'}</div>
+            {(acctAiProposal.rows || []).map((r, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '5px 0', borderBottom: '1px dashed #eef2f8' }}>
+                <span>{r.date} · {r.kind} · {r.party}{r.note ? ` — ${r.note}` : ''}</span>
+                <b style={{ fontFamily: 'monospace' }}>{fmtINR(r.amount)}</b>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+              <button className="v2-cta" onClick={acctAiApply} style={{ background: '#15803d' }}>✓ Apply to Ledger</button>
+              <button className="v2-cta" onClick={() => setAcctAiProposal(null)} style={{ background: '#6b7a99' }}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="v2-panel" style={{ marginTop: 24 }}>
@@ -8423,7 +8672,7 @@ export default function V2Pages() {
     return <TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />;
   }
   if (route === 'accounts') {
-    return <AccountsV2 leads={items} />;
+    return <AccountsV2 leads={items} onDealClick={openDeal} />;
   }
   if (route === 'reports') {
     return <ReportsV2 leads={items} />;
