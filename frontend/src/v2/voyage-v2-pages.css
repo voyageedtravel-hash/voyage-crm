@@ -1223,7 +1223,7 @@
   font-family: 'Playfair Display', serif;
   font-size: 38px;
   font-weight: 600;
-  color: #fff;
+  color: #fff !important;
   margin: 0 0 8px 0;
   letter-spacing: -0.5px;
 }

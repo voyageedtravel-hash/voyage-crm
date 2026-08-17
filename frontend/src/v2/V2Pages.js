@@ -1623,7 +1623,24 @@ function buildProposalHTMLV2(deal) {
     if (cur !== null) out.push(cur);
     return out;
   };
-  const allDayLines = (deal.landVendors || []).filter((l) => l.itinerary).map((l) => parseDaysV2(l.itinerary)).reduce((a, b) => a.concat(b), []);
+  const landDayLines = (deal.landVendors || []).filter((l) => l.itinerary).map((l) => parseDaysV2(l.itinerary)).reduce((a, b) => a.concat(b), []);
+  // Fallback: if no manual land-vendor itinerary exists but the AI Itinerary
+  // Builder generated one and it was attached to this deal, use that instead
+  // — so the Proposal PDF is never missing a day-wise plan just because the
+  // ops team used the AI tool instead of typing it into a land vendor row.
+  const aiItineraryRaw = (!landDayLines.length && deal.aiItineraryText) ? deal.aiItineraryText : '';
+  const aiDayLines = aiItineraryRaw ? parseDaysV2(aiItineraryRaw) : [];
+  const allDayLines = landDayLines.length ? landDayLines : aiDayLines;
+  // The AI itinerary text also has an opening welcome note before "Day 1" —
+  // parseDaysV2 drops everything before the first day header, so pull that
+  // intro paragraph out separately to show as a warm note above the days.
+  const aiIntroText = (() => {
+    if (!aiItineraryRaw) return '';
+    const raw = aiItineraryRaw.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const firstHdr = raw.findIndex((l) => dayHdr.test(l));
+    if (firstHdr <= 0) return '';
+    return raw.slice(0, firstHdr).join(' ');
+  })();
 
   const dayIconV2 = (t) => {
     const s = (t || '').toLowerCase();
@@ -2032,7 +2049,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${trains.length ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
     ${tierOptionsBlock}
     ${showH && hotels.length && !tierOptionsBlock ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}` : ''}
-    ${landBlocks ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${timelineHTML}${landBlocks}` : ''}
+    ${landBlocks ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${aiIntroText ? `<div style="background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:12px;padding:16px 20px;margin-bottom:16px;font-family:Georgia,'Times New Roman',serif;font-size:13px;line-height:1.8;color:#5a4a1a;font-style:italic">${escHtml(aiIntroText)}</div>` : ''}${timelineHTML}${landBlocks}` : ''}
 
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
       <div style="flex:1;min-width:250px">
@@ -2106,9 +2123,10 @@ const HOTEL_VOUCHER_TC = [
   'Full cancellation charges are applicable on early check-out unless otherwise specified.',
 ];
 
-function buildVouchersHTMLV2(deal) {
-  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
-  const flights = (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name })));
+function buildVouchersHTMLV2(deal, opts) {
+  const o = { hotel: true, land: true, flight: true, ...(opts || {}) };
+  const hotels = o.hotel ? (deal.hotelVendors || []).filter((h) => h.hotelName) : [];
+  const flights = o.flight ? (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name }))) : [];
   // eslint-disable-next-line no-unused-vars
   const trains = (deal.trainVendors || []).flatMap((t) => [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, trainName: t.name })));
   const ref = deal.dealNumber || 'VE-VOUCHER';
@@ -2142,7 +2160,7 @@ function buildVouchersHTMLV2(deal) {
     </div>`;
   }).join('');
 
-  const landVendors = (deal.landVendors || []).filter((l) => l.itinerary || l.name);
+  const landVendors = o.land ? (deal.landVendors || []).filter((l) => l.itinerary || l.name) : [];
   const landCards = landVendors.map((l) => `
     <div style="page-break-inside:avoid;border:1px solid #e3eaf7;border-radius:14px;margin-bottom:20px;overflow:hidden;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:#f8fafd;border-bottom:1px solid #e3eaf7">
@@ -2206,10 +2224,10 @@ function buildVouchersHTMLV2(deal) {
 </body></html>`;
 }
 
-function openVouchersV2(deal) {
+function openVouchersV2(deal, opts) {
   const w = window.open('', '_blank');
   if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
-  try { w.document.write(buildVouchersHTMLV2(deal)); w.document.close(); }
+  try { w.document.write(buildVouchersHTMLV2(deal, opts)); w.document.close(); }
   catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
 }
 
@@ -2819,6 +2837,13 @@ function InvoiceModal({ deal, onClose }) {
     catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
   };
 
+  const warnings = [];
+  if (!billing.billToName || !billing.billToName.trim()) warnings.push('Client / contact name missing — invoice will show a blank Bill To.');
+  if (!billing.billToPhone && !billing.billToEmail) warnings.push('No client phone or email on file — add one so this invoice can be sent directly.');
+  if (billing.billToCompany && !billing.billToGSTIN) warnings.push('Company name given but GSTIN is blank — B2B invoices usually need this for the client\'s input tax credit.');
+  if (!(sellINR(deal) > 0)) warnings.push('No selling price set on this deal yet — line items may show ₹0.');
+  if (!billing.dueDate) warnings.push('Payment due date is blank.');
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -2877,6 +2902,12 @@ function InvoiceModal({ deal, onClose }) {
               <input value={billing.paymentTerms} onChange={set('paymentTerms')} style={inputStyle} />
             </div>
           </div>
+          {warnings.length > 0 && (
+            <div style={{ background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '10px 14px' }}>
+              <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#8a6d1a', fontWeight: 800, marginBottom: 5 }}>⚠️ CHECK KARO ({warnings.length})</div>
+              {warnings.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: '#7a5c10', lineHeight: 1.7 }}>• {w}</div>)}
+            </div>
+          )}
           <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: 10 }}>
             Voyage-Ed company details, GSTIN, and bank info are pre-filled automatically. Line items are generated from this deal's components (selling prices only — cost is never shown).
           </div>
@@ -2890,10 +2921,31 @@ function InvoiceModal({ deal, onClose }) {
   );
 }
 
-function AIItineraryModal({ deal, onClose }) {
-  const [result, setResult] = useState('');
+const AI_VIBE_OPTIONS = [
+  { id: 'auto', label: '🤖 Auto-detect', desc: 'AI reads pax/deal and picks the right tone' },
+  { id: 'family', label: '👨‍👩‍👧 Family Trip', desc: 'Warm, reassuring — comfort, safety, kid-friendly pacing' },
+  { id: 'bachelors', label: '🎉 Bachelors / Friends', desc: 'Energetic, casual — nightlife, adventure, fun' },
+  { id: 'honeymoon', label: '💑 Honeymoon', desc: 'Romantic, intimate — private, unhurried experiences' },
+  { id: 'luxury', label: '💎 Uber-Luxury', desc: 'Refined, understated — exclusivity, zero exclamation marks' },
+  { id: 'solo', label: '🎒 Solo Traveller', desc: 'Confident, easy-going — flexible, social touchpoints' },
+];
+
+function AIItineraryModal({ deal, onClose, onSaved }) {
+  const [result, setResult] = useState(deal.aiItineraryText || '');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [vibe, setVibe] = useState(deal.aiItineraryVibe || 'auto');
+  const [attach, setAttach] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const vibeInstruction = (v) => ({
+    auto: `First, infer the right tone from the pax breakdown and deal notes below (e.g. children present → family tone; 2 adults with no kids and a high budget → consider honeymoon or luxury; larger all-adult groups → friends trip). Then write in that inferred tone.`,
+    family: `Write for a FAMILY trip. Warm, reassuring, practical tone. Emphasize comfort, safety, kid-friendly pacing, multi-generational activities, and downtime. Avoid slang.`,
+    bachelors: `Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone — like a well-travelled friend planning the trip. Emphasize nightlife, adventure activities, group experiences, and flexibility. Keep it lively but still professional enough to send a client.`,
+    honeymoon: `Write for a HONEYMOON. Romantic, warm, intimate tone. Emphasize private experiences, candlelit dinners, sunset moments, and unhurried pacing. Elegant language, not over-the-top.`,
+    luxury: `Write for an UBER-LUXURY client. Sophisticated, understated, refined tone — think a five-star concierge letter. NO exclamation marks, no hard-sell language, no emojis in the prose (icons in headers are fine). Emphasize exclusivity, privacy, and seamlessness.`,
+    solo: `Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility, ease of getting around, safety notes, and opportunities to meet people or have quiet time as preferred.`,
+  }[v] || '');
 
   const generate = async () => {
     setLoading(true); setErr('');
@@ -2907,20 +2959,33 @@ function AIItineraryModal({ deal, onClose }) {
       const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
 
-      const prompt = `Generate a detailed, compelling day-wise itinerary for this trip. Write in a warm, professional tone that a travel agent would send to a client on WhatsApp.\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nFormat each day as "Day 1: Title\\nDetails..." Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a Voyage-Ed Tip where relevant. Keep it practical and specific, not generic.`;
+      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
 
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries. Use Hinglish sparingly (mostly English with occasional Hindi). Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3200, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely — a bachelors trip and an uber-luxury honeymoon should read completely differently. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
       const text = (data.content || []).map((c) => c.text || '').join('');
       setResult(text);
+      if (attach) await doAttach(text);
     } catch (e) {
       setErr(e.message || 'Could not generate');
     }
     setLoading(false);
+  };
+
+  const doAttach = async (text) => {
+    setSaving(true);
+    try {
+      const updated = await patchDeal(deal._id, { aiItineraryText: text, aiItineraryVibe: vibe });
+      onSaved && onSaved(updated);
+      window.veToast && window.veToast('Itinerary attached — will appear in Proposal & Quotation PDFs ✓', 'success');
+    } catch (e) {
+      window.veToast && window.veToast('Could not attach to deal: ' + (e.message || ''), 'warning');
+    }
+    setSaving(false);
   };
 
   const copyToClipboard = () => {
@@ -2935,32 +3000,120 @@ function AIItineraryModal({ deal, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: '#fff', borderRadius: 18, width: 640, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 660, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
         <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>✨ AI Itinerary Builder</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
           {!result && !loading && (
-            <div style={{ textAlign: 'center', padding: '30px 10px' }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>✨</div>
-              <div style={{ fontSize: 14, color: '#33446b', fontWeight: 600, marginBottom: 6 }}>Generate a day-wise itinerary for {destination(deal) || 'this trip'}</div>
-              <div style={{ fontSize: 12, color: '#6b7a99', marginBottom: 20 }}>AI will use this deal's flights, hotels, cruise, and existing land notes to build a detailed, client-ready itinerary.</div>
-              <button className="v2-cta" onClick={generate}>✨ Generate Itinerary</button>
-            </div>
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 8 }}>WHAT KIND OF TRIP IS THIS</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                {AI_VIBE_OPTIONS.map((o) => (
+                  <label key={o.id} style={{
+                    display: 'flex', flexDirection: 'column', gap: 2, cursor: 'pointer',
+                    border: '1px solid ' + (vibe === o.id ? '#c9a84c' : '#e3eaf7'),
+                    background: vibe === o.id ? '#fdf6e5' : '#fff',
+                    borderRadius: 10, padding: '9px 12px',
+                  }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, color: '#0d1b3e' }}>
+                      <input type="radio" name="vibe" checked={vibe === o.id} onChange={() => setVibe(o.id)} style={{ accentColor: '#c9a84c' }} />
+                      {o.label}
+                    </span>
+                    <span style={{ fontSize: 10.5, color: '#6b7a99', marginLeft: 20 }}>{o.desc}</span>
+                  </label>
+                ))}
+              </div>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', background: attach ? '#f0f5ff' : '#fff', border: '1px solid ' + (attach ? '#4169E1' : '#e3eaf7'), borderRadius: 8, padding: '9px 11px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#0f2350', marginBottom: 16 }}>
+                <input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} style={{ width: 15, height: 15, accentColor: '#4169E1' }} />
+                Attach to Proposal PDF & Quotation PDF automatically
+              </label>
+              <div style={{ textAlign: 'center', padding: '10px 10px 4px' }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>✨</div>
+                <div style={{ fontSize: 14, color: '#33446b', fontWeight: 600, marginBottom: 6 }}>Generate a day-wise itinerary for {destination(deal) || 'this trip'}</div>
+                <div style={{ fontSize: 12, color: '#6b7a99', marginBottom: 18 }}>AI will write a warm intro message plus the full day-wise plan, using this deal's flights, hotels, cruise, and existing land notes.</div>
+                <button className="v2-cta" onClick={generate}>✨ Generate Itinerary</button>
+              </div>
+            </>
           )}
           {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Writing your itinerary… (15-30 seconds)</div>}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5 }}>{err}</div>}
           {result && (
             <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 10.5, letterSpacing: 1, color: '#c9961a', fontWeight: 800, background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 20, padding: '4px 10px' }}>
+                  {AI_VIBE_OPTIONS.find((o) => o.id === vibe)?.label || 'Auto'}
+                </span>
+                {attach && <span style={{ fontSize: 10.5, color: '#15803d', fontWeight: 700 }}>{saving ? 'Attaching…' : '✓ Attached to deal'}</span>}
+              </div>
               <div style={{ whiteSpace: 'pre-line', fontSize: 13, lineHeight: 1.8, color: '#1a2c52', background: '#f9fafc', borderRadius: 12, padding: '18px 20px', marginBottom: 14 }}>{result}</div>
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <button className="v2-cta" onClick={copyToClipboard}>📋 Copy</button>
                 {deal.contactNo && <button className="v2-cta" onClick={shareWhatsApp} style={{ background: '#15803d' }}>📱 WhatsApp</button>}
-                <button className="v2-cta" onClick={generate} style={{ background: '#6b7a99' }}>🔄 Regenerate</button>
+                {!attach && <button className="v2-cta" onClick={() => doAttach(result)} disabled={saving} style={{ background: '#4169E1' }}>{saving ? 'Attaching…' : '📎 Attach to Proposal'}</button>}
+                <button className="v2-cta" onClick={() => { setResult(''); }} style={{ background: '#6b7a99' }}>🔄 Change vibe / Regenerate</button>
               </div>
             </>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VouchersModal({ deal, onClose }) {
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
+  const land = (deal.landVendors || []).filter((l) => l.itinerary || l.name);
+  const flights = (deal.flightVendors || []).some((f) => [...(f.sectors || []), ...(f.returnSectors || [])].some((s) => s.from || s.to));
+
+  const [inc, setInc] = useState({ hotel: hotels.length > 0, land: land.length > 0, flight: flights });
+  const toggle = (k) => setInc((s) => ({ ...s, [k]: !s[k] }));
+
+  const warnings = [];
+  if (inc.hotel) hotels.forEach((h) => { if (!h.confirmationNo) warnings.push(`Hotel "${h.hotelName}" — confirmation no. missing, will show "To be advised"`); });
+  if (inc.land) land.forEach((l) => {
+    if (!l.meetingPoints) warnings.push(`Land voucher "${l.name || 'Tours & Transfers'}" — meeting point missing`);
+    if (!l.confirmationNo) warnings.push(`Land voucher "${l.name || 'Tours & Transfers'}" — confirmation no. missing`);
+  });
+  if (!hotels.length && !land.length && !flights) warnings.push('No hotel, land, or flight components found on this deal yet — voucher will be mostly empty.');
+
+  const generate = () => { openVouchersV2(deal, inc); onClose(); };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 560, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🎫 Generate Vouchers</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 8 }}>WHAT TO INCLUDE</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', background: inc.hotel ? '#f0f5ff' : '#fff', border: '1px solid ' + (inc.hotel ? '#4169E1' : '#e3eaf7'), borderRadius: 8, padding: '9px 11px', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+              <input type="checkbox" checked={inc.hotel} onChange={() => toggle('hotel')} style={{ width: 15, height: 15, accentColor: '#4169E1' }} />
+              🏨 Hotel Vouchers {hotels.length ? `(${hotels.length})` : '(none on this deal)'}
+            </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', background: inc.land ? '#f0f5ff' : '#fff', border: '1px solid ' + (inc.land ? '#4169E1' : '#e3eaf7'), borderRadius: 8, padding: '9px 11px', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+              <input type="checkbox" checked={inc.land} onChange={() => toggle('land')} style={{ width: 15, height: 15, accentColor: '#4169E1' }} />
+              🗺️ Land / Transfer Vouchers {land.length ? `(${land.length})` : '(none on this deal)'}
+            </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', background: inc.flight ? '#f0f5ff' : '#fff', border: '1px solid ' + (inc.flight ? '#4169E1' : '#e3eaf7'), borderRadius: 8, padding: '9px 11px', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+              <input type="checkbox" checked={inc.flight} onChange={() => toggle('flight')} style={{ width: 15, height: 15, accentColor: '#4169E1' }} />
+              ✈️ Flight Details {flights ? '' : '(none on this deal)'}
+            </label>
+          </div>
+          {warnings.length > 0 && (
+            <div style={{ background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+              <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#8a6d1a', fontWeight: 800, marginBottom: 5 }}>⚠️ CHECK KARO ({warnings.length})</div>
+              {warnings.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: '#7a5c10', lineHeight: 1.7 }}>• {w}</div>)}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: 10, marginBottom: 16 }}>
+            Standard Voyage-Ed T&C are added automatically for hotel vouchers. For land/transfer, use <b>Land Voucher (AI)</b> to auto-fill meeting points, pickup times & remarks from a vendor document before generating here.
+          </div>
+          <button className="v2-cta" onClick={generate} style={{ width: '100%' }}>🎫 Generate Vouchers</button>
         </div>
       </div>
     </div>
@@ -5362,11 +5515,11 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             <button className="v2-hero-btn" onClick={() => {
               const w = window.open('', '_blank');
               if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
-              try { w.document.write(buildQuotationHTMLV2(deal, null)); w.document.close(); }
+              try { w.document.write(buildQuotationHTMLV2(deal, deal.aiItineraryText || null)); w.document.close(); }
               catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
             }}>📋 Quotation PDF</button>
             <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
-            <button className="v2-hero-btn" onClick={() => openVouchersV2(deal)}>🎫 Vouchers</button>
+            <button className="v2-hero-btn" onClick={() => setModal('vouchers')}>🎫 Vouchers</button>
             <button className="v2-hero-btn" onClick={() => setModal('landVoucherAI')}>🗺️ Land Voucher (AI)</button>
             <button className="v2-hero-btn" onClick={() => setModal('invoice')}>🧾 Invoice</button>
           </div>
@@ -6373,9 +6526,10 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} />}
+          {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'invoice' && <InvoiceModal deal={deal} onClose={() => setModal(null)} />}
+          {modal === 'vouchers' && <VouchersModal deal={deal} onClose={() => setModal(null)} />}
         </div>
 
         {/* Right sidebar */}
@@ -6474,7 +6628,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               </div>
             ) : (
               <>
-                {payments.slice(0, 5).map((p, i) => (
+                {payments.map((p, i) => (
                   <div key={'p' + i} className="v2-schedule-row">
                     <div>
                       <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
