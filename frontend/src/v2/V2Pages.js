@@ -1679,11 +1679,11 @@ function buildProposalHTMLV2(deal, opts) {
   const sell = o.showPrice ? sellINR(deal) : 0;
   const totalPax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
 
-  const dayHdr = /^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+  const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
   const parseDaysV2 = (text) => {
-    const raw = (text || '').split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const raw = (text || '').split(/\n+/).map((x) => x.trim().replace(/^#+\s*/, '')).filter(Boolean);
     const firstHdr = raw.findIndex((l) => dayHdr.test(l));
-    if (firstHdr < 0) return raw;
+    if (firstHdr < 0) return raw.length > 15 ? [] : raw; // safety: if no day headers found and text is huge, return empty rather than 72 "days"
     const out = []; let cur = null;
     raw.slice(firstHdr).forEach((l) => {
       if (dayHdr.test(l)) { if (cur !== null) out.push(cur); cur = l; }
@@ -1705,10 +1705,10 @@ function buildProposalHTMLV2(deal, opts) {
   // intro paragraph out separately to show as a warm note above the days.
   const aiIntroText = (() => {
     if (!aiItineraryRaw) return '';
-    const raw = aiItineraryRaw.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const raw = aiItineraryRaw.split(/\n+/).map((x) => x.trim().replace(/^#+\s*/, '')).filter(Boolean);
     const firstHdr = raw.findIndex((l) => dayHdr.test(l));
     if (firstHdr <= 0) return '';
-    return raw.slice(0, firstHdr).join(' ');
+    return raw.slice(0, firstHdr).filter((l) => !/^[-*_]{3,}$/.test(l)).join(' ');
   })();
 
   const dayIconV2 = (t) => {
@@ -1964,7 +1964,9 @@ function buildProposalHTMLV2(deal, opts) {
     const _bC = allDays.filter((d) => /breakfast/i.test(d)).length, _lC = allDays.filter((d) => /\blunch/i.test(d)).length, _dC = allDays.filter((d) => /dinner/i.test(d)).length;
     const mealSummary = (_bC || _lC || _dC) ? `<div style="margin:-2px 0 14px;display:flex;gap:8px;flex-wrap:wrap">${[_bC ? `🍳 ${_bC} Breakfast${_bC > 1 ? 's' : ''}` : '', _lC ? `🥗 ${_lC} Lunch${_lC > 1 ? 'es' : ''}` : '', _dC ? `🍽 ${_dC} Dinner${_dC > 1 ? 's' : ''}` : ''].filter(Boolean).map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:10px;font-weight:800;border-radius:20px;padding:5px 12px">${x} included</span>`).join('')}</div>` : '';
     const _cards = allDays.map((d, i) => {
-      const lines = String(d).split('\n');
+      // Strip markdown artifacts from AI-generated text before processing
+      const cleanD = String(d).replace(/^#+\s*/gm, '').replace(/^\s*[-*_]{3,}\s*$/gm, '').replace(/\*\*([^*]+)\*\*/g, '$1');
+      const lines = cleanD.split('\n').filter((l) => l.trim());
       let head = lines[0] || '';
       const m = head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);
       let rest = m ? m[2] : head;
@@ -1989,7 +1991,7 @@ function buildProposalHTMLV2(deal, opts) {
           ${(function () { const mm = mealsOfV2(d), tt = tagsOfV2(d); if (!mm.length && !tt.length) return ''; return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${mm.map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}${tt.map((x) => `<span style="background:#eef3fc;border:1px solid #d4e0f5;color:#334e82;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}</div>`; })()}
           ${(function () {
       if (!body) return '';
-      const hi = (t) => escHtml(t).replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
+      const hi = (t) => escHtml(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^[-*_]{3,}$/gm, '').replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
       // Lookbehind regex support in Safari only landed in 16.4 (Mar 2023) —
       // on an older iOS/Safari this would throw a SyntaxError the moment
       // the script parses, breaking the entire page (not just this one
@@ -3386,7 +3388,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   };
 
   const loadPropDays = () => {
-    const dayHdr = /^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+    const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
     const src = deal.aiItineraryText || (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
     const lines = src.split(/\n+/).map((x) => x.trim()).filter(Boolean);
     const firstHdr = lines.findIndex((l) => dayHdr.test(l));
@@ -3487,6 +3489,31 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
           </span>
           <button onClick={extendQuoteVT} title="+7 din" style={{ background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 800, color: '#334e82' }}>🔄 +7d</button>
         </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>💺 OCCUPANCY PRICING <span style={{ fontWeight: 400 }}>(optional — sharing-wise per person)</span></div>
+        {!(deal.pricingRows && deal.pricingRows.length) ? (
+          <button onClick={async () => { const updated = await patchDeal(deal._id, { pricingRows: [{ id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '2', pp: '' }] }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 14 }}>➕ Twin/Single/Triple/Child-wise pricing likho</button>
+        ) : (
+          <div style={{ marginBottom: 14, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }}>
+            {(deal.pricingRows || []).map((r, i) => (
+              <div key={r.id || i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                <select value={r.cat} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, cat: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ flex: 2, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', background: '#fff' }}>
+                  {['Adult — Twin Sharing', 'Adult — Single Occupancy', 'Adult — Triple Sharing', 'Child With Bed (2–11 yrs)', 'Child Without Bed (2–11 yrs)', 'Infant (0–2 yrs)', 'Extra Adult / Mattress'].map((c) => <option key={c}>{c}</option>)}
+                </select>
+                <input value={r.count || ''} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, count: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} placeholder="Pax" style={{ width: 50, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'center' }} />
+                <input value={r.pp || ''} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, pp: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} placeholder="₹ per person" style={{ width: 90, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'right' }} />
+                <button onClick={async () => { const rows = (deal.pricingRows || []).filter((x) => x.id !== r.id); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ background: 'transparent', border: '1px solid #fdeaea', color: '#b91c1c', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+              </div>
+            ))}
+            <button onClick={async () => { const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '', pp: '' }]; const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ width: '100%', background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#334e82' }}>+ Row</button>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>🏨 3★ / 4★ / 5★ OPTIONS <span style={{ fontWeight: 400 }}>(optional — teeno ek PDF mein side-by-side)</span></div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '11px 14px', cursor: 'pointer', marginBottom: 18 }}>
+          <input type="checkbox" checked={false} disabled style={{ width: 17, height: 17 }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#334e82' }}>3 options wali comparison PDF banao (client ko teeno choices dikhao)</span>
+        </label>
 
         <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>✅ INCLUSIONS / ✖ EXCLUSIONS</div>
         {propInc == null && (
