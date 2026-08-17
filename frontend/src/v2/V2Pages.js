@@ -1692,14 +1692,14 @@ function buildProposalHTMLV2(deal, opts) {
     if (cur !== null) out.push(cur);
     return out;
   };
+  // AI itinerary is the PRIMARY source when it exists — it was explicitly
+  // generated/approved by the ops team, so it takes precedence over raw
+  // vendor itinerary notes. Vendor notes are the fallback for deals where
+  // the AI tool hasn't been used yet.
   const landDayLines = (deal.landVendors || []).filter((l) => l.itinerary).map((l) => parseDaysV2(l.itinerary)).reduce((a, b) => a.concat(b), []);
-  // Fallback: if no manual land-vendor itinerary exists but the AI Itinerary
-  // Builder generated one and it was attached to this deal, use that instead
-  // — so the Proposal PDF is never missing a day-wise plan just because the
-  // ops team used the AI tool instead of typing it into a land vendor row.
-  const aiItineraryRaw = (!landDayLines.length && deal.aiItineraryText) ? deal.aiItineraryText : '';
+  const aiItineraryRaw = deal.aiItineraryText || '';
   const aiDayLines = aiItineraryRaw ? parseDaysV2(aiItineraryRaw) : [];
-  const allDayLines = landDayLines.length ? landDayLines : aiDayLines;
+  const allDayLines = aiDayLines.length ? aiDayLines : landDayLines;
   // The AI itinerary text also has an opening welcome note before "Day 1" —
   // parseDaysV2 drops everything before the first day header, so pull that
   // intro paragraph out separately to show as a warm note above the days.
@@ -3331,72 +3331,96 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
 // Step 2 is the actual proposal options (mirrors V1's Generate Proposal
 // panel) — both write to the SAME deal.aiItinerary* / generate options so
 // the intro tone and the itinerary the client sees are never out of sync. ──
-function ProposalBuilderModal({ deal, onClose, onDealUpdated }) {
+function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
+  const [deal, setDeal] = useState(initialDeal);
   const [step, setStep] = useState(deal.aiItineraryText ? 'options' : 'vibe');
   const [vibe, setVibe] = useState(deal.aiItineraryVibe || 'auto');
   const [genBusy, setGenBusy] = useState(false);
   const [genErr, setGenErr] = useState('');
-  const [liveDeal, setLiveDeal] = useState(deal);
 
-  const [mode, setMode] = useState('full'); // full | withoutFlights | flightsOnly
-  const [showPrice, setShowPrice] = useState(true);
-  const [coverUrl, setCoverUrl] = useState('');
-  const [editIncExc, setEditIncExc] = useState(false);
-  const [incText, setIncText] = useState(() => autoIncTextForDealV2(deal));
-  const [excText, setExcText] = useState(() => autoExcTextForDealV2(deal));
+  // Options step state — mirrors V1 exactly
+  const [propFlights, setPropFlights] = useState('with'); // with | without | only
+  const [propShowPrice, setPropShowPrice] = useState(true);
+  const [propCoverUrl, setPropCoverUrl] = useState('');
+  const [propInc, setPropInc] = useState(null); // null = auto
+  const [propExc, setPropExc] = useState(null);
+  const [propCancelMode, setPropCancelMode] = useState('static');
+  const [propCancelCustom, setPropCancelCustom] = useState('');
+  const [propDays, setPropDays] = useState(null); // null = auto, array = edited
+
+  const sell = sellINR(deal);
 
   const vibeInstruction = (v) => ({
-    auto: `First, infer the right tone from the pax breakdown and deal notes below (e.g. children present → family tone; 2 adults with no kids and a high budget → consider honeymoon or luxury; larger all-adult groups → friends trip). Then write in that inferred tone.`,
-    family: `Write for a FAMILY trip. Warm, reassuring, practical tone. Emphasize comfort, safety, kid-friendly pacing, multi-generational activities, and downtime. Avoid slang.`,
-    bachelors: `Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone — like a well-travelled friend planning the trip. Emphasize nightlife, adventure activities, group experiences, and flexibility. Keep it lively but still professional enough to send a client.`,
-    honeymoon: `Write for a HONEYMOON. Romantic, warm, intimate tone. Emphasize private experiences, candlelit dinners, sunset moments, and unhurried pacing. Elegant language, not over-the-top.`,
-    luxury: `Write for an UBER-LUXURY client. Sophisticated, understated, refined tone — think a five-star concierge letter. NO exclamation marks, no hard-sell language, no emojis in the prose (icons in headers are fine). Emphasize exclusivity, privacy, and seamlessness.`,
-    solo: `Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility, ease of getting around, safety notes, and opportunities to meet people or have quiet time as preferred.`,
+    auto: 'First, infer the right tone from the pax breakdown and deal notes below. Then write in that inferred tone.',
+    family: 'Write for a FAMILY trip. Warm, reassuring tone. Emphasize comfort, safety, kid-friendly pacing.',
+    bachelors: 'Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone. Emphasize nightlife, adventure, group experiences.',
+    honeymoon: 'Write for a HONEYMOON. Romantic, intimate tone. Emphasize private experiences, sunset moments.',
+    luxury: 'Write for an UBER-LUXURY client. Sophisticated, understated tone. NO exclamation marks.',
+    solo: 'Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility.',
   }[v] || '');
 
   const generateItinerary = async () => {
     setGenBusy(true); setGenErr('');
     try {
-      const d = liveDeal;
+      const d = deal;
       const hotels = (d.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''})`).join('; ');
-      const flights = (d.flightVendors || []).map((f) => {
-        const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
-        return secs.map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ');
-      }).join('; ');
+      const flights = (d.flightVendors || []).map((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ')).join('; ');
       const land = (d.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
       const cruises = (d.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${d.adults || 0} adults${Number(d.children) > 0 ? `, ${d.children} children` : ''}${Number(d.infants) > 0 ? `, ${d.infants} infants` : ''}`;
-      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(d) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
+      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Then Day 1: Title, followed by details. Include meals, transfers, tips.`;
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3200, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely — a bachelors trip and an uber-luxury honeymoon should read completely differently. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3200, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
       const text = (data.content || []).map((c) => c.text || '').join('');
       const updated = await patchDeal(d._id, { aiItineraryText: text, aiItineraryVibe: vibe });
-      setLiveDeal(updated);
+      setDeal(updated);
       onDealUpdated && onDealUpdated(updated);
       setStep('options');
-    } catch (e) {
-      setGenErr(e.message || 'Could not generate');
-    }
+      window.veToast && window.veToast('AI itinerary generated & attached ✓', 'success');
+    } catch (e) { setGenErr(e.message || 'Could not generate'); }
     setGenBusy(false);
   };
 
+  const loadPropDays = () => {
+    const dayHdr = /^(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+    const src = deal.aiItineraryText || (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
+    const lines = src.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    const firstHdr = lines.findIndex((l) => dayHdr.test(l));
+    if (firstHdr < 0) { setPropDays(['']); return; }
+    const days = []; let cur = null;
+    lines.slice(firstHdr).forEach((l) => { if (dayHdr.test(l)) { if (cur !== null) days.push(cur); cur = l; } else { cur = cur === null ? l : cur + '\n' + l; } });
+    if (cur !== null) days.push(cur);
+    setPropDays(days.length ? days : ['']);
+  };
+
   const generate = () => {
-    openProposalV2(liveDeal, {
-      mode, showPrice, coverUrl: coverUrl.trim(),
-      incText: editIncExc ? incText : null,
-      excText: editIncExc ? excText : null,
+    openProposalV2(deal, {
+      mode: propFlights === 'without' ? 'withoutFlights' : propFlights === 'only' ? 'flightsOnly' : 'full',
+      showPrice: propShowPrice,
+      coverUrl: propCoverUrl.trim(),
+      incText: propInc, excText: propExc,
     });
     onClose();
   };
 
+  const quoteVTDisplay = deal.quoteValidTill
+    ? new Date(deal.quoteValidTill).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : new Date(Date.now() + 7 * 864e5).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const quoteDaysLeft = deal.quoteValidTill ? Math.max(0, Math.round((new Date(deal.quoteValidTill) - Date.now()) / 864e5)) : 7;
+  const extendQuoteVT = async () => {
+    const d = new Date((deal.quoteValidTill ? new Date(deal.quoteValidTill) : new Date()).getTime() + 7 * 864e5).toISOString().slice(0, 10);
+    const updated = await patchDeal(deal._id, { quoteValidTill: d });
+    setDeal(updated); onDealUpdated && onDealUpdated(updated);
+  };
+
+  // Vibe step
   if (step === 'vibe') {
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
         <div style={{ background: '#fff', borderRadius: 18, width: 620, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 30px 80px rgba(0,0,0,.35)' }}>
           <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>📄 Client Proposal</h3>
@@ -3404,15 +3428,10 @@ function ProposalBuilderModal({ deal, onClose, onDealUpdated }) {
           </div>
           <div style={{ padding: '18px 24px' }}>
             <div style={{ fontSize: 13, color: '#33446b', fontWeight: 600, marginBottom: 4 }}>Ye trip kis type ke liye hai?</div>
-            <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 14 }}>AI isi ke hisaab se intro message aur day-wise itinerary likhega — yehi tone proposal PDF mein bhi jayegi, alag se dobara likhne ki zaroorat nahi.</div>
+            <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 14 }}>AI isi ke hisaab se intro message aur day-wise itinerary likhega — yehi tone proposal PDF mein bhi jayegi.</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
               {AI_VIBE_OPTIONS.map((o) => (
-                <label key={o.id} style={{
-                  display: 'flex', flexDirection: 'column', gap: 2, cursor: 'pointer',
-                  border: '1px solid ' + (vibe === o.id ? '#c9a84c' : '#e3eaf7'),
-                  background: vibe === o.id ? '#fdf6e5' : '#fff',
-                  borderRadius: 10, padding: '9px 12px',
-                }}>
+                <label key={o.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'pointer', border: '1px solid ' + (vibe === o.id ? '#c9a84c' : '#e3eaf7'), background: vibe === o.id ? '#fdf6e5' : '#fff', borderRadius: 10, padding: '9px 12px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, color: '#0d1b3e' }}>
                     <input type="radio" name="proposal-vibe" checked={vibe === o.id} onChange={() => setVibe(o.id)} style={{ accentColor: '#c9a84c' }} />
                     {o.label}
@@ -3423,10 +3442,8 @@ function ProposalBuilderModal({ deal, onClose, onDealUpdated }) {
             </div>
             {genErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 12, marginBottom: 12 }}>{genErr}</div>}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>
-                {genBusy ? '⏳ Writing itinerary… (15-30s)' : '✨ Write Itinerary & Continue'}
-              </button>
-              <button className="v2-cta" disabled={genBusy} onClick={() => setStep('options')} style={{ flex: 1, background: '#6b7a99' }}>Skip</button>
+              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? '⏳ Writing itinerary… (15-30s)' : '✨ Write Itinerary & Continue'}</button>
+              <button className="v2-cta" disabled={genBusy} onClick={() => setStep('options')} style={{ flex: 1, background: '#6b7a99' }}>Skip →</button>
             </div>
           </div>
         </div>
@@ -3434,71 +3451,97 @@ function ProposalBuilderModal({ deal, onClose, onDealUpdated }) {
     );
   }
 
-  const warnings = [];
-  if (!(sellINR(liveDeal) > 0)) warnings.push('No selling price set on this deal yet.');
-  if (!liveDeal.contactNo && !liveDeal.email) warnings.push('Client phone/email missing — WhatsApp/Email send kaam nahi karega.');
-
+  // Options step — mirrors V1 exactly
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: '#fff', borderRadius: 18, width: 560, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,.35)' }}>
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 10, letterSpacing: 2, color: '#f97316', fontWeight: 800 }}>CLIENT PROPOSAL</div>
-            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>Generate Proposal</h3>
-          </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
-          {liveDeal.aiItineraryText && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0faf4', border: '1px solid #cfe9d6', borderRadius: 10, padding: '9px 12px', marginBottom: 14, fontSize: 11.5, color: '#15803d', fontWeight: 700 }}>
-              <span>✓ AI itinerary attached ({AI_VIBE_OPTIONS.find((o) => o.id === liveDeal.aiItineraryVibe)?.label || 'custom'})</span>
-              <button onClick={() => setStep('vibe')} style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'underline' }}>Change</button>
-            </div>
-          )}
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, padding: '26px', width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 30px 80px rgba(0,0,0,.35)' }}>
+        <div style={{ fontSize: 10, letterSpacing: 2, color: '#f97316', fontWeight: 800, marginBottom: 4 }}>CLIENT PROPOSAL</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: '#0f2350', marginBottom: 16 }}>📄 Generate Proposal</div>
 
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>WHAT TO INCLUDE</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-            {[['full', '✈️+🏨 Full package'], ['withoutFlights', '🏨 Without flights'], ['flightsOnly', '✈️ Flights only']].map(([id, label]) => (
-              <button key={id} onClick={() => setMode(id)} style={{ flex: '1 1 120px', background: mode === id ? '#0d1b3e' : '#f4f7fc', color: mode === id ? '#fff' : '#334e82', border: '1px solid ' + (mode === id ? '#0d1b3e' : '#d4e0f5'), borderRadius: 10, padding: '10px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>WHAT TO INCLUDE</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {[['with', '✈️+🏨 Full package'], ['without', '🏨 Without flights'], ['only', '✈️ Flights only']].map(([id, label]) => {
+            const act = propFlights === id;
+            return <button key={id} onClick={() => setPropFlights(id)} style={{ flex: '1 1 120px', background: act ? '#0d1b3e' : '#f4f7fc', color: act ? '#fff' : '#334e82', border: '1px solid ' + (act ? '#0d1b3e' : '#d4e0f5'), borderRadius: 10, padding: '10px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>;
+          })}
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '11px 14px', cursor: 'pointer', marginBottom: 12 }}>
+          <input type="checkbox" checked={propShowPrice} onChange={(e) => setPropShowPrice(e.target.checked)} style={{ width: 17, height: 17, accentColor: '#c9961a' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1a2c52' }}>Show selling price {propShowPrice && sell > 0 && <b style={{ color: '#15803d' }}>(₹{sell.toLocaleString('en-IN')})</b>}</span>
+        </label>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>COVER PHOTO URL <span style={{ fontWeight: 400 }}>(optional — paste any image link)</span></div>
+        <input value={propCoverUrl} onChange={(e) => setPropCoverUrl(e.target.value)} placeholder="https://... (blank = auto/premium cover)" style={{ width: '100%', background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '10px 13px', fontSize: 12, outline: 'none', marginBottom: 18 }} />
+
+        {deal.aiItineraryText && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0faf4', border: '1px solid #cfe9d6', borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 11.5, fontWeight: 700 }}>
+            <span style={{ color: '#15803d' }}>✓ AI itinerary attached ({AI_VIBE_OPTIONS.find((o) => o.id === deal.aiItineraryVibe)?.label || 'custom'})</span>
+            <button onClick={() => setStep('vibe')} style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'underline' }}>Change vibe</button>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ flex: 1, fontSize: 11, fontWeight: 800, borderRadius: 8, padding: '8px 12px', background: quoteDaysLeft > 3 ? '#f0faf4' : quoteDaysLeft >= 1 ? '#fff7ed' : '#fdf1f1', color: quoteDaysLeft > 3 ? '#15803d' : quoteDaysLeft >= 1 ? '#c2660a' : '#b91c1c', border: '1px solid ' + (quoteDaysLeft > 3 ? '#cfe9d6' : quoteDaysLeft >= 1 ? '#f3dfc0' : '#f3c6c6') }}>
+            ⏳ Quote valid till {quoteVTDisplay}{deal.quoteValidTill ? ` — ${quoteDaysLeft} din ${quoteDaysLeft === 1 ? 'bacha' : 'bache'}` : ' (generate pe lock hogi)'}
+          </span>
+          <button onClick={extendQuoteVT} title="+7 din" style={{ background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 800, color: '#334e82' }}>🔄 +7d</button>
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>✅ INCLUSIONS / ✖ EXCLUSIONS</div>
+        {propInc == null && (
+          <button onClick={() => { setPropInc(autoIncTextForDealV2(deal)); setPropExc(autoExcTextForDealV2(deal)); }} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 14 }}>✏️ Edit Inclusions & Exclusions</button>
+        )}
+        {propInc != null && (
+          <div style={{ marginBottom: 14, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', marginBottom: 4 }}>✅ INCLUSIONS (one per line)</div>
+            <textarea value={propInc} onChange={(e) => setPropInc(e.target.value)} rows={5} style={{ width: '100%', background: '#fff', border: '1px solid #d3ecd9', borderRadius: 8, padding: '8px 11px', fontSize: 11.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6, marginBottom: 8 }} />
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#b4540a', marginBottom: 4 }}>✖ EXCLUSIONS (one per line)</div>
+            <textarea value={propExc == null ? '' : propExc} onChange={(e) => setPropExc(e.target.value)} rows={4} style={{ width: '100%', background: '#fff', border: '1px solid #f3e3cf', borderRadius: 8, padding: '8px 11px', fontSize: 11.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
+            <button onClick={() => { setPropInc(null); setPropExc(null); }} style={{ marginTop: 8, width: '100%', background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#7d8bab' }}>↺ Reset to auto (visa/flights ke hisab se)</button>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>ITINERARY (DAY-WISE)</div>
+        {!propDays && (
+          <button onClick={loadPropDays} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 14 }}>✏️ Edit itinerary day-wise before generating</button>
+        )}
+        {propDays && (
+          <div style={{ marginBottom: 14, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }}>
+            {propDays.map((d, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                <div style={{ minWidth: 44, background: 'linear-gradient(135deg,#c9961a,#f0c842)', borderRadius: 8, textAlign: 'center', padding: '5px 0', fontSize: 10, fontWeight: 800, color: '#0d1b3e' }}>DAY<br />{i + 1}</div>
+                <textarea value={d} rows={2} onChange={(e) => { const a = propDays.slice(); a[i] = e.target.value; setPropDays(a); }}
+                  style={{ flex: 1, background: '#fff', border: '1px solid #d4e0f5', borderRadius: 8, padding: '7px 10px', fontSize: 11.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+                <button onClick={() => { const a = propDays.slice(); a.splice(i, 1); setPropDays(a.length ? a : ['']); }} title="Remove day" style={{ background: 'transparent', border: '1px solid #fdeaea', color: '#b91c1c', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+              </div>
             ))}
-          </div>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '11px 14px', cursor: 'pointer', marginBottom: 12 }}>
-            <input type="checkbox" checked={showPrice} onChange={(e) => setShowPrice(e.target.checked)} style={{ width: 17, height: 17, accentColor: '#c9961a' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1a2c52' }}>Show selling price {showPrice && sellINR(liveDeal) > 0 && <b style={{ color: '#15803d' }}>({fmtINR(sellINR(liveDeal))})</b>}</span>
-          </label>
-
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>COVER PHOTO URL <span style={{ fontWeight: 400 }}>(optional)</span></div>
-          <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="https://... (blank = auto/premium cover)" style={{ ...inputStyle, marginBottom: 16 }} />
-
-          {warnings.length > 0 && (
-            <div style={{ background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
-              <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#8a6d1a', fontWeight: 800, marginBottom: 5 }}>⚠️ CHECK KARO ({warnings.length})</div>
-              {warnings.map((w, i) => <div key={i} style={{ fontSize: 11.5, color: '#7a5c10', lineHeight: 1.7 }}>• {w}</div>)}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setPropDays(propDays.concat(['']))} style={{ flex: 1, background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#334e82' }}>+ Add day</button>
+              <button onClick={() => setPropDays(null)} style={{ flex: 1, background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#7d8bab' }}>↺ Reset to auto</button>
             </div>
-          )}
-
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>✅ INCLUSIONS / ✖ EXCLUSIONS</div>
-          {!editIncExc && (
-            <button onClick={() => setEditIncExc(true)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 16 }}>✏️ Edit Inclusions &amp; Exclusions</button>
-          )}
-          {editIncExc && (
-            <div style={{ marginBottom: 16, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }}>
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', marginBottom: 4 }}>✅ INCLUSIONS (one per line)</div>
-              <textarea value={incText} onChange={(e) => setIncText(e.target.value)} rows={5} style={{ width: '100%', background: '#fff', border: '1px solid #d3ecd9', borderRadius: 8, padding: '8px 11px', fontSize: 11.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6, marginBottom: 8 }} />
-              <div style={{ fontSize: 10, fontWeight: 800, color: '#b4540a', marginBottom: 4 }}>✖ EXCLUSIONS (one per line)</div>
-              <textarea value={excText} onChange={(e) => setExcText(e.target.value)} rows={4} style={{ width: '100%', background: '#fff', border: '1px solid #f3e3cf', borderRadius: 8, padding: '8px 11px', fontSize: 11.5, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
-              <button onClick={() => { setIncText(autoIncTextForDealV2(liveDeal)); setExcText(autoExcTextForDealV2(liveDeal)); setEditIncExc(false); }} style={{ marginTop: 8, width: '100%', background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#7d8bab' }}>↺ Reset to auto</button>
-            </div>
-          )}
-
-          <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: 10, marginBottom: 16 }}>
-            3★/4★/5★ tiered pricing aur occupancy-wise pricing rows already deal page ke sidebar se editable hain — wahan set karo, proposal automatically pick kar lega.
           </div>
+        )}
 
-          <button className="v2-cta" onClick={generate} style={{ width: '100%' }}>📄 Generate Proposal</button>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>CANCELLATION POLICY</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: propCancelMode === 'custom' ? 8 : 14, flexWrap: 'wrap' }}>
+          {[['static', '📋 Static (official policy)'], ['custom', '✏️ Amend for this booking']].map(([id, label]) => {
+            const act = propCancelMode === id;
+            return <button key={id} onClick={() => { setPropCancelMode(id); if (id === 'custom' && !propCancelCustom) setPropCancelCustom('Non-refundable once booked\nDate change not permitted\nNo refund for unused services\nVisa fee & service charges non-refundable'); }} style={{ flex: '1 1 150px', background: act ? '#0d1b3e' : '#f4f7fc', color: act ? '#fff' : '#334e82', border: '1px solid ' + (act ? '#0d1b3e' : '#d4e0f5'), borderRadius: 10, padding: '10px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>;
+          })}
         </div>
+        {propCancelMode === 'custom' && (
+          <div style={{ marginBottom: 14 }}>
+            <textarea value={propCancelCustom} onChange={(e) => setPropCancelCustom(e.target.value)} rows={5} placeholder="One condition per line"
+              style={{ width: '100%', background: '#fdf6e5', border: '1px dashed #c9961a', borderRadius: 10, padding: '10px 13px', fontSize: 12, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }} />
+            <div style={{ fontSize: 10, color: '#8a6d1a', marginTop: 4 }}>💡 Yeh terms proposal + legal T&C dono mein automatically apply hongi.</div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={generate} style={{ flex: 1, background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#fff', border: 'none', borderRadius: 11, padding: 13, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>🖨 Preview / PDF</button>
+        </div>
+        <div style={{ fontSize: 10, color: '#8a97b5', marginTop: 10, textAlign: 'center' }}>PDF: browser print dialog se "Save as PDF" karo</div>
       </div>
     </div>
   );
