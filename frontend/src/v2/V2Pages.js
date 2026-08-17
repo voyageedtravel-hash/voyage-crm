@@ -223,10 +223,15 @@ const refundedINR = (d) => sumBy(d.refunds, 'amount');
 // carried over — niche field, not worth the extra complexity here.
 const netSellINR = (d) => sellINR(d) - refundedINR(d);
 const profitINR = (d) => netSellINR(d) - costINR(d);
+// V1's dealGst() computes GST off the RAW sell price (dealSell), not the
+// refund-adjusted netSell — only the Gross Profit / balance figures get the
+// refund adjustment in V1, GST does not. V2 previously used netSellINR here,
+// which silently produced a different GST (and therefore Net Profit) total
+// than V1 on any deal with a refund. Matched to V1 exactly now.
 const gstINR = (d) => {
   const mode = d.gstMode || 'profit';
   if (mode === 'none') return 0;
-  const sell = netSellINR(d), cost = costINR(d), gpm = sell - cost;
+  const sell = sellINR(d), cost = costINR(d), gpm = sell - cost;
   return mode === 'package' ? sell * GST_RATE_PACKAGE : (gpm > 0 ? gpm * GST_RATE_PROFIT : 0);
 };
 // eslint-disable-next-line no-unused-vars
@@ -335,9 +340,10 @@ function DashboardV2({ leads, onDealClick }) {
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
   const stats = useMemo(() => {
-    let collections = 0, profit = 0, vendorPmts = 0, gst = 0, vendorPaid = 0;
+    let collections = 0, sell = 0, profit = 0, vendorPmts = 0, gst = 0, vendorPaid = 0;
     booked.forEach((l) => {
       collections += paidINR(l);
+      sell += sellINR(l);
       vendorPmts += costINR(l);
       profit += profitINR(l);
       gst += gstINR(l);
@@ -346,7 +352,7 @@ function DashboardV2({ leads, onDealClick }) {
     });
     const vendorDue = Math.max(0, vendorPmts - vendorPaid);
     const clientDue = booked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0);
-    return { collections, bookings: booked.length, profit, vendorPmts, gst, netProfit: profit - gst, vendorPaid, vendorDue, clientDue };
+    return { collections, sell, bookings: booked.length, profit, vendorPmts, gst, netProfit: profit - gst, vendorPaid, vendorDue, clientDue };
   }, [booked]);
 
   const openDrilldown = (title, filterFn, valueFn, valueLabel) => {
@@ -471,6 +477,46 @@ function DashboardV2({ leads, onDealClick }) {
           <div className="v2-kpi-label">Net Profit</div>
           <div className="v2-kpi-value">{fmtINR(stats.netProfit)}</div>
           <div className="v2-kpi-delta">GPM {fmtINR(stats.profit)} − GST {fmtINR(stats.gst)}</div>
+        </div>
+      </div>
+
+      {/* Full V1-style booked breakdown — same source (stats/booked), same
+          formulas (sellINR/costINR/profitINR/gstINR/paidINR/netSellINR) as
+          V1's dealFinance()/rollup(), so these numbers are guaranteed to
+          match the V1 dashboard's "Booked" card grid exactly. */}
+      <h2 className="v2-section-title" style={{ marginTop: 8 }}>✅ Booked — {stats.bookings} deals</h2>
+      <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' }}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Sale Price Breakdown', null, sellINR, 'Sale Price')}>
+          <div className="v2-kpi-label">Sale Price</div>
+          <div className="v2-kpi-value">{fmtINR(stats.sell)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Cost Price Breakdown', null, costINR, 'Cost Price')}>
+          <div className="v2-kpi-label">Cost Price</div>
+          <div className="v2-kpi-value">{fmtINR(stats.vendorPmts)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Gross Profit Breakdown', null, profitINR, 'Gross Profit')}>
+          <div className="v2-kpi-label">Gross Profit</div>
+          <div className="v2-kpi-value" style={{ color: stats.profit >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(stats.profit)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Net (after GST) Breakdown', null, (d) => profitINR(d) - gstINR(d), 'Net')}>
+          <div className="v2-kpi-label">Net (after GST)</div>
+          <div className="v2-kpi-value" style={{ color: stats.netProfit >= 0 ? '#f97316' : '#ef4444' }}>{fmtINR(stats.netProfit)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Paid Breakdown', null, (d) => dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0), 'Vendor Paid')}>
+          <div className="v2-kpi-label">Vendor Paid</div>
+          <div className="v2-kpi-value" style={{ color: '#4169E1' }}>{fmtINR(stats.vendorPaid)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Pending Breakdown', (d) => costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0) > 0, (d) => Math.max(0, costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0)), 'Vendor Pending')}>
+          <div className="v2-kpi-label">Vendor Pending</div>
+          <div className="v2-kpi-value" style={{ color: stats.vendorDue > 0 ? '#ef4444' : '#10b981' }}>{fmtINR(stats.vendorDue)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Received Breakdown', null, paidINR, 'Client Received')}>
+          <div className="v2-kpi-label">Client Received</div>
+          <div className="v2-kpi-value" style={{ color: '#10b981' }}>{fmtINR(stats.collections)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Pending Breakdown', (d) => netSellINR(d) - paidINR(d) > 0, (d) => Math.max(0, netSellINR(d) - paidINR(d)), 'Client Pending')}>
+          <div className="v2-kpi-label">Client Pending</div>
+          <div className="v2-kpi-value" style={{ color: stats.clientDue > 0 ? '#f59e0b' : '#10b981' }}>{fmtINR(stats.clientDue)}</div>
         </div>
       </div>
 
