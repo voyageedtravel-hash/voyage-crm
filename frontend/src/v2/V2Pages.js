@@ -1284,6 +1284,17 @@ const CANCEL_STATUSES = ['Pending', 'Refund Approved', 'Refund Processed', 'No R
 const TRAIN_CLASSES = ['1A','2A','3A','SL','CC','EC','2S','Sleeper','First Class','Business','Standard','Other'];
 // eslint-disable-next-line no-unused-vars
 const OCC_CATS = ['Adult — Twin Sharing','Adult — Single Occupancy','Adult — Triple Sharing','Child With Bed (2–11 yrs)','Child Without Bed (2–11 yrs)','Infant (0–2 yrs)','Extra Adult / Mattress'];
+
+const MEAL_PLANS = [
+  { id: 'bb', label: 'Breakfast Only (BB)', short: 'Breakfast included' },
+  { id: 'hb', label: 'Half Board (HB)', short: 'Half Board (Breakfast + Lunch/Dinner)' },
+  { id: 'fb', label: 'Full Board (FB)', short: 'Full Board (B/L/D)' },
+  { id: 'ai', label: 'All Inclusive (AI)', short: 'All Inclusive' },
+  { id: 'aip', label: 'All Inclusive+ (AI+)', short: 'All Inclusive+' },
+  { id: 'spai', label: 'Super Premium All Inclusive', short: 'Super Premium AI' },
+  { id: 'ro', label: 'Room Only (No Meals)', short: 'Room Only' },
+];
+const mealPlanLabel = (id) => (MEAL_PLANS.find((m) => m.id === id) || MEAL_PLANS[0]).short;
 const GST_RATE_PROFIT = 0.18;
 const GST_RATE_PACKAGE = 0.05;
 const lookupCountry = (city) => CITY_COUNTRY[(city || '').toLowerCase().trim()] || '';
@@ -1727,7 +1738,7 @@ function buildProposalHTMLV2(deal, opts) {
   const statsRibbon = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px">
     ${nightsTotal ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${nightsTotal}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">NIGHTS</div></div>` : ''}
     ${_tiers.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${_tiers.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">STAY OPTIONS</div></div>`
-      : (showH && hotels.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${hotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${hotels.length > 1 ? 'S' : ''}</div></div>` : '')}
+      : (showH && hotels.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${mergedHotels.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">PREMIUM STAY${mergedHotels.length > 1 ? 'S' : ''}</div></div>` : '')}
     ${showF && flights.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${flights.reduce((s, f) => s + ((f.sectors || []).filter((x) => x.from || x.to).length) + ((f.returnSectors || []).filter((x) => x.from || x.to).length), 0)}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">FLIGHT SECTORS</div></div>` : ''}
     ${allDayLines.length ? `<div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${allDayLines.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">CURATED DAYS</div></div>` : ''}
     <div style="flex:1;min-width:110px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:13px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#0d1b3e">${totalPax || '–'}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">TRAVELLER${totalPax > 1 ? 'S' : ''}</div></div>
@@ -1735,7 +1746,7 @@ function buildProposalHTMLV2(deal, opts) {
 
   const hlItems = [];
   if (showF && flights.length) hlItems.push('✈️ Flights handpicked for the best timings & baggage');
-  if (showH && hotels.length) hlItems.push(`🏨 ${hotels.length} premium stay${hotels.length > 1 ? 's' : ''} with breakfast included`);
+  if (showH && mergedHotels.length) hlItems.push(`🏨 ${mergedHotels.length} premium stay${mergedHotels.length > 1 ? 's' : ''} with meals included`);
   if (allDayLines.length) hlItems.push(`🗺️ ${allDayLines.length}-day fully curated experience — zero planning stress`);
   hlItems.push('🤝 Dedicated Voyage-Ed trip manager on WhatsApp, before & during your trip');
   const highlightsHTML = `<div style="background:linear-gradient(135deg,#fdf9ee,#fff);border-left:4px solid #c9961a;border-radius:0 14px 14px 0;padding:16px 20px;margin:0 0 18px">
@@ -1922,14 +1933,45 @@ function buildProposalHTMLV2(deal, opts) {
     </div>`;
   }).join('');
 
-  const hotelBlocks = showH ? hotels.map((h) => `
+  // ── Smart hotel deduplication: when the same hotel with the same check-in
+  // and check-out dates appears multiple times (because rooms were booked
+  // through different vendors — e.g. 2 from MMT, 3 from TBO), group them
+  // into a single display card showing the combined room count. The deal's
+  // underlying data stays vendor-separated (for cost tracking); this is
+  // purely a presentation merge for the client-facing proposal. ──
+  const mergedHotels = (() => {
+    const map = new Map();
+    hotels.forEach((h) => {
+      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.checkIn || '')}::${(h.checkOut || '')}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          ...h,
+          _totalRooms: Number(h.rooms) || 1,
+          _vendors: [{ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
+          _totalSell: toINR(h.sellingPrice, h.currency, h.exchangeRate),
+        });
+      } else {
+        const g = map.get(key);
+        g._totalRooms += Number(h.rooms) || 1;
+        g._totalSell += toINR(h.sellingPrice, h.currency, h.exchangeRate);
+        g._vendors.push({ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
+        // Use the best photo / highest star rating / most complete data from any entry
+        if (!g.photoUrl && h.photoUrl) g.photoUrl = h.photoUrl;
+        if ((Number(h.starRating) || 0) > (Number(g.starRating) || 0)) g.starRating = h.starRating;
+        if (!g.roomCategory && h.roomCategory) g.roomCategory = h.roomCategory;
+      }
+    });
+    return [...map.values()];
+  })();
+
+  const hotelBlocks = showH ? mergedHotels.map((h) => `
     <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
       ${h.photoUrl ? `<img src="${escHtml(h.photoUrl)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
         <div>
           <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${escHtml((h.city || '').toUpperCase())}${h.country ? ' · ' + escHtml(h.country.toUpperCase()) : ''}</div>
           <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${escHtml(h.hotelName) || 'Hotel'}</div>
-          <div style="font-size:12px;color:#5a6b8c">${escHtml(h.roomCategory)} · Breakfast included</div>
+          <div style="font-size:12px;color:#5a6b8c">${escHtml(h.roomCategory)} · ${escHtml(mealPlanLabel(h.mealPlan))}${h._totalRooms > 1 ? ` · <b>${h._totalRooms} Rooms</b>` : ''}</div>
           ${h.starRating ? `<div style="font-size:13px;color:#f0c842;margin-top:3px">${'★'.repeat(Number(h.starRating) || 0)}<span style="color:#c9ccd4">${'★'.repeat(Math.max(0, 5 - (Number(h.starRating) || 0)))}</span></div>` : ''}
         </div>
         <div style="text-align:right">
@@ -3984,12 +4026,17 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
     sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
     exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
     country: editing.country || '', city: editing.city || '', starRating: editing.starRating || '4',
-    roomCategory: editing.roomCategory || '', checkIn: editing.checkIn || '', checkOut: editing.checkOut || '',
+    roomCategory: editing.roomCategory || '', mealPlan: editing.mealPlan || 'bb',
+    rooms: editing.rooms != null ? String(editing.rooms) : '1',
+    vendorSource: editing.vendorSource || '',
+    checkIn: editing.checkIn || '', checkOut: editing.checkOut || '',
     confirmationNo: editing.confirmationNo || '', photoUrl: editing.photoUrl || '',
     paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     hotelName: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-    country: '', city: '', starRating: '4', roomCategory: '', checkIn: '', checkOut: '', confirmationNo: '',
+    country: '', city: '', starRating: '4', roomCategory: '', mealPlan: 'bb',
+    rooms: '1', vendorSource: '',
+    checkIn: '', checkOut: '', confirmationNo: '',
     photoUrl: '', paxPricing: false, paxRates: {},
   });
   const [extraHotels, setExtraHotels] = useState([]); // any additional hotels found beyond the first
@@ -4063,6 +4110,9 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         country: form.country, city: form.city,
         starRating: form.starRating, roomCategory: form.roomCategory,
+        mealPlan: form.mealPlan || 'bb',
+        rooms: Number(form.rooms) || 1,
+        vendorSource: form.vendorSource,
         checkIn: form.checkIn, checkOut: form.checkOut, confirmationNo: form.confirmationNo,
         photoUrl: form.photoUrl,
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
@@ -4146,6 +4196,22 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
           <option value="">Select…</option>
           {ROOM_CATEGORIES.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Meal Plan</div>
+          <select value={form.mealPlan} onChange={set('mealPlan')} style={inputStyle}>
+            {MEAL_PLANS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Rooms</div>
+          <input type="number" min="1" value={form.rooms} onChange={set('rooms')} style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Booked via</div>
+          <input value={form.vendorSource} onChange={set('vendorSource')} placeholder="e.g. MMT, TBO, Tripjack" style={inputStyle} />
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -6569,7 +6635,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                             {h.starRating && <span className="stars">{'★'.repeat(Number(h.starRating) || 3)}</span>}
                           </div>
                           <div className="v2-hotel-meta">
-                            {h.roomCategory || 'Standard'} · {h.city || ''} {h.nights ? `· ${h.nights} nights` : ''}
+                            {h.roomCategory || 'Standard'} · {mealPlanLabel(h.mealPlan)} · {h.city || ''} {h.nights ? `· ${h.nights} nights` : ''}{Number(h.rooms) > 1 ? ` · ${h.rooms} rooms` : ''}{h.vendorSource ? ` · via ${h.vendorSource}` : ''}
                           </div>
                         </div>
                         <div className="v2-hotel-price">
