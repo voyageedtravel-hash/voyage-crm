@@ -2003,7 +2003,20 @@ function buildProposalHTMLV2(deal, opts) {
     const _hn = (deal.hotelVendors || []).map((h) => ({ h, ci: _hp(h.checkIn), co: _hp(h.checkOut) })).filter((x) => x.ci !== null && x.co !== null && x.co > x.ci);
     const _t0 = _hn.length ? Math.min.apply(null, _hn.map((x) => x.ci)) : null;
     const overnightFor = (i) => { if (_t0 === null) return null; const t = _t0 + i * 86400000; const f = _hn.find((x) => t >= x.ci && t < x.co); return f ? f.h : null; };
-    const mealsOfV2 = (d) => { const c = []; if (/breakfast/i.test(d)) c.push('🍳 Breakfast'); if (/\blunch/i.test(d)) c.push('🥗 Lunch'); if (/dinner/i.test(d)) c.push('🍽 Dinner'); return c; };
+    // Detects meals ONLY when they're genuinely included. Negation phrases like
+    // "lunch on own account", "dinner at own cost", "not included", "excluding
+    // lunch", "no lunch provided" must NOT show a Lunch/Dinner chip — earlier
+    // logic was greedy and showed chips whenever the word appeared anywhere,
+    // which lied to the client and created a real financial loss risk.
+    const isMealIncluded = (text, meal) => {
+      const re = new RegExp('([^.!?\\n]*\\b' + meal + '\\b[^.!?\\n]*)', 'gi');
+      const sentences = text.match(re) || [];
+      if (!sentences.length) return false;
+      // Any sentence mentioning the meal must NOT contain a negation phrase
+      const negation = /\b(on own|at own|own account|own cost|not included|excluding|excluded|no\s+\w*\s*(?:breakfast|lunch|dinner)|without|exclude|at extra cost|extra cost|payable|pay direct|direct payment|at\s+(?:the\s+)?guests?['’]?\s*expense|guests?['’]?\s*(?:own|expense)|no meals|meals not|except|beyond breakfast|other than breakfast)\b/i;
+      return sentences.some((s) => !negation.test(s));
+    };
+    const mealsOfV2 = (d) => { const c = []; if (isMealIncluded(d, 'breakfast')) c.push('🍳 Breakfast'); if (isMealIncluded(d, 'lunch')) c.push('🥗 Lunch'); if (isMealIncluded(d, 'dinner')) c.push('🍽 Dinner'); return c; };
     const tagsOfV2 = (d) => {
       const t = [];
       if (/temple|monastery|pagoda|shakti|church|cathedral|mosque|gurudwara/i.test(d)) t.push('🛕 Temples');
@@ -2016,7 +2029,7 @@ function buildProposalHTMLV2(deal, opts) {
       if (!t.length && /transfer|proceed to|drive to|drop/i.test(d)) t.push('🚗 Transfer Day');
       return t.slice(0, 3);
     };
-    const _bC = allDays.filter((d) => /breakfast/i.test(d)).length, _lC = allDays.filter((d) => /\blunch/i.test(d)).length, _dC = allDays.filter((d) => /dinner/i.test(d)).length;
+    const _bC = allDays.filter((d) => isMealIncluded(d, 'breakfast')).length, _lC = allDays.filter((d) => isMealIncluded(d, 'lunch')).length, _dC = allDays.filter((d) => isMealIncluded(d, 'dinner')).length;
     const mealSummary = (_bC || _lC || _dC) ? `<div style="margin:-2px 0 14px;display:flex;gap:8px;flex-wrap:wrap">${[_bC ? `🍳 ${_bC} Breakfast${_bC > 1 ? 's' : ''}` : '', _lC ? `🥗 ${_lC} Lunch${_lC > 1 ? 'es' : ''}` : '', _dC ? `🍽 ${_dC} Dinner${_dC > 1 ? 's' : ''}` : ''].filter(Boolean).map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:10px;font-weight:800;border-radius:20px;padding:5px 12px">${x} included</span>`).join('')}</div>` : '';
     const _cards = allDays.map((d, i) => {
       // Strip markdown artifacts from AI-generated text before processing
@@ -2025,11 +2038,27 @@ function buildProposalHTMLV2(deal, opts) {
       let head = lines[0] || '';
       const m = head.match(/^((?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)[:\-\s]*)(.*)$/i);
       let rest = m ? m[2] : head;
-      let chip = ''; const dm = rest.match(/^\s*\(([^)]{3,30})\)\s*[:\-–]?\s*(.*)$/);
+      let chip = '';
+      // "(Sun 3 Mar)" style date in parens after the day header
+      const dm = rest.match(/^\s*\(([^)]{3,30})\)\s*[:\-–]?\s*(.*)$/);
       if (dm) { chip = dm[1]; rest = dm[2] || rest; }
+      // Also handle AI's "— Monday, 25 Aug 2026" style: pull the date OUT into
+      // the chip and let the actual activity (from next line or later text)
+      // become the title. Earlier logic was using the DATE as the title, which
+      // is why every day heading just showed "— Monday, 28 Aug 2026" instead
+      // of what the client is actually doing that day.
+      const dateRe = /(?:^|\s)[-–—]?\s*((?:mon|tue|wed|thu|fri|sat|sun)[a-z]*day)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\s*[-–—]?/i;
+      const dateMatch = rest.match(dateRe);
+      if (dateMatch && !chip) { chip = dateMatch[0].replace(/^[\s\-–—]+|[\s\-–—]+$/g, ''); rest = rest.replace(dateRe, ' ').replace(/^\s*[-–—:]+\s*/, '').trim(); }
       let title = rest, body = lines.slice(1).join(' ');
-      const tSplit = rest.split(/\s[-–—]\s|:\s/);
-      if (tSplit.length > 1 && tSplit[0].length < 70) { title = tSplit[0]; body = (rest.slice(title.length).replace(/^[\s:\-–—]+/, '') + ' ' + body).trim(); }
+      // If after stripping the date, the head line is now empty or just symbols,
+      // promote the FIRST non-header body line to be the title
+      if (!title.replace(/[-–—:\s]/g, '')) {
+        const bodyLines = lines.slice(1).filter((l) => l.trim() && !dateRe.test(l));
+        if (bodyLines.length) { title = bodyLines[0].replace(/^[-*•\s]+/, '').slice(0, 90); body = bodyLines.slice(1).join(' '); }
+      }
+      const tSplit = title.split(/\s[-–—]\s|:\s/);
+      if (tSplit.length > 1 && tSplit[0].length < 70) { const newTitle = tSplit[0]; body = (title.slice(newTitle.length).replace(/^[\s:\-–—]+/, '') + ' ' + body).trim(); title = newTitle; }
       return `
       <div style="display:flex;gap:0;position:relative">
         <div style="width:66px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">
@@ -3150,7 +3179,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
   const generate = async () => {
     setLoading(true); setErr('');
     try {
-      const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''})`).join('; ');
+      const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
       const flights = (deal.flightVendors || []).map((f) => {
         const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
         return secs.map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ');
@@ -3159,7 +3188,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
       const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
 
-      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
+      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". If you want to show the date, put it in parentheses AFTER the title, e.g. "Day 1: Arrival in Nairobi (Mon, 25 Aug 2026)".\n4. TRUTH ABOUT MEALS IS CRITICAL — the client uses this itinerary to know what is included. NEVER write "Lunch" or "Dinner" or "Breakfast" as if a meal is included unless the land vendor notes or hotel meal plan actually say it is. If a meal is NOT included, either omit it entirely, or explicitly say "Lunch on own account" / "Dinner at own cost". A false meal claim causes a real financial loss to the agency. Only mention breakfast if the hotel meal plan includes it.\n5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
 
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3424,12 +3453,12 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
     setGenBusy(true); setGenErr('');
     try {
       const d = deal;
-      const hotels = (d.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''})`).join('; ');
+      const hotels = (d.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
       const flights = (d.flightVendors || []).map((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ')).join('; ');
       const land = (d.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
       const cruises = (d.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${d.adults || 0} adults${Number(d.children) > 0 ? `, ${d.children} children` : ''}${Number(d.infants) > 0 ? `, ${d.infants} infants` : ''}`;
-      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Then Day 1: Title, followed by details. Include meals, transfers, tips.`;
+      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Each day: "Day 1: <activity title>" (NOT the date — date goes in parens if at all). Then details on next lines.\n3. Only mention Breakfast/Lunch/Dinner as included when it TRULY is per hotel meal plan / land vendor notes. If a meal is not included, say "lunch on own" or omit. False meal claims cost the agency money.`;
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
