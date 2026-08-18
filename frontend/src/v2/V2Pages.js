@@ -1287,6 +1287,36 @@ const AIRPORT_MAP = {
 // outline SVG paths. Only the countries Voyage-Ed actively sells right now are
 // bundled; add more here as coverage grows. Coordinates are approximate
 // (nearest 0.05°) — precise enough for a proposal-quality overview map.
+// Airport IATA -> [lat, lng]. Lets flight-only routes plot without needing a
+// city-name match, and extends map coverage well beyond India/Vietnam.
+const AIRPORT_COORDS = {
+  DEL: [28.56, 77.10], BOM: [19.09, 72.87], BLR: [13.20, 77.71], MAA: [12.99, 80.17],
+  CCU: [22.65, 88.45], HYD: [17.24, 78.43], AMD: [23.07, 72.63], COK: [10.15, 76.39],
+  GOI: [15.38, 73.83], JAI: [26.82, 75.81], LKO: [26.76, 80.89], ATQ: [31.71, 74.80],
+  VNS: [25.45, 82.86], IXC: [30.67, 76.79], PNQ: [18.58, 73.92], SXR: [33.99, 74.77],
+  IXL: [34.14, 77.55], TRV: [8.48, 76.92], BBI: [20.24, 85.82], IXB: [26.68, 88.33],
+  DXB: [25.25, 55.36], AUH: [24.43, 54.65], SHJ: [25.33, 55.52], DOH: [25.27, 51.61],
+  MCT: [23.59, 58.28], BAH: [26.27, 50.63], KWI: [29.23, 47.97], RUH: [24.96, 46.70], JED: [21.68, 39.16],
+  SIN: [1.36, 103.99], BKK: [13.69, 100.75], DMK: [13.91, 100.61], HKT: [8.11, 98.31],
+  CNX: [18.77, 98.96], USM: [9.55, 100.06], KUL: [2.75, 101.71], DPS: [-8.75, 115.17],
+  CGK: [-6.13, 106.66], HKG: [22.31, 113.91], TPE: [25.08, 121.23], PVG: [31.14, 121.81],
+  PEK: [40.08, 116.58], ICN: [37.46, 126.44], NRT: [35.77, 140.39], HND: [35.55, 139.78],
+  SGN: [10.82, 106.65], HAN: [21.22, 105.81], DAD: [16.04, 108.20], PQC: [10.23, 103.97],
+  REP: [13.41, 103.81], PNH: [11.55, 104.84], RGN: [16.91, 96.13], MLE: [4.19, 73.53],
+  CMB: [7.18, 79.88], KTM: [27.70, 85.36], DAC: [23.84, 90.40],
+  LHR: [51.47, -0.45], LGW: [51.15, -0.19], CDG: [49.01, 2.55], FRA: [50.04, 8.56],
+  AMS: [52.31, 4.76], ZUR: [47.46, 8.55], VIE: [48.11, 16.57], FCO: [41.80, 12.25],
+  BCN: [41.30, 2.08], MAD: [40.47, -3.56], MXP: [45.63, 8.72], VCE: [45.50, 12.35],
+  ATH: [37.94, 23.95], IST: [41.28, 28.75], MUC: [48.35, 11.79], PRG: [50.10, 14.26],
+  LIS: [38.77, -9.13], DUB: [53.42, -6.27], GVA: [46.24, 6.11],
+  CAI: [30.11, 31.41], JNB: [-26.14, 28.25], NBO: [-1.32, 36.93],
+  SYD: [-33.94, 151.18], MEL: [-37.67, 144.84], PER: [-31.94, 115.97], BNE: [-27.38, 153.12],
+  AKL: [-37.01, 174.79], LAX: [33.94, -118.41], JFK: [40.64, -73.78], ORD: [41.98, -87.90],
+  YYZ: [43.68, -79.63], YVR: [49.19, -123.18], GRU: [-23.43, -46.47],
+  TBS: [41.67, 44.95], BUS: [41.61, 41.60], GYD: [40.47, 50.05], EVN: [40.15, 44.40],
+  ALA: [43.35, 77.04], NQZ: [51.02, 71.47], TAS: [41.26, 69.28],
+};
+
 const CITY_COORDS = {
   // India
   delhi: [28.61, 77.21], mumbai: [19.08, 72.88], bengaluru: [12.97, 77.59], bangalore: [12.97, 77.59],
@@ -1304,6 +1334,38 @@ const CITY_COORDS = {
   "phu quoc": [10.29, 103.98], "phu quoc island": [10.29, 103.98], hue: [16.46, 107.60],
   "hoi an": [15.88, 108.34], sapa: [22.34, 103.84], "nha trang": [12.24, 109.20], dalat: [11.94, 108.44],
   ninhbinh: [20.25, 105.97], "ninh binh": [20.25, 105.97],
+  // Thailand / SE Asia
+  bangkok: [13.76, 100.50], pattaya: [12.93, 100.88], phuket: [7.88, 98.39], krabi: [8.09, 98.91],
+  "chiang mai": [18.79, 98.98], "koh samui": [9.51, 100.01], singapore: [1.35, 103.82],
+  "kuala lumpur": [3.14, 101.69], langkawi: [6.35, 99.80], penang: [5.41, 100.33],
+  bali: [-8.41, 115.19], denpasar: [-8.65, 115.22], ubud: [-8.51, 115.26], kuta: [-8.72, 115.17],
+  seminyak: [-8.69, 115.17], nusa: [-8.80, 115.22], jakarta: [-6.21, 106.85],
+  "siem reap": [13.36, 103.86], "phnom penh": [11.56, 104.92],
+  // Middle East
+  dubai: [25.20, 55.27], "abu dhabi": [24.45, 54.38], sharjah: [25.35, 55.39],
+  doha: [25.29, 51.53], muscat: [23.59, 58.41],
+  // Indian Ocean
+  male: [4.18, 73.51], maldives: [3.20, 73.22], colombo: [6.93, 79.86], kandy: [7.29, 80.64],
+  bentota: [6.42, 80.00], galle: [6.03, 80.22], ella: [6.87, 81.05], sigiriya: [7.96, 80.76],
+  kathmandu: [27.72, 85.32], pokhara: [28.21, 83.99],
+  // Europe
+  london: [51.51, -0.13], paris: [48.86, 2.35], rome: [41.90, 12.50], venice: [45.44, 12.32],
+  milan: [45.46, 9.19], florence: [43.77, 11.26], barcelona: [41.39, 2.17], madrid: [40.42, -3.70],
+  amsterdam: [52.37, 4.90], frankfurt: [50.11, 8.68], munich: [48.14, 11.58], zurich: [47.38, 8.54],
+  vienna: [48.21, 16.37], prague: [50.08, 14.44], lisbon: [38.72, -9.14], dublin: [53.35, -6.26],
+  geneva: [46.20, 6.14], athens: [37.98, 23.73], istanbul: [41.01, 28.98], santorini: [36.39, 25.46],
+  interlaken: [46.69, 7.86], lucerne: [47.05, 8.31],
+  // Caucasus / Central Asia
+  tbilisi: [41.72, 44.78], batumi: [41.64, 41.64], kazbegi: [42.66, 44.64], baku: [40.41, 49.87],
+  yerevan: [40.18, 44.51], almaty: [43.24, 76.89], astana: [51.17, 71.45], tashkent: [41.30, 69.24],
+  samarkand: [39.65, 66.96],
+  // Africa / Americas / Oceania
+  cairo: [30.04, 31.24], nairobi: [-1.29, 36.82], naivasha: [-0.72, 36.43], nakuru: [-0.30, 36.08],
+  "maasai mara": [-1.49, 35.14], mara: [-1.49, 35.14], amboseli: [-2.65, 37.26],
+  johannesburg: [-26.20, 28.05], "cape town": [-33.92, 18.42],
+  sydney: [-33.87, 151.21], melbourne: [-37.81, 144.96], auckland: [-36.85, 174.76],
+  "new york": [40.71, -74.01], "los angeles": [34.05, -118.24], toronto: [43.65, -79.38],
+  vancouver: [49.28, -123.12],
 };
 
 // Country outline for map background. Path uses lng,lat coordinates (SVG will
@@ -1318,6 +1380,97 @@ const COUNTRY_OUTLINES = {
     path: "M105,23 L106,22 L107,21 L108,20 L108,19 L107,18 L106,17 L107,16 L108,15 L109,14 L109,13 L108,12 L107,11 L106,10 L105,9 L104,9 L104,10 L105,11 L106,12 L106,13 L107,14 L106,15 L105,16 L104,17 L103,18 L103,19 L104,20 L104,21 L104,22 L105,23 Z",
   },
 };
+
+// ─── Mapbox Static Images API ────────────────────────────────────────────
+// Renders a REAL map (streets, coastlines, labels, terrain) as the background,
+// with the trip's route drawn on top. Requires a Mapbox public token — free
+// tier is 50k map loads/month, no card needed. Set it once via the browser
+// console:  localStorage.setItem('voyage:mapboxToken', 'pk.eyJ1...')
+// or hardcode it in MAPBOX_TOKEN_FALLBACK below.
+const MAPBOX_TOKEN_FALLBACK = '';
+const mapboxToken = () => {
+  try { return localStorage.getItem('voyage:mapboxToken') || MAPBOX_TOKEN_FALLBACK; }
+  catch { return MAPBOX_TOKEN_FALLBACK; }
+};
+
+// Resolve a stop name (city or IATA) to [lat, lng]
+function coordsForStopV2(name) {
+  if (!name) return null;
+  const raw = String(name).trim();
+  const key = raw.toLowerCase();
+  if (CITY_COORDS[key]) return CITY_COORDS[key];
+  const up = raw.toUpperCase();
+  if (AIRPORT_COORDS[up]) return AIRPORT_COORDS[up];
+  // Try loose match: "Denpasar Bali" -> "bali", "Ho Chi Minh City" -> "ho chi minh"
+  for (const k of Object.keys(CITY_COORDS)) {
+    if (key.includes(k) || k.includes(key)) return CITY_COORDS[k];
+  }
+  return null;
+}
+
+// Build a Mapbox Static Images URL with the route as a GeoJSON overlay.
+// Line style encodes transport mode; markers are numbered stop pins.
+function buildMapboxRouteURL(resolved, W, H) {
+  const token = mapboxToken();
+  if (!token || resolved.length < 2) return '';
+  const features = [];
+  // Route legs — one LineString per leg so each can carry its own colour
+  for (let i = 1; i < resolved.length; i++) {
+    const a = resolved[i - 1], b = resolved[i];
+    const mode = b.mode || 'car';
+    const stroke = mode === 'flight' ? '#2563eb' : mode === 'train' ? '#7c3aed' : mode === 'cruise' ? '#0891b2' : '#dc2626';
+    features.push({
+      type: 'Feature',
+      properties: { stroke, 'stroke-width': 3, 'stroke-opacity': 0.9 },
+      geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
+    });
+  }
+  // Numbered stop markers (Mapbox supports 1-99 as marker-symbol)
+  resolved.forEach((s, i) => {
+    features.push({
+      type: 'Feature',
+      properties: { 'marker-symbol': String(i + 1), 'marker-color': '#c9961a', 'marker-size': 'medium' },
+      geometry: { type: 'Point', coordinates: [s.lng, s.lat] },
+    });
+  });
+  const geojson = encodeURIComponent(JSON.stringify({ type: 'FeatureCollection', features }));
+  // 'auto' fits the viewport to the overlay with sensible padding
+  const url = `https://api.mapbox.com/styles/v1/mapbox/light-v11/static/geojson(${geojson})/auto/${W}x${H}@2x?padding=60&access_token=${token}`;
+  return url.length < 8000 ? url : '';
+}
+
+// Main entry: returns the map block HTML for the proposal. Prefers a real
+// Mapbox basemap; falls back to the simplified SVG outline when no token is
+// configured, so proposals never break.
+function buildRouteMapBlockV2(deal) {
+  const stops = extractRouteStopsV2(deal);
+  if (stops.length < 2) return '';
+  const resolved = stops.map((s) => {
+    const co = coordsForStopV2(s.name);
+    return co ? { ...s, lat: co[0], lng: co[1] } : null;
+  }).filter(Boolean);
+  if (resolved.length < 2) return '';
+
+  const legend = `<div style="display:flex;gap:14px;font-size:10px;color:#7d8bab;margin-top:8px;flex-wrap:wrap">
+      <span style="color:#2563eb">━ Flight</span><span style="color:#dc2626">━ Road</span><span style="color:#7c3aed">━ Train</span><span style="color:#0891b2">━ Cruise</span>
+    </div>`;
+  const routeList = resolved.map((s, i) => `<b>${i + 1}.</b> ${escHtml(s.name)}`).join(' &nbsp;→&nbsp; ');
+
+  const mbUrl = buildMapboxRouteURL(resolved, 640, 460);
+  if (mbUrl) {
+    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE</div>
+      <img src="${mbUrl}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
+      <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
+      ${legend}
+      <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">© Mapbox © OpenStreetMap</div>
+    </div>`;
+  }
+
+  // Fallback: simplified SVG outline (only India/Vietnam have outlines bundled)
+  const region = detectMapRegionV2(stops);
+  return region ? buildRouteMapSVG(stops, region) : '';
+}
 
 function detectMapRegionV2(stops) {
   const countries = new Set();
@@ -2365,14 +2518,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${statsRibbon}
     ${priceBlock}
     ${highlightsHTML}
-    ${(function () {
-      // Route map — only render if we can detect a supported region and have
-      // 2+ mappable stops. Silently omits itself when the trip is outside
-      // India/Vietnam, so it never shows up as a broken/empty block.
-      const stops = extractRouteStopsV2(deal);
-      const region = detectMapRegionV2(stops);
-      return region ? buildRouteMapSVG(stops, region) : '';
-    })()}
+    ${buildRouteMapBlockV2(deal)}
     ${showF ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}` : ''}
     ${trains.length ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
     ${tierOptionsBlock}
