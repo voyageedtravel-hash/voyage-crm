@@ -1690,6 +1690,37 @@ function buildProposalHTMLV2(deal, opts) {
   const sell = o.showPrice ? sellINR(deal) : 0;
   const totalPax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
 
+  // ── Smart hotel deduplication: when the same hotel with the same check-in
+  // and check-out dates appears multiple times (because rooms were booked
+  // through different vendors — e.g. 2 from MMT, 3 from TBO), group them
+  // into a single display card showing the combined room count. The deal's
+  // underlying data stays vendor-separated (for cost tracking); this is
+  // purely a presentation merge for the client-facing proposal. ──
+  const mergedHotels = (() => {
+    const map = new Map();
+    hotels.forEach((h) => {
+      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.checkIn || '')}::${(h.checkOut || '')}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          ...h,
+          _totalRooms: Number(h.rooms) || 1,
+          _vendors: [{ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
+          _totalSell: toINR(h.sellingPrice, h.currency, h.exchangeRate),
+        });
+      } else {
+        const g = map.get(key);
+        g._totalRooms += Number(h.rooms) || 1;
+        g._totalSell += toINR(h.sellingPrice, h.currency, h.exchangeRate);
+        g._vendors.push({ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
+        // Use the best photo / highest star rating / most complete data from any entry
+        if (!g.photoUrl && h.photoUrl) g.photoUrl = h.photoUrl;
+        if ((Number(h.starRating) || 0) > (Number(g.starRating) || 0)) g.starRating = h.starRating;
+        if (!g.roomCategory && h.roomCategory) g.roomCategory = h.roomCategory;
+      }
+    });
+    return [...map.values()];
+  })();
+
   const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
   const parseDaysV2 = (text) => {
     const raw = (text || '').split(/\n+/).map((x) => x.trim().replace(/^#+\s*/, '')).filter(Boolean);
@@ -1932,37 +1963,6 @@ function buildProposalHTMLV2(deal, opts) {
       ${retSegs.map((s) => `<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>` + trainSegRow(s)).join('')}
     </div>`;
   }).join('');
-
-  // ── Smart hotel deduplication: when the same hotel with the same check-in
-  // and check-out dates appears multiple times (because rooms were booked
-  // through different vendors — e.g. 2 from MMT, 3 from TBO), group them
-  // into a single display card showing the combined room count. The deal's
-  // underlying data stays vendor-separated (for cost tracking); this is
-  // purely a presentation merge for the client-facing proposal. ──
-  const mergedHotels = (() => {
-    const map = new Map();
-    hotels.forEach((h) => {
-      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.checkIn || '')}::${(h.checkOut || '')}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          ...h,
-          _totalRooms: Number(h.rooms) || 1,
-          _vendors: [{ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
-          _totalSell: toINR(h.sellingPrice, h.currency, h.exchangeRate),
-        });
-      } else {
-        const g = map.get(key);
-        g._totalRooms += Number(h.rooms) || 1;
-        g._totalSell += toINR(h.sellingPrice, h.currency, h.exchangeRate);
-        g._vendors.push({ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
-        // Use the best photo / highest star rating / most complete data from any entry
-        if (!g.photoUrl && h.photoUrl) g.photoUrl = h.photoUrl;
-        if ((Number(h.starRating) || 0) > (Number(g.starRating) || 0)) g.starRating = h.starRating;
-        if (!g.roomCategory && h.roomCategory) g.roomCategory = h.roomCategory;
-      }
-    });
-    return [...map.values()];
-  })();
 
   const hotelBlocks = showH ? mergedHotels.map((h) => `
     <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
