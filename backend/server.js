@@ -431,7 +431,11 @@ const start = async () => {
       }); });
       if (!msgs.length || imgCount > 4 || tooBig) return res.status(400).json({ error: "invalid payload" });
       const model = ALLOWED_MODELS.has(req.body.model) ? req.body.model : "claude-haiku-4-5-20251001";
-      const maxTok = Math.min(Number(req.body.max_tokens) || 1000, 3000);
+      // Cap exists to stop abuse of this endpoint as an open proxy, but 3000 was
+      // far too low for real work — it silently truncated 7+ day AI itineraries
+      // mid-generation (client PDFs came out with only 4-6 days). 16000 still
+      // bounds cost per call while letting long itineraries finish.
+      const maxTok = Math.min(Number(req.body.max_tokens) || 1000, 16000);
       try {
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",

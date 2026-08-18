@@ -3333,6 +3333,33 @@ function InvoiceModal({ deal, onClose }) {
   );
 }
 
+// Works out how many days the AI itinerary should cover, so the prompt can
+// state it explicitly. Without a hard number the model guesses from the hotel
+// nights and routinely stops short (a 7-day trip came back as 4-6 days).
+// Priority: explicit nights/days in the deal title, then flight span, then
+// hotel span, then a safe default.
+function tripDayCountV2(deal) {
+  const title = String(deal.destination || deal.tripName || '');
+  const nd = title.match(/(\d+)\s*N(?:ights?)?\s*[\/&+-]?\s*(\d+)\s*D(?:ays?)?/i);
+  if (nd) return Number(nd[2]);
+  const dOnly = title.match(/(\d+)\s*Days?\b/i);
+  if (dOnly) return Number(dOnly[1]);
+  const nOnly = title.match(/(\d+)\s*Nights?\b/i);
+  if (nOnly) return Number(nOnly[1]) + 1;
+  // Flight span (first departure -> last arrival)
+  const allDates = [];
+  (deal.flightVendors || []).forEach((f) => {
+    [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) allDates.push(s.date); });
+  });
+  (deal.hotelVendors || []).forEach((h) => { if (h.checkIn) allDates.push(h.checkIn); if (h.checkOut) allDates.push(h.checkOut); });
+  const valid = allDates.map((d) => new Date(d)).filter((d) => !isNaN(d)).sort((a, b) => a - b);
+  if (valid.length >= 2) {
+    const span = Math.round((valid[valid.length - 1] - valid[0]) / 86400000) + 1;
+    if (span > 0 && span < 40) return span;
+  }
+  return 0; // unknown — prompt will omit the hard requirement
+}
+
 const AI_VIBE_OPTIONS = [
   { id: 'auto', label: '🤖 Auto-detect', desc: 'AI reads pax/deal and picks the right tone' },
   { id: 'family', label: '👨‍👩‍👧 Family Trip', desc: 'Warm, reassuring — comfort, safety, kid-friendly pacing' },
@@ -3371,7 +3398,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
       const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
 
-      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". If you want to show the date, put it in parentheses AFTER the title, e.g. "Day 1: Arrival in Nairobi (Mon, 25 Aug 2026)".\n4. TRUTH ABOUT MEALS IS CRITICAL — the client uses this itinerary to know what is included. NEVER write "Lunch" or "Dinner" or "Breakfast" as if a meal is included unless the land vendor notes or hotel meal plan actually say it is. If a meal is NOT included, either omit it entirely, or explicitly say "Lunch on own account" / "Dinner at own cost". A false meal claim causes a real financial loss to the agency. Only mention breakfast if the hotel meal plan includes it.\n5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
+      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}${(function(){ const n = tripDayCountV2(deal); return n ? `\n\n*** THIS ITINERARY MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Do not stop early. If you are running long, make each day shorter, but you MUST reach Day ${n}. ***` : ''; })()}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". If you want to show the date, put it in parentheses AFTER the title, e.g. "Day 1: Arrival in Nairobi (Mon, 25 Aug 2026)".\n4. TRUTH ABOUT MEALS IS CRITICAL — the client uses this itinerary to know what is included. NEVER write "Lunch" or "Dinner" or "Breakfast" as if a meal is included unless the land vendor notes or hotel meal plan actually say it is. If a meal is NOT included, either omit it entirely, or explicitly say "Lunch on own account" / "Dinner at own cost". A false meal claim causes a real financial loss to the agency. Only mention breakfast if the hotel meal plan includes it.\n5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
 
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3380,6 +3407,12 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
       const text = (data.content || []).map((c) => c.text || '').join('');
+      // Anthropic sets stop_reason='max_tokens' when it ran out of room mid-way.
+      // Surfacing this matters: a silently truncated itinerary reaches the client
+      // as a PDF missing its last days, which looks broken and costs credibility.
+      if (data.stop_reason === 'max_tokens') {
+        window.veToast && window.veToast('⚠️ Itinerary truncated mid-way — regenerate to get all days', 'warning');
+      }
       setResult(text);
       if (attach) await doAttach(text);
     } catch (e) {
@@ -3641,7 +3674,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
       const land = (d.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
       const cruises = (d.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
       const pax = `${d.adults || 0} adults${Number(d.children) > 0 ? `, ${d.children} children` : ''}${Number(d.infants) > 0 ? `, ${d.infants} infants` : ''}`;
-      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Each day: "Day 1: <activity title>" (NOT the date — date goes in parens if at all). Then details on next lines.\n3. Only mention Breakfast/Lunch/Dinner as included when it TRULY is per hotel meal plan / land vendor notes. If a meal is not included, say "lunch on own" or omit. False meal claims cost the agency money.`;
+      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}${(function(){ const n = tripDayCountV2(d); return n ? `\n\n*** MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Do not stop early. Shorten each day if needed, but reach Day ${n}. ***` : ''; })()}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Each day: "Day 1: <activity title>" (NOT the date — date goes in parens if at all). Then details on next lines.\n3. Only mention Breakfast/Lunch/Dinner as included when it TRULY is per hotel meal plan / land vendor notes. If a meal is not included, say "lunch on own" or omit. False meal claims cost the agency money.`;
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
@@ -3649,6 +3682,9 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
       const text = (data.content || []).map((c) => c.text || '').join('');
+      if (data.stop_reason === 'max_tokens') {
+        window.veToast && window.veToast('⚠️ Itinerary truncated mid-way — regenerate to get all days', 'warning');
+      }
       const updated = await patchDeal(d._id, { aiItineraryText: text, aiItineraryVibe: vibe });
       setDeal(updated);
       onDealUpdated && onDealUpdated(updated);
