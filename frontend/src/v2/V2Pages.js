@@ -1690,35 +1690,48 @@ function buildProposalHTMLV2(deal, opts) {
   const sell = o.showPrice ? sellINR(deal) : 0;
   const totalPax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
 
-  // ── Smart hotel deduplication: when the same hotel with the same check-in
-  // and check-out dates appears multiple times (because rooms were booked
-  // through different vendors — e.g. 2 from MMT, 3 from TBO), group them
-  // into a single display card showing the combined room count. The deal's
-  // underlying data stays vendor-separated (for cost tracking); this is
-  // purely a presentation merge for the client-facing proposal. ──
+  // ── Smart hotel deduplication: when the same hotel appears multiple times
+  // (rooms booked through different vendors, or different room categories
+  // like 4 Junior Suite + 1 Family), group them into ONE display card with a
+  // "Room mix" summary line. Dedup key is name+city — dates/room-category
+  // differences are shown INSIDE the merged card, not as separate cards.
+  // The deal's underlying data stays vendor-separated for cost tracking. ──
   const mergedHotels = (() => {
     const map = new Map();
     hotels.forEach((h) => {
-      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.checkIn || '')}::${(h.checkOut || '')}`;
+      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.city || '').trim().toLowerCase()}`;
+      const roomsCount = Number(h.rooms) || 1;
       if (!map.has(key)) {
         map.set(key, {
           ...h,
-          _totalRooms: Number(h.rooms) || 1,
-          _vendors: [{ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
-          _totalSell: toINR(h.sellingPrice, h.currency, h.exchangeRate),
+          _totalRooms: roomsCount,
+          // roomBreakdown maps room-category → total count across all entries
+          _roomBreakdown: { [h.roomCategory || 'Standard']: roomsCount },
+          // Collect distinct date ranges — if all merge cleanly to one range, show that
+          _dateRanges: [(h.checkIn || '') + '::' + (h.checkOut || '')],
+          _mealPlans: new Set([h.mealPlan || 'bb']),
+          _vendors: [{ source: h.vendorSource || '', rooms: roomsCount, roomCategory: h.roomCategory || 'Standard', cost: toINR(h.costPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
         });
       } else {
         const g = map.get(key);
-        g._totalRooms += Number(h.rooms) || 1;
-        g._totalSell += toINR(h.sellingPrice, h.currency, h.exchangeRate);
-        g._vendors.push({ source: h.vendorSource || '', rooms: Number(h.rooms) || 1, cost: toINR(h.costPrice, h.currency, h.exchangeRate), sell: toINR(h.sellingPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
-        // Use the best photo / highest star rating / most complete data from any entry
+        g._totalRooms += roomsCount;
+        g._roomBreakdown[h.roomCategory || 'Standard'] = (g._roomBreakdown[h.roomCategory || 'Standard'] || 0) + roomsCount;
+        const dr = (h.checkIn || '') + '::' + (h.checkOut || '');
+        if (!g._dateRanges.includes(dr)) g._dateRanges.push(dr);
+        g._mealPlans.add(h.mealPlan || 'bb');
+        g._vendors.push({ source: h.vendorSource || '', rooms: roomsCount, roomCategory: h.roomCategory || 'Standard', cost: toINR(h.costPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
         if (!g.photoUrl && h.photoUrl) g.photoUrl = h.photoUrl;
         if ((Number(h.starRating) || 0) > (Number(g.starRating) || 0)) g.starRating = h.starRating;
-        if (!g.roomCategory && h.roomCategory) g.roomCategory = h.roomCategory;
       }
     });
-    return [...map.values()];
+    // Build display summary for each merged hotel
+    return [...map.values()].map((g) => {
+      const rb = Object.entries(g._roomBreakdown).filter(([, n]) => n > 0);
+      const roomsSummary = rb.length === 1
+        ? `${rb[0][1]} × ${rb[0][0]}`
+        : rb.map(([cat, n]) => `${n} × ${cat}`).join(' + ');
+      return { ...g, _roomsSummary: roomsSummary };
+    });
   })();
 
   const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
@@ -1971,7 +1984,7 @@ function buildProposalHTMLV2(deal, opts) {
         <div>
           <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800">🏨 ${escHtml((h.city || '').toUpperCase())}${h.country ? ' · ' + escHtml(h.country.toUpperCase()) : ''}</div>
           <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${escHtml(h.hotelName) || 'Hotel'}</div>
-          <div style="font-size:12px;color:#5a6b8c">${escHtml(h.roomCategory)} · ${escHtml(mealPlanLabel(h.mealPlan))}${h._totalRooms > 1 ? ` · <b>${h._totalRooms} Rooms</b>` : ''}</div>
+          <div style="font-size:12px;color:#5a6b8c">${escHtml(h._roomsSummary || h.roomCategory || '')} · ${escHtml(mealPlanLabel(h.mealPlan))}</div>
           ${h.starRating ? `<div style="font-size:13px;color:#f0c842;margin-top:3px">${'★'.repeat(Number(h.starRating) || 0)}<span style="color:#c9ccd4">${'★'.repeat(Math.max(0, 5 - (Number(h.starRating) || 0)))}</span></div>` : ''}
         </div>
         <div style="text-align:right">
@@ -2033,7 +2046,11 @@ function buildProposalHTMLV2(deal, opts) {
           ${(function () { const mm = mealsOfV2(d), tt = tagsOfV2(d); if (!mm.length && !tt.length) return ''; return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${mm.map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}${tt.map((x) => `<span style="background:#eef3fc;border:1px solid #d4e0f5;color:#334e82;font-size:9px;font-weight:800;border-radius:20px;padding:3px 9px">${x}</span>`).join('')}</div>`; })()}
           ${(function () {
       if (!body) return '';
-      const hi = (t) => escHtml(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/^[-*_]{3,}$/gm, '').replace(/(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|transfer|overnight(?:\s+night)?\s+stay|pick[- ]?up|drop(?:\s+off)?|sightseeing|excursion|visit|explore)/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
+      // AI writes lots of **emphasis** markdown for its own formatting — dates,
+      // "Please allow", location names, etc. Bolding ALL of it clutters the
+      // page. Strip the ** delimiters (so they don't show as literal asterisks)
+      // but only apply real bold styling to the client-action keywords below.
+      const hi = (t) => escHtml(t).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/^[-*_]{3,}$/gm, '').replace(/\b(breakfast|lunch|dinner|check[- ]?in|check[- ]?out|overnight|pick[- ]?up|drop(?:[- ]?off)?)\b/gi, '<b style="color:#8a6d1a;font-weight:700">$1</b>');
       // Lookbehind regex support in Safari only landed in 16.4 (Mar 2023) —
       // on an older iOS/Safari this would throw a SyntaxError the moment
       // the script parses, breaking the entire page (not just this one
@@ -3146,7 +3163,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
 
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3200, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely — a bachelors trip and an uber-luxury honeymoon should read completely differently. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely — a bachelors trip and an uber-luxury honeymoon should read completely differently. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
@@ -3415,7 +3432,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
       const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Then Day 1: Title, followed by details. Include meals, transfers, tips.`;
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3200, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
