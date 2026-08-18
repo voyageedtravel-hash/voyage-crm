@@ -1239,6 +1239,27 @@ const AIRLINE_MAP = {
   "AY":"Finnair","SK":"SAS","EI":"Aer Lingus","SU":"Aeroflot","AC":"Air Canada","WS":"WestJet",
   "ET":"Ethiopian Airlines","MS":"EgyptAir","KQ":"Kenya Airways",
 };
+
+// airhex.com serves airline logos indexed by IATA 2-letter code — free tier,
+// stable URLs, transparent PNGs, well-maintained global coverage. Same base URL
+// pattern works for every carrier; if the code isn't recognized their CDN
+// returns a plain plane silhouette which is a fine fallback.
+const airlineLogoUrl = (code) => code ? `https://content.airhex.com/content/logos/airlines_${String(code).toUpperCase()}_100_100_s.png` : '';
+// Try to guess an airline IATA code from a free-text vendor name like
+// "Vietnam Airlines" -> "VN", "Emirates" -> "EK". Used when the flight vendor
+// row has no explicit airlineCode saved (older data, hand-entered vendors).
+const guessAirlineCode = (name) => {
+  if (!name) return '';
+  const up = String(name).trim().toUpperCase();
+  // Already a 2-letter code
+  if (/^[A-Z0-9]{2}$/.test(up)) return up;
+  for (const [code, full] of Object.entries(AIRLINE_MAP)) {
+    if (up === full.toUpperCase()) return code;
+    if (up.includes(full.toUpperCase())) return code;
+  }
+  return '';
+};
+
 const AIRPORT_MAP = {
   "DEL":"Delhi (IGI)","BOM":"Mumbai (CSIA)","BLR":"Bengaluru (KIA)","MAA":"Chennai",
   "CCU":"Kolkata","HYD":"Hyderabad","AMD":"Ahmedabad","COK":"Kochi","GOI":"Goa",
@@ -1261,6 +1282,155 @@ const AIRPORT_MAP = {
   "IXL":"Leh","PNQ":"Pune","TRV":"Thiruvananthapuram","RGN":"Yangon","PER":"Perth","BNE":"Brisbane",
   "PQC":"Phu Quoc Island",
 };
+
+// ─── Route map data: city coordinates (lat, lng in decimal degrees) + country
+// outline SVG paths. Only the countries Voyage-Ed actively sells right now are
+// bundled; add more here as coverage grows. Coordinates are approximate
+// (nearest 0.05°) — precise enough for a proposal-quality overview map.
+const CITY_COORDS = {
+  // India
+  delhi: [28.61, 77.21], mumbai: [19.08, 72.88], bengaluru: [12.97, 77.59], bangalore: [12.97, 77.59],
+  chennai: [13.08, 80.27], kolkata: [22.57, 88.36], hyderabad: [17.39, 78.49], ahmedabad: [23.02, 72.57],
+  kochi: [9.94, 76.27], goa: [15.30, 74.12], jaipur: [26.91, 75.79], lucknow: [26.85, 80.95],
+  amritsar: [31.63, 74.87], varanasi: [25.32, 82.97], chandigarh: [30.73, 76.77], pune: [18.52, 73.86],
+  agra: [27.18, 78.02], srinagar: [34.08, 74.79], leh: [34.15, 77.58], "new delhi": [28.61, 77.21],
+  udaipur: [24.58, 73.68], jodhpur: [26.29, 73.03], darjeeling: [27.04, 88.26], shimla: [31.10, 77.17],
+  manali: [32.24, 77.19], dharamshala: [32.22, 76.32], khajuraho: [24.83, 79.92],
+  jaisalmer: [26.92, 70.90], bhubaneswar: [20.30, 85.82], puri: [19.81, 85.83], konark: [19.89, 86.09],
+  guwahati: [26.14, 91.74], gangtok: [27.33, 88.61], "port blair": [11.62, 92.73],
+  // Vietnam
+  hanoi: [21.03, 105.85], "ho chi minh": [10.82, 106.63], "ho chi minh city": [10.82, 106.63],
+  "da nang": [16.06, 108.22], danang: [16.06, 108.22], "ha long": [20.95, 107.08], halong: [20.95, 107.08],
+  "phu quoc": [10.29, 103.98], "phu quoc island": [10.29, 103.98], hue: [16.46, 107.60],
+  "hoi an": [15.88, 108.34], sapa: [22.34, 103.84], "nha trang": [12.24, 109.20], dalat: [11.94, 108.44],
+  ninhbinh: [20.25, 105.97], "ninh binh": [20.25, 105.97],
+};
+
+// Country outline for map background. Path uses lng,lat coordinates (SVG will
+// project them). Simplified from Natural Earth 50m public-domain data.
+const COUNTRY_OUTLINES = {
+  india: {
+    bounds: [[6, 68], [37, 98]],
+    path: "M77,7 L75,8 L74,10 L72,12 L71,15 L68,20 L69,23 L70,26 L72,28 L74,29 L76,29 L78,30 L80,30 L82,30 L84,32 L85,34 L87,35 L88,34 L90,32 L92,30 L94,28 L96,27 L97,26 L96,24 L94,23 L92,22 L90,22 L88,21 L86,20 L85,19 L84,18 L83,17 L82,15 L83,13 L84,11 L83,9 L82,8 L80,7 Z",
+  },
+  vietnam: {
+    bounds: [[8, 102], [24, 110]],
+    path: "M105,23 L106,22 L107,21 L108,20 L108,19 L107,18 L106,17 L107,16 L108,15 L109,14 L109,13 L108,12 L107,11 L106,10 L105,9 L104,9 L104,10 L105,11 L106,12 L106,13 L107,14 L106,15 L105,16 L104,17 L103,18 L103,19 L104,20 L104,21 L104,22 L105,23 Z",
+  },
+};
+
+function detectMapRegionV2(stops) {
+  const countries = new Set();
+  stops.forEach((s) => {
+    const key = String(s.name || '').toLowerCase().trim();
+    const c = CITY_COUNTRY[key];
+    if (c) countries.add(c.toLowerCase());
+    if (/india|delhi|mumbai|chennai|kolkata|bengal|jaipur|goa|kerala|rajasthan|kashmir|himachal|uttarakhand|agra/i.test(s.name || '')) countries.add('india');
+    if (/vietnam|hanoi|saigon|ho chi|da nang|hoi an|hue|phu quoc|halong|ha long/i.test(s.name || '')) countries.add('vietnam');
+  });
+  if (countries.has('india') && countries.size === 1) return 'india';
+  if (countries.has('vietnam') && countries.size === 1) return 'vietnam';
+  return null;
+}
+
+function buildRouteMapSVG(stops, region) {
+  const outline = COUNTRY_OUTLINES[region];
+  if (!outline || stops.length < 2) return '';
+  const [[minLat, minLng], [maxLat, maxLng]] = outline.bounds;
+  const W = 560, H = 620;
+  const proj = (lat, lng) => [
+    ((lng - minLng) / (maxLng - minLng)) * W,
+    ((maxLat - lat) / (maxLat - minLat)) * H,
+  ];
+  const resolved = stops.map((s) => {
+    const key = String(s.name || '').toLowerCase().trim();
+    const coord = CITY_COORDS[key];
+    return coord ? { ...s, xy: proj(coord[0], coord[1]) } : null;
+  }).filter(Boolean);
+  if (resolved.length < 2) return '';
+
+  const markers = resolved.map((s, i) => {
+    const [x, y] = s.xy;
+    return `<g>
+      <circle cx="${x}" cy="${y}" r="14" fill="#c9961a" stroke="#fff" stroke-width="3"/>
+      <text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12" font-weight="800" fill="#fff" font-family="Inter,sans-serif">${i + 1}</text>
+      <text x="${x + 20}" y="${y - 8}" font-size="12" font-weight="700" fill="#0d1b3e" font-family="Inter,sans-serif">${escHtml(s.name)}</text>
+    </g>`;
+  }).join('');
+
+  const lines = resolved.slice(0, -1).map((s, i) => {
+    const a = s.xy, b = resolved[i + 1].xy;
+    const mode = resolved[i + 1].mode || 'car';
+    const style = mode === 'flight'
+      ? `stroke="#4169E1" stroke-width="2.5" stroke-dasharray="8 4"`
+      : mode === 'train' ? `stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="2 3"`
+      : mode === 'cruise' ? `stroke="#0891b2" stroke-width="2.5" stroke-dasharray="4 4 1 4"`
+      : `stroke="#dc2626" stroke-width="2.5"`;
+    const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2 - Math.abs(b[0] - a[0]) * 0.15;
+    const icon = mode === 'flight' ? '✈' : mode === 'train' ? '🚆' : mode === 'cruise' ? '🚢' : '🚗';
+    return `<path d="M${a[0]},${a[1]} Q${cx},${cy} ${b[0]},${b[1]}" fill="none" ${style} stroke-linecap="round"/>
+      <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-size="18">${icon}</text>`;
+  }).join('');
+
+  const routeList = resolved.map((s, i) => `<b>${i + 1}.</b> ${escHtml(s.name)}`).join(' → ');
+  // Project the country outline path
+  const projectedPath = outline.path.replace(/([0-9.]+),([0-9.]+)/g, (_, lng, lat) => {
+    const [px, py] = proj(parseFloat(lat), parseFloat(lng));
+    return `${px.toFixed(1)},${py.toFixed(1)}`;
+  });
+
+  return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE · ${(region || '').toUpperCase()}</div>
+    <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-height:520px;background:linear-gradient(180deg,#f0f5fd,#e8f0fb);border-radius:12px" preserveAspectRatio="xMidYMid meet">
+      <path d="${projectedPath}" fill="#dbe8fb" stroke="#a5b8d8" stroke-width="1.5" stroke-linejoin="round"/>
+      ${lines}
+      ${markers}
+    </svg>
+    <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
+    <div style="display:flex;gap:14px;font-size:10px;color:#7d8bab;margin-top:8px;flex-wrap:wrap">
+      <span>✈ Flight</span><span>🚗 Road</span><span>🚆 Train</span><span>🚢 Cruise</span>
+    </div>
+  </div>`;
+}
+
+function extractRouteStopsV2(deal) {
+  const stops = [];
+  const seen = new Set();
+  const addStop = (name) => {
+    if (!name) return;
+    const key = String(name).toLowerCase().trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    stops.push({ name: name });
+  };
+  const hotelsInOrder = (deal.hotelVendors || [])
+    .filter((h) => h.city && h.checkIn)
+    .sort((a, b) => String(a.checkIn).localeCompare(String(b.checkIn)));
+  hotelsInOrder.forEach((h) => addStop(h.city));
+  (deal.flightVendors || []).forEach((f) => {
+    [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => {
+      if (s.fromName) addStop(s.fromName);
+      if (s.toName) addStop(s.toName);
+    });
+  });
+  // Infer mode of transition between consecutive stops using flight sectors
+  const flightPairs = new Set();
+  (deal.flightVendors || []).forEach((f) => {
+    [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => {
+      const from = String(s.fromName || '').toLowerCase().trim();
+      const to = String(s.toName || '').toLowerCase().trim();
+      if (from && to) flightPairs.add(from + '|' + to);
+    });
+  });
+  for (let i = 1; i < stops.length; i++) {
+    const prev = stops[i - 1].name.toLowerCase().trim();
+    const cur = stops[i].name.toLowerCase().trim();
+    stops[i].mode = flightPairs.has(prev + '|' + cur) ? 'flight' : 'car';
+  }
+  if (stops.length) stops[0].mode = null;
+  return stops;
+}
+
 const CITY_COUNTRY = {
   bangkok:"Thailand",phuket:"Thailand","chiang mai":"Thailand","koh samui":"Thailand",pattaya:"Thailand",krabi:"Thailand",
   bali:"Indonesia",denpasar:"Indonesia",jakarta:"Indonesia",ubud:"Indonesia",
@@ -1896,14 +2066,19 @@ function buildProposalHTMLV2(deal, opts) {
   `;
   const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=' + encodeURIComponent(acceptWA);
 
-  const sectorRowV2 = (s) => {
-    const _code = String(s.airlineCode || '').trim().toUpperCase();
-    const _name = String(s.airlineName || '').trim();
+  const sectorRowV2 = (s, f) => {
+    // Prefer per-sector airline (multi-carrier trips) but fall back to the
+    // vendor-level airline so single-carrier flights still show the logo even
+    // when older data didn't populate airlineCode on every sector.
+    const _code = String(s.airlineCode || (f && f.airlineCode) || guessAirlineCode(s.airlineName || (f && f.name))).trim().toUpperCase();
+    const _name = String(s.airlineName || (f && f.name) || '').trim();
+    const _logo = _code ? airlineLogoUrl(_code) : '';
     return `
     <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px dashed #d8e2f3">
-      <div style="min-width:72px;max-width:86px;text-align:center">
-        <div style="font-size:14px;font-weight:800;color:#c9961a;letter-spacing:1px">${escHtml(_code) || (_name ? escHtml(_name.split(' ')[0]) : '✈')}</div>
-        <div style="font-size:9.5px;color:#7d8bab;line-height:1.3">${escHtml(_name)}</div>
+      <div style="min-width:82px;max-width:96px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:3px">
+        ${_logo ? `<img src="${_logo}" alt="${escHtml(_name)}" style="width:44px;height:44px;object-fit:contain;background:#fff;border-radius:8px;padding:3px;border:1px solid #f0f4fa" onerror="this.style.display='none'"/>` : ''}
+        <div style="font-size:12px;font-weight:800;color:#c9961a;letter-spacing:1px">${escHtml(_code) || (_name ? escHtml(_name.split(' ')[0]) : '✈')}</div>
+        <div style="font-size:9px;color:#7d8bab;line-height:1.3">${escHtml(_name)}</div>
       </div>
       <div style="flex:1;display:flex;align-items:center;gap:10px">
         <div><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.from)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.fromName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.depTime)}</div></div>
@@ -1935,8 +2110,8 @@ function buildProposalHTMLV2(deal, opts) {
     return `
     <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;overflow:hidden;margin-bottom:16px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
       <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;padding:10px 18px;font-size:12px;font-weight:700;letter-spacing:1px">✈️ FLIGHT · ${detectFlightTypeV2(f)}</div>
-      ${visSecs.map(sectorRowV2).join('')}
-      ${visRets.map((s) => `<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>` + sectorRowV2(s)).join('')}
+      ${visSecs.map((s) => sectorRowV2(s, f)).join('')}
+      ${visRets.map((s) => `<div style="background:#f8fafd;font-size:10px;color:#7d8bab;padding:4px 18px;font-weight:700;letter-spacing:1px">RETURN</div>` + sectorRowV2(s, f)).join('')}
       ${noTimes ? `<div style="background:#fdf9ee;font-size:10px;color:#8a6d1a;padding:7px 18px">🕐 Exact departure &amp; arrival timings will be confirmed on your final ticket.</div>` : ''}
     </div>`;
   }).join('') : '';
@@ -2190,6 +2365,14 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${statsRibbon}
     ${priceBlock}
     ${highlightsHTML}
+    ${(function () {
+      // Route map — only render if we can detect a supported region and have
+      // 2+ mappable stops. Silently omits itself when the trip is outside
+      // India/Vietnam, so it never shows up as a broken/empty block.
+      const stops = extractRouteStopsV2(deal);
+      const region = detectMapRegionV2(stops);
+      return region ? buildRouteMapSVG(stops, region) : '';
+    })()}
     ${showF ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">✈️ Your Flights</h2>${flightBlocks}` : ''}
     ${trains.length ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
     ${tierOptionsBlock}
