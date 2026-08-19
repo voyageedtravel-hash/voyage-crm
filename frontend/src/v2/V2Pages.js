@@ -1928,7 +1928,17 @@ async function runAIExtract(kind, files) {
   const txt = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
   if (!txt) throw new Error('AI returned nothing — file may not have been readable');
   try { return JSON.parse(txt); }
-  catch { throw new Error("Could not understand the AI's response — try a clearer image"); }
+  catch {
+    // The model sometimes wraps JSON in a sentence despite instructions
+    // ("Here's what I found: {...}"). Salvage the outermost {...} block
+    // before giving up, so a stray prefix/suffix doesn't fail the whole
+    // extraction outright.
+    const match = txt.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch { /* fall through to error below */ }
+    }
+    throw new Error("Could not understand the AI's response — try a clearer image");
+  }
 }
 
 /* ─── PROPOSAL PDF — client-side HTML, same mechanism V1 uses
@@ -4093,34 +4103,31 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
 }
 
 function AddFlightModal({ deal, editing, onClose, onSaved }) {
-  const [form, setForm] = useState(() => {
-    if (editing) {
-      const first = (editing.sectors || [])[0] || {};
-      return {
-        name: editing.name || '', currency: editing.currency || 'INR',
-        costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
-        sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
-        exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
-        from: first.from || '', fromName: first.fromName || '', to: first.to || '', toName: first.toName || '',
-        date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
-        paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
-      };
-    }
-    return {
-      name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-      from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '',
-      paxPricing: false, paxRates: {},
-    };
-  });
-  // Pre-seed with the existing multi-sector data when editing, so a
-  // round-trip entry keeps ALL its legs unless the user re-scans.
-  const [aiSectors, setAiSectors] = useState(() => editing ? (editing.sectors || null) : null);
-  const [aiReturnSectors, setAiReturnSectors] = useState(() => editing ? (editing.returnSectors || null) : null);
+  const emptySector = () => ({ from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '', airlineCode: '', airlineName: '' });
+
+  const [name, setName] = useState(editing ? (editing.name || '') : '');
+  const [currency, setCurrency] = useState(editing ? (editing.currency || 'INR') : 'INR');
+  const [costPrice, setCostPrice] = useState(editing && editing.costPrice != null ? String(editing.costPrice) : '');
+  const [sellingPrice, setSellingPrice] = useState(editing && editing.sellingPrice != null ? String(editing.sellingPrice) : '');
+  const [exchangeRate, setExchangeRate] = useState(editing && editing.exchangeRate != null ? String(editing.exchangeRate) : '');
+  const [paxPricing, setPaxPricing] = useState(editing ? !!editing.paxPricing : false);
+  const [paxRates, setPaxRates] = useState(editing ? (editing.paxRates || {}) : {});
+
+  // Trip type + editable sector lists — this is what V1 has and V2 was
+  // missing entirely: a One Way / Return / Multi City toggle with a full
+  // editable list of legs per direction, not just a single hidden-away leg.
+  const [flightType, setFlightType] = useState(editing ? (editing.flightType || (editing.returnSectors && editing.returnSectors.length ? 'return' : 'one-way')) : 'one-way');
+  const [sectors, setSectors] = useState(editing && editing.sectors && editing.sectors.length ? editing.sectors : [emptySector()]);
+  const [returnSectors, setReturnSectors] = useState(editing && editing.returnSectors && editing.returnSectors.length ? editing.returnSectors : [emptySector()]);
+
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const updSector = (list, setList, i, patch) => setList((arr) => arr.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+  const addSector = (setList) => setList((arr) => [...arr, emptySector()]);
+  const rmSector = (setList) => (i) => setList((arr) => arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr);
 
   const processFiles = async (files) => {
     if (!files.length) return;
@@ -4129,27 +4136,28 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
     try {
       const j = await runAIExtract('flight', files);
       const mapSec = (x) => ({
-        from: x.from || '', fromName: x.fromName || '', to: x.to || '', toName: x.toName || '',
+        from: (x.from || '').toUpperCase(), fromName: x.fromName || '', to: (x.to || '').toUpperCase(), toName: x.toName || '',
         date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
         airlineCode: (x.airlineCode || '').toUpperCase(), airlineName: x.airlineName || '',
       });
       const secs = (j.sectors || []).map(mapSec);
       const retSecs = (j.returnSectors || []).map(mapSec);
       if (!secs.length) throw new Error('No flight details found in this file');
-      setAiSectors(secs);
-      setAiReturnSectors(retSecs);
-      const first = secs[0];
-      setForm((f) => ({
-        ...f,
-        name: j.vendorName || first.airlineName || f.name,
-        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
-        from: first.from, fromName: first.fromName, to: first.to, toName: first.toName,
-        date: first.date, depTime: first.depTime, arrTime: first.arrTime,
-      }));
+
+      let type = String(j.flightType || '').toLowerCase();
+      if (!['one-way', 'return', 'multi-city'].includes(type)) {
+        type = retSecs.length ? 'return' : (secs.length > 1 ? 'multi-city' : 'one-way');
+      }
+      setFlightType(type);
+      setSectors(secs);
+      setReturnSectors(retSecs.length ? retSecs : [emptySector()]);
+      if (!name.trim()) setName(j.vendorName || secs[0].airlineName || '');
+      if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
+
       const totalLegs = secs.length + retSecs.length;
       setAiSummary(
         totalLegs > 1
-          ? `✓ Extracted ${secs.length} outbound + ${retSecs.length} return sector${retSecs.length !== 1 ? 's' : ''} — all will be saved. Fields below show the first leg for review.`
+          ? `✓ Extracted ${secs.length} outbound + ${retSecs.length} return sector${retSecs.length !== 1 ? 's' : ''} — review below.`
           : '✓ Extracted — review the fields below before saving.'
       );
       window.veToast && window.veToast('Flight details extracted ✓', 'success');
@@ -4179,31 +4187,22 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   };
 
   const submit = async () => {
-    if (!form.name.trim()) { setErr('Airline name is required'); return; }
+    if (!name.trim()) { setErr('Airline name is required'); return; }
     setSaving(true);
     setErr('');
     try {
-      const usingAI = Array.isArray(aiSectors) && aiSectors.length > 0;
-      // The visible form always represents leg #1 — sync any edits made
-      // to it back into aiSectors[0] before saving, so editing an
-      // existing (possibly multi-leg) flight doesn't silently ignore
-      // changes typed into the form.
-      const firstLeg = {
-        from: form.from, fromName: form.fromName, to: form.to, toName: form.toName,
-        date: form.date, depTime: form.depTime, arrTime: form.arrTime,
-      };
-      const finalSectors = usingAI ? [firstLeg, ...aiSectors.slice(1)] : [firstLeg];
       const vendorFields = {
-        name: form.name,
-        currency: form.currency,
-        costPrice: Number(form.costPrice) || 0,
-        sellingPrice: Number(form.sellingPrice) || 0,
-        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
-        flightType: aiReturnSectors && aiReturnSectors.length ? 'return' : 'oneway',
-        sectors: finalSectors,
-        returnSectors: aiReturnSectors || [],
-        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        name,
+        currency,
+        costPrice: Number(costPrice) || 0,
+        sellingPrice: Number(sellingPrice) || 0,
+        exchangeRate: currency === 'INR' ? 1 : (Number(exchangeRate) || 0),
+        flightType,
+        sectors: sectors.filter((s) => s.from || s.to),
+        returnSectors: flightType === 'return' ? returnSectors.filter((s) => s.from || s.to) : [],
+        paxPricing, paxRates: paxPricing ? paxRates : {},
       };
+      if (!vendorFields.sectors.length) { setErr('Add at least one sector'); setSaving(false); return; }
 
       if (editing) {
         const updatedList = (deal.flightVendors || []).map((f) => f.id === editing.id ? { ...f, ...vendorFields } : f);
@@ -4223,65 +4222,110 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
     }
   };
 
+  const SectorRow = ({ sector, i, onChange, onRemove, showRemove, label }) => (
+    <div style={{ border: '1px dashed #d4e0f5', borderRadius: 9, padding: '10px 12px', marginBottom: 8, background: '#fff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: .6, color: '#94a3b8' }}>{label}</span>
+        {showRemove && <button onClick={onRemove} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.from} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ from: v, fromName: lookupAirport(v) || sector.fromName }); }} placeholder="From (DEL)" style={inputStyle} />
+        <input value={sector.to} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ to: v, toName: lookupAirport(v) || sector.toName }); }} placeholder="To (SGN)" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.fromName} onChange={(e) => onChange({ fromName: e.target.value })} placeholder="From city" style={inputStyle} />
+        <input value={sector.toName} onChange={(e) => onChange({ toName: e.target.value })} placeholder="To city" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.date} onChange={(e) => onChange({ date: e.target.value })} placeholder="6 Oct 2026" style={inputStyle} />
+        <input value={sector.depTime} onChange={(e) => onChange({ depTime: e.target.value })} placeholder="Dep 23:35" style={inputStyle} />
+        <input value={sector.arrTime} onChange={(e) => onChange({ arrTime: e.target.value })} placeholder="Arr 06:05" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+        <input value={sector.airlineName || ''} onChange={(e) => onChange({ airlineName: e.target.value })} placeholder="Airline (per-leg, optional)" style={inputStyle} />
+        <input value={sector.airlineCode || ''} onChange={(e) => onChange({ airlineCode: e.target.value.toUpperCase() })} placeholder="Code" style={inputStyle} />
+      </div>
+    </div>
+  );
+
   return (
     <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      {!editing && (
-        <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
-            </span>
-            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
-      )}
-      {editing && (aiSectors || []).length + (aiReturnSectors || []).length > 1 && (
-        <div style={{ fontSize: 11, color: '#6b7a99', background: '#f9fafc', borderRadius: 8, padding: '8px 12px' }}>
-          This flight has {(aiSectors || []).length + (aiReturnSectors || []).length} legs total. The fields below edit leg 1 only — other legs are kept as-is.
-        </div>
-      )}
+      <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
+          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
+          </span>
+          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
+        </label>
+        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
+      </div>
+
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
-        <input value={form.name} onChange={(e) => { const v = e.target.value; const looked = lookupAirline(v.trim()); setForm((f) => ({ ...f, name: looked || v })); }} placeholder="e.g. VN or Vietnam Airlines" style={inputStyle} />
+        <input value={name} onChange={(e) => { const v = e.target.value; const looked = lookupAirline(v.trim()); setName(looked || v); }} placeholder="e.g. VN or Vietnam Airlines" style={inputStyle} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (code)</div>
-          <input value={form.from} onChange={(e) => { const v = e.target.value.toUpperCase(); setForm((f) => ({ ...f, from: v, fromName: lookupAirport(v) || f.fromName })); }} placeholder="DEL" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (code)</div>
-          <input value={form.to} onChange={(e) => { const v = e.target.value.toUpperCase(); setForm((f) => ({ ...f, to: v, toName: lookupAirport(v) || f.toName })); }} placeholder="SGN" style={inputStyle} />
-        </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 4 }}>TRIP TYPE</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+        {[['one-way', '→ One Way'], ['return', '⇄ Return'], ['multi-city', '⊞ Multi City']].map(([v, l]) => (
+          <button key={v} type="button" onClick={() => setFlightType(v)}
+            style={{ flex: 1, border: '1px solid ' + (flightType === v ? '#f97316' : '#c2d2ee'), background: flightType === v ? '#f9731610' : 'transparent', color: flightType === v ? '#f97316' : '#6b7a99', borderRadius: 20, padding: '7px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{l}</button>
+        ))}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+
+      {flightType === 'one-way' && (
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (city)</div>
-          <input value={form.fromName} onChange={set('fromName')} placeholder="New Delhi" style={inputStyle} />
+          <div style={{ fontSize: 10, color: '#f97316', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>OUTBOUND SECTOR</div>
+          {sectors.map((s, i) => (
+            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+              onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
+          ))}
+          <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Sector</button>
         </div>
+      )}
+
+      {flightType === 'return' && (
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (city)</div>
-          <input value={form.toName} onChange={set('toName')} placeholder="Ho Chi Minh City" style={inputStyle} />
+          <div style={{ fontSize: 10, color: '#15803d', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>OUTBOUND</div>
+          {sectors.map((s, i) => (
+            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+              onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
+          ))}
+          <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82', marginBottom: 12 }}>+ Add Outbound Sector</button>
+          <div style={{ borderTop: '1px dashed #c2d2ee', margin: '10px 0' }} />
+          <div style={{ fontSize: 10, color: '#4169E1', fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>RETURN</div>
+          {returnSectors.map((s, i) => (
+            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={returnSectors.length > 1}
+              onChange={(patch) => updSector(returnSectors, setReturnSectors, i, patch)} onRemove={() => rmSector(setReturnSectors)(i)} />
+          ))}
+          <button type="button" onClick={() => addSector(setReturnSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Return Sector</button>
         </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+      )}
+
+      {flightType === 'multi-city' && (
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
-          <input value={form.date} onChange={set('date')} placeholder="6 Oct 2026" style={inputStyle} />
+          <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>SECTORS (IN JOURNEY ORDER)</div>
+          {sectors.map((s, i) => (
+            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+              onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
+          ))}
+          <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Sector</button>
         </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Dep Time</div>
-          <input value={form.depTime} onChange={set('depTime')} placeholder="23:35" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Arr Time</div>
-          <input value={form.arrTime} onChange={set('arrTime')} placeholder="06:05" style={inputStyle} />
-        </div>
-      </div>
-      <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      )}
+
+      <CurrencyCostRow form={{ currency, costPrice, sellingPrice, exchangeRate }} setForm={(fn) => {
+        const next = typeof fn === 'function' ? fn({ currency, costPrice, sellingPrice, exchangeRate }) : fn;
+        if (next.currency !== undefined) setCurrency(next.currency);
+        if (next.costPrice !== undefined) setCostPrice(next.costPrice);
+        if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
+        if (next.exchangeRate !== undefined) setExchangeRate(next.exchangeRate);
+      }} />
+      <PaxRatesFields form={{ paxPricing, paxRates }} setForm={(fn) => {
+        const next = typeof fn === 'function' ? fn({ paxPricing, paxRates }) : fn;
+        if (next.paxPricing !== undefined) setPaxPricing(next.paxPricing);
+        if (next.paxRates !== undefined) setPaxRates(next.paxRates);
+      }} />
     </ModalShell>
   );
 }
