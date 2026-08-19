@@ -4471,18 +4471,6 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
     e.target.value = '';
   };
 
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
-  };
-
   const submit = async () => {
     if (!form.name.trim() && !form.trainName.trim()) { setErr('Train name is required'); return; }
     setSaving(true);
@@ -4529,16 +4517,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Train' : '+ Add Train'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
-            </span>
-            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
+        <PasteZone hint="Click here, then paste (Ctrl+V) a ticket screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -4668,18 +4647,6 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
     e.target.value = '';
   };
 
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
-  };
-
   const submit = async () => {
     if (!form.hotelName.trim()) { setErr('Hotel name is required'); return; }
     setSaving(true);
@@ -4738,20 +4705,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Hotel' : '+ Add Hotel'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div
-          tabIndex={0}
-          onPaste={handlePaste}
-          style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
-        >
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
-            </span>
-            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
+        <PasteZone hint="Click here, then paste (Ctrl+V) a hotel voucher screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Name *</div>
@@ -5121,8 +5075,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true); setErr('');
     try {
@@ -5146,7 +5099,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
       window.veToast && window.veToast('Cruise booking extracted ✓', 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read — try a clearer scan');
-    } finally { setExtracting(false); e.target.value = ''; }
+    } finally { setExtracting(false); }
   };
 
   const submit = async () => {
@@ -5177,16 +5130,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Cruise' : '+ Add Cruise'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Scan a cruise booking confirmation — AI fills the form below'}
-            </span>
-            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
+        <PasteZone hint="Click here, then paste (Ctrl+V) a cruise booking confirmation" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -5332,8 +5276,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const processFiles = async (files) => {
     if (!files.length) return;
     setExtracting(true); setErr('');
     try {
@@ -5354,7 +5297,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
       window.veToast && window.veToast('Insurance details extracted ✓', 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read — try a clearer scan');
-    } finally { setExtracting(false); e.target.value = ''; }
+    } finally { setExtracting(false); }
   };
 
   const submit = async () => {
@@ -5384,16 +5327,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Insurance' : '+ Add Insurance'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <div style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading file…' : 'Scan an insurance policy document — AI fills the form below'}
-            </span>
-            <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
+        <PasteZone hint="Click here, then paste (Ctrl+V) an insurance policy document" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -5870,18 +5804,6 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
     e.target.value = '';
   };
 
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
-  };
-
   const submit = async () => {
     if (!preview) { setErr('Scan an e-ticket first'); return; }
     setSaving(true);
@@ -5898,19 +5820,7 @@ function ScanTicketModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="✨ Scan E-Ticket" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div
-        tabIndex={0}
-        onPaste={handlePaste}
-        style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
-      >
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🎫'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading ticket…' : 'Click here, then paste (Ctrl+V) — or choose the e-ticket file'}
-          </span>
-          <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-      </div>
+      <PasteZone hint="Click here, then paste (Ctrl+V) the e-ticket screenshot/PDF" accept="image/*,.pdf" onFiles={processFiles} extracting={extracting} />
       {preview && (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ background: '#f9fafc', borderRadius: 8, padding: '10px 12px' }}>
@@ -6072,18 +5982,6 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
     e.target.value = '';
   };
 
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
-  };
-
   const submit = async () => {
     if (!preview || !preview.length) { setErr('Scan a passport/ID first'); return; }
     setSaving(true);
@@ -6109,19 +6007,7 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 
   return (
     <ModalShell title="✨ Scan Passport / ID" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
-      <div
-        tabIndex={0}
-        onPaste={handlePaste}
-        style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
-      >
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '🛂'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading document(s)…' : 'Click here, then paste (Ctrl+V) — or choose passport/Aadhaar photos'}
-          </span>
-          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-      </div>
+      <PasteZone hint="Click here, then paste (Ctrl+V) passport/Aadhaar photos" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} />
       {preview && preview.length > 0 && (
         <div style={{ display: 'grid', gap: 8 }}>
           <div className="v2-detail-field-label">Found {preview.length} traveller{preview.length !== 1 ? 's' : ''} — review before saving</div>
