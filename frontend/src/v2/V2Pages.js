@@ -3606,13 +3606,14 @@ STRUCTURE (follow exactly):
   const messages = [{ role: 'user', content: prompt }];
   let fullText = '';
   let attempts = 0;
-  const MAX_ATTEMPTS = 4;
+  let lastDaysWritten = -1;
+  const MAX_ATTEMPTS = 5;
 
   while (attempts < MAX_ATTEMPTS) {
     attempts++;
     const res = await fetch(`${apiBase()}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system, messages }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 16000, system, messages }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error((data && data.error) || 'AI error');
@@ -3621,17 +3622,19 @@ STRUCTURE (follow exactly):
     messages.push({ role: 'assistant', content: chunk });
 
     const daysWritten = countItineraryDaysV2(fullText);
-    const hitTokenLimit = data.stop_reason === 'max_tokens';
 
     if (!n || daysWritten >= n) {
       // Target met (or unknown target — accept what we got)
       return { text: fullText, daysWritten, targetDays: n, complete: true };
     }
-    if (!hitTokenLimit && attempts > 1) {
-      // Model stopped voluntarily on a continuation turn without hitting the
-      // limit and still isn't at target — asking again is unlikely to help.
-      break;
-    }
+    // Keep retrying as long as each attempt is making forward progress,
+    // regardless of WHY the previous call stopped (token limit vs the model
+    // just deciding it was "done") — that distinction isn't reliable enough
+    // to bet an early exit on. Only give up if a full attempt added zero new
+    // days (genuinely stuck, further attempts would just repeat the same
+    // non-progress), or the attempt budget runs out.
+    if (daysWritten === lastDaysWritten) break;
+    lastDaysWritten = daysWritten;
     // Ask it to continue, in-context, from exactly where it left off.
     messages.push({ role: 'user', content: `Continue the SAME itinerary. You have written up to Day ${daysWritten} so far. Continue starting from Day ${daysWritten + 1}, in the exact same format and tone, through Day ${n}. Do NOT repeat any earlier days, do NOT re-introduce the trip — just continue the day-wise list.` });
   }
