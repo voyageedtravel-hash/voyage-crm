@@ -3572,92 +3572,132 @@ const ITINERARY_VIBE_INSTRUCTIONS = {
 // verbose a particular tone turns out to be — the loop simply doesn't stop
 // until the target is met or the retry budget is exhausted (in which case it
 // returns whatever it has AND tells the caller so no shortfall ships silently).
-async function generateFullItineraryV2(deal, vibe) {
-  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
-  const flights = (deal.flightVendors || []).map((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ')).join('; ');
-  const land = (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
-  const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
+async function generateFullItineraryV2(deal, vibe, onProgress) {
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName || h.city);
+  const flights = deal.flightVendors || [];
+  const landText = (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n\n');
+  const cruises = deal.cruiseVendors || [];
   const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
-  const n = tripDayCountV2(deal);
+  const n = tripDayCountV2(deal) || 1;
+  const vibeText = ITINERARY_VIBE_INSTRUCTIONS[vibe] || ITINERARY_VIBE_INSTRUCTIONS.auto;
 
-  const prompt = `Generate a client-ready itinerary for this trip.
+  // Work out the calendar start date (earliest flight departure or hotel
+  // check-in) so each day number can be mapped to a real date, and to the
+  // hotel/flight that's actually active that day. This is what makes
+  // day-by-day generation reliable — each call gets grounded, specific facts
+  // for exactly one day, not "write N days and hope you count right".
+  const allDates = [];
+  flights.forEach((f) => { [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) allDates.push(s.date); }); });
+  hotels.forEach((h) => { if (h.checkIn) allDates.push(h.checkIn); });
+  const validStart = allDates.map((d) => new Date(d)).filter((d) => !isNaN(d)).sort((a, b) => a - b)[0] || null;
 
-${ITINERARY_VIBE_INSTRUCTIONS[vibe] || ITINERARY_VIBE_INSTRUCTIONS.auto}
+  const dateForDay = (i) => {
+    if (!validStart) return null;
+    const d = new Date(validStart);
+    d.setDate(d.getDate() + (i - 1));
+    return d.toISOString().slice(0, 10);
+  };
+  const activeHotelForDate = (dateStr) => {
+    if (!dateStr) return null;
+    return hotels.find((h) => h.checkIn && h.checkOut && dateStr >= h.checkIn && dateStr < h.checkOut) || null;
+  };
+  const flightsOnDate = (dateStr) => {
+    if (!dateStr) return [];
+    const out = [];
+    flights.forEach((f) => {
+      [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date === dateStr) out.push(`${s.from || s.fromName || '?'} → ${s.to || s.toName || '?'} (${f.name || ''})`); });
+    });
+    return out;
+  };
+  const cruiseOnDate = (dateStr) => {
+    if (!dateStr) return null;
+    return cruises.find((c) => c.checkIn && c.checkOut && dateStr >= c.checkIn && dateStr < c.checkOut) || null;
+  };
 
-Destination: ${destination(deal)}
-Dates: ${deal.travelDates || 'flexible'}
-Pax: ${pax}
-Client name: ${clientName(deal) || 'the traveller(s)'}
-Hotels: ${hotels || 'TBD'}
-Flights: ${flights || 'TBD'}
-Cruise: ${cruises || 'none'}
-Existing land itinerary notes: ${land || 'none'}
-${n ? `\n*** THIS ITINERARY MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Budget your writing so every day gets covered — do not spend most of your output on the first few days. ***` : ''}
+  const system = 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write ONE day at a time when asked, in the exact tone/vibe requested, grounded strictly in the specific facts given for that day. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout.';
 
-STRUCTURE (follow exactly):
-1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above. This is NOT a day and must not have a "Day" header.
-2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.
-3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". Date can go in parens AFTER the title.
-4. TRUTH ABOUT MEALS IS CRITICAL — never claim Breakfast/Lunch/Dinner is included unless the hotel meal plan or land notes actually say so. If not included, say "on own account" or omit. A false meal claim causes a real financial loss to the agency.
-5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers.`;
+  // Step 1 — intro only. Short, cheap, sets tone.
+  const introPrompt = `Write ONLY a short 2-4 sentence warm introductory message for a ${destination(deal)} trip proposal, addressed to ${clientName(deal) || 'the traveller(s)'} by name. ${vibeText} Pax: ${pax}. Do NOT include any "Day" content — intro paragraph only, nothing else.`;
+  onProgress && onProgress(`Writing your welcome message…`);
+  const introRes = await fetch(`${apiBase()}/api/chat`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 600, system, messages: [{ role: 'user', content: introPrompt }] }),
+  });
+  const introData = await introRes.json();
+  if (!introRes.ok) throw new Error((introData && introData.error) || 'AI error');
+  const introText = (introData.content || []).map((c) => c.text || '').join('').trim();
 
-  const system = 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.';
+  // Step 2 — one call per day, each grounded in that day's real hotel/
+  // flight/land facts. A short rolling summary of the previous day keeps the
+  // narrative flowing without needing full prior-day text as context (keeps
+  // each call small and fast).
+  const dayTexts = [];
+  let prevSummary = '';
+  for (let i = 1; i <= n; i++) {
+    const dateStr = dateForDay(i);
+    const hotel = activeHotelForDate(dateStr);
+    const cruise = cruiseOnDate(dateStr);
+    const flightsToday = flightsOnDate(dateStr);
+    const isFirstDay = i === 1, isLastDay = i === n;
 
-  const messages = [{ role: 'user', content: prompt }];
-  let fullText = '';
-  let attempts = 0;
-  let lastDaysWritten = -1;
-  const MAX_ATTEMPTS = 5;
+    const dayFacts = [
+      dateStr ? `Calendar date: ${dateStr}` : '',
+      flightsToday.length ? `Flight(s) today: ${flightsToday.join('; ')}` : '',
+      hotel ? `Hotel tonight: ${hotel.hotelName} (${hotel.city || ''}, ${mealPlanLabel(hotel.mealPlan)}, room: ${hotel.roomCategory || 'Standard'})` : (isLastDay ? 'No hotel tonight — this is the departure/return day.' : 'No hotel change today (same as previous day).'),
+      cruise ? `Cruise: ${cruise.shipName || cruise.cruiseLine || ''}` : '',
+      isFirstDay ? 'This is the FIRST day of the trip.' : '',
+      isLastDay ? 'This is the LAST day of the trip — cover departure/checkout and the journey home.' : '',
+      landText ? `Reference land-vendor itinerary notes (use only what's relevant to THIS specific day, ignore the rest):\n${landText}` : '',
+    ].filter(Boolean).join('\n');
 
-  while (attempts < MAX_ATTEMPTS) {
-    attempts++;
+    const dayPrompt = `Write ONLY "Day ${i}: <short activity-based title>" (title must describe the activity, NOT the date — date can go in parens after the title) followed by that single day's itinerary content. This is day ${i} of ${n} total for a ${destination(deal)} trip.
+
+${vibeText}
+
+${dayFacts}
+
+${prevSummary ? `Previous day ended with: ${prevSummary}\n` : ''}
+TRUTH ABOUT MEALS IS CRITICAL — only mention Breakfast/Lunch/Dinner as included if the hotel meal plan or land notes above genuinely say so. If not included, say "on own account" or omit. A false meal claim causes real financial loss to the agency.
+
+Write ONLY Day ${i} — do not write any other day, do not repeat earlier days, do not add a closing sign-off unless this truly is the last day.`;
+
+    onProgress && onProgress(`Writing Day ${i} of ${n}…`);
     const res = await fetch(`${apiBase()}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 16000, system, messages }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1600, system, messages: [{ role: 'user', content: dayPrompt }] }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error((data && data.error) || 'AI error');
-    const chunk = (data.content || []).map((c) => c.text || '').join('');
-    fullText = fullText ? fullText + '\n' + chunk : chunk;
-    messages.push({ role: 'assistant', content: chunk });
-
-    const daysWritten = countItineraryDaysV2(fullText);
-
-    if (!n || daysWritten >= n) {
-      // Target met (or unknown target — accept what we got)
-      return { text: fullText, daysWritten, targetDays: n, complete: true };
+    let dayText = (data.content || []).map((c) => c.text || '').join('').trim();
+    // Safety net: if the model somehow didn't lead with "Day N", force it —
+    // guarantees the parser downstream always finds every day, no exceptions.
+    if (!new RegExp(`^[\\s#*>_-]*day[\\s-]*${i}\\b`, 'i').test(dayText)) {
+      dayText = `Day ${i}: ${dayText}`;
     }
-    // Keep retrying as long as each attempt is making forward progress,
-    // regardless of WHY the previous call stopped (token limit vs the model
-    // just deciding it was "done") — that distinction isn't reliable enough
-    // to bet an early exit on. Only give up if a full attempt added zero new
-    // days (genuinely stuck, further attempts would just repeat the same
-    // non-progress), or the attempt budget runs out.
-    if (daysWritten === lastDaysWritten) break;
-    lastDaysWritten = daysWritten;
-    // Ask it to continue, in-context, from exactly where it left off.
-    messages.push({ role: 'user', content: `Continue the SAME itinerary. You have written up to Day ${daysWritten} so far. Continue starting from Day ${daysWritten + 1}, in the exact same format and tone, through Day ${n}. Do NOT repeat any earlier days, do NOT re-introduce the trip — just continue the day-wise list.` });
+    dayTexts.push(dayText);
+    prevSummary = dayText.slice(-220).replace(/\n+/g, ' ');
   }
 
-  const finalDays = countItineraryDaysV2(fullText);
-  return { text: fullText, daysWritten: finalDays, targetDays: n, complete: !n || finalDays >= n };
+  const fullText = introText + '\n\n' + dayTexts.join('\n\n');
+  return { text: fullText, daysWritten: n, targetDays: n, complete: true };
 }
 
 
 function AIItineraryModal({ deal, onClose, onSaved }) {
   const [result, setResult] = useState(deal.aiItineraryText || '');
   const [loading, setLoading] = useState(false);
+  const [progressNote, setProgressNote] = useState('');
   const [err, setErr] = useState('');
   const [vibe, setVibe] = useState(deal.aiItineraryVibe || 'auto');
   const [attach, setAttach] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const generate = async () => {
-    setLoading(true); setErr('');
+    setLoading(true); setErr(''); setProgressNote('');
     try {
-      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe);
+      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe, setProgressNote);
       if (!complete) {
-        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days after retrying — please review before sending`, 'warning');
+        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days — please review before sending`, 'warning');
       }
       setResult(text);
       if (attach) await doAttach(text);
@@ -3728,7 +3768,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
               </div>
             </>
           )}
-          {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Writing your itinerary… (may take up to a minute for longer trips — it auto-checks and continues if it stops early)</div>}
+          {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ {progressNote || 'Starting…'}<div style={{ fontSize: 10.5, color: '#aab4c8', marginTop: 6 }}>Writing day-by-day for accuracy — may take 1-2 minutes for longer trips.</div></div>}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5 }}>{err}</div>}
           {result && (
             <>
@@ -3889,6 +3929,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const [vibe, setVibe] = useState(deal.aiItineraryVibe || 'auto');
   const [genBusy, setGenBusy] = useState(false);
   const [genErr, setGenErr] = useState('');
+  const [genProgress, setGenProgress] = useState('');
 
   // Options step state — mirrors V1 exactly
   const [propFlights, setPropFlights] = useState('with'); // with | without | only
@@ -3903,11 +3944,11 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const sell = sellINR(deal);
 
   const generateItinerary = async () => {
-    setGenBusy(true); setGenErr('');
+    setGenBusy(true); setGenErr(''); setGenProgress('');
     try {
-      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe);
+      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe, setGenProgress);
       if (!complete) {
-        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days after retrying — please review before sending`, 'warning');
+        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days — please review before sending`, 'warning');
       }
       const updated = await patchDeal(deal._id, { aiItineraryText: text, aiItineraryVibe: vibe });
       setDeal(updated);
@@ -3975,7 +4016,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
             </div>
             {genErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 12, marginBottom: 12 }}>{genErr}</div>}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? '⏳ Writing itinerary… (up to a minute)' : '✨ Write Itinerary & Continue'}</button>
+              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? `⏳ ${genProgress || 'Starting…'}` : '✨ Write Itinerary & Continue'}</button>
               <button className="v2-cta" disabled={genBusy} onClick={() => setStep('options')} style={{ flex: 1, background: '#6b7a99' }}>Skip →</button>
             </div>
           </div>
