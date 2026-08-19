@@ -2996,28 +2996,14 @@ function LandVoucherAIModal({ deal, onClose }) {
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const handleFiles = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
+  const LAND_VOUCHER_SYSTEM = 'You extract ALL details from a DMC/vendor land voucher for a travel agency. Output ONLY valid JSON, no markdown: {"vendorName":string,"confirmationNo":string,"itinerary":string,"meetingPoints":string,"vendorTC":string,"emergencyContact":string}. itinerary = day-wise with pickup times and remarks (e.g. "Day 1 (15/08): Arrival at Bangkok Airport, transfer to Pattaya Hotel - PVT CAR, Pickup: 13:50HRS, Meet at Rep Point Only\nDay 2 (16/08): Coral Island by Speedboat + Lunch - SIC, Pickup: 09:00-09:30HRS, Wait at Hotel Lobby"). meetingPoints = ALL airport meeting points mentioned (gate numbers, terminal info). vendorTC = ALL terms & conditions text, numbered. emergencyContact = contact numbers for local and India office. Extract EVERYTHING — do not summarize or skip any T&C clause.';
+
+  const runExtraction = async (content) => {
     setExtracting(true); setErr('');
     try {
-      const images = [];
-      for (const file of files) {
-        if (file.type === 'application/pdf') {
-          const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
-          images.push({ type: 'image', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
-        } else {
-          const compressed = await new Promise((res, rej) => { imgToDataURL(file, (d) => res(d)); });
-          images.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: compressed.split(',')[1] } });
-        }
-      }
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6', max_tokens: 3000,
-          system: 'You extract ALL details from a DMC/vendor land voucher for a travel agency. Output ONLY valid JSON, no markdown: {"vendorName":string,"confirmationNo":string,"itinerary":string,"meetingPoints":string,"vendorTC":string,"emergencyContact":string}. itinerary = day-wise with pickup times and remarks (e.g. "Day 1 (15/08): Arrival at Bangkok Airport, transfer to Pattaya Hotel - PVT CAR, Pickup: 13:50HRS, Meet at Rep Point Only\\nDay 2 (16/08): Coral Island by Speedboat + Lunch - SIC, Pickup: 09:00-09:30HRS, Wait at Hotel Lobby"). meetingPoints = ALL airport meeting points mentioned (gate numbers, terminal info). vendorTC = ALL terms & conditions text, numbered. emergencyContact = contact numbers for local and India office. Extract EVERYTHING — do not summarize or skip any T&C clause.',
-          messages: [{ role: 'user', content: [...images, { type: 'text', text: 'Extract all details from this vendor land/tours voucher. Get every T&C clause, every meeting point, every pickup time, every emergency number.' }] }],
-        }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3000, system: LAND_VOUCHER_SYSTEM, messages: [{ role: 'user', content }] }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'AI error');
@@ -3029,7 +3015,28 @@ function LandVoucherAIModal({ deal, onClose }) {
       setErr(ex.message || 'Could not read — try a clearer image');
     }
     setExtracting(false);
-    e.target.value = '';
+  };
+
+  const processFiles = async (files) => {
+    if (!files.length) return;
+    const images = [];
+    for (const file of files) {
+      if (file.type === 'application/pdf') {
+        const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+        images.push({ type: 'image', source: { type: 'base64', media_type: 'application/pdf', data: b64 } });
+      } else {
+        const compressed = await new Promise((res, rej) => { imgToDataURL(file, (d) => res(d)); });
+        images.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: compressed.split(',')[1] } });
+      }
+    }
+    await runExtraction([...images, { type: 'text', text: 'Extract all details from this vendor land/tours voucher. Get every T&C clause, every meeting point, every pickup time, every emergency number.' }]);
+  };
+
+  // Pasting the vendor's plain-text voucher/email (copied from Word/Outlook,
+  // not a screenshot) now runs through the SAME extraction — previously this
+  // modal was upload-only with no paste support at all.
+  const processText = async (text) => {
+    await runExtraction([{ type: 'text', text: 'Extract all details from this vendor land/tours voucher text. Get every T&C clause, every meeting point, every pickup time, every emergency number.\n\n' + text }]);
   };
 
   const saveToLand = async () => {
@@ -3078,18 +3085,14 @@ function LandVoucherAIModal({ deal, onClose }) {
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
           {!extracted && (
-            <div style={{ textAlign: 'center', padding: '20px 10px' }}>
-              <div style={{ background: '#faf7f0', border: '2px dashed #c9a84c', borderRadius: 14, padding: 30, cursor: extracting ? 'wait' : 'pointer' }}>
-                <label style={{ cursor: extracting ? 'wait' : 'pointer' }}>
-                  <div style={{ fontSize: 32, marginBottom: 10 }}>{extracting ? '⏳' : '📄'}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#0d1b3e' }}>
-                    {extracting ? 'AI reading vendor voucher…' : 'Upload vendor voucher (PDF or screenshot)'}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#6b7a99', marginTop: 6 }}>Supports PDF, JPG, PNG — AI will extract everything automatically</div>
-                  <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-                </label>
-              </div>
-            </div>
+            <PasteZone
+              hint="Click here, then paste (Ctrl+V) the vendor voucher — screenshot, PDF, or plain text"
+              accept="image/*,.pdf"
+              multiple
+              onFiles={processFiles}
+              onPlainText={processText}
+              extracting={extracting}
+            />
           )}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5, marginBottom: 12 }}>{err}</div>}
           {extracted && (
