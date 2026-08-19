@@ -2396,7 +2396,22 @@ function buildProposalHTMLV2(deal, opts) {
         if (bodyLines.length) { title = bodyLines[0].replace(/^[-*•\s]+/, '').slice(0, 90); body = bodyLines.slice(1).join(' '); }
       }
       const tSplit = title.split(/\s[-–—]\s|:\s/);
-      if (tSplit.length > 1 && tSplit[0].length < 70) { const newTitle = tSplit[0]; body = (title.slice(newTitle.length).replace(/^[\s:\-–—]+/, '') + ' ' + body).trim(); title = newTitle; }
+      if (tSplit.length > 1 && tSplit[0].length < 70) {
+        const newTitle = tSplit[0]; body = (title.slice(newTitle.length).replace(/^[\s:\-–—]+/, '') + ' ' + body).trim(); title = newTitle;
+      } else if (title.length > 90) {
+        // No natural short break point found (common with land-vendor text
+        // where a whole day is one continuous line, e.g. DMC quotes) — hard
+        // cap the title so it can never render an entire multi-hundred-
+        // character paragraph in bold. Cut at the nearest sentence end or
+        // word boundary near 90 chars instead of a fixed character chop.
+        const cut = title.slice(0, 90);
+        const lastPeriod = cut.lastIndexOf('. ');
+        const lastSpace = cut.lastIndexOf(' ');
+        const cutAt = lastPeriod > 30 ? lastPeriod + 1 : (lastSpace > 30 ? lastSpace : 90);
+        const newTitle = title.slice(0, cutAt).trim();
+        body = (title.slice(cutAt).trim() + ' ' + body).trim();
+        title = newTitle;
+      }
       return `
       <div style="display:flex;gap:0;position:relative">
         <div style="width:66px;display:flex;flex-direction:column;align-items:center;flex-shrink:0">
@@ -4136,6 +4151,72 @@ function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, labe
   );
 }
 
+// ── Shared AI paste/upload zone ──────────────────────────────────────────
+// Fixes two real bugs in the old per-modal version of this block:
+// 1. The whole zone was wrapped in a <label> around a hidden file input, so
+//    ANY click anywhere in it — including clicking to focus for a paste —
+//    immediately opened the OS file picker. There was no way to just
+//    "click here, then paste" without the file dialog popping up first.
+//    Now clicking the zone only focuses it (enabling Ctrl+V); browsing is a
+//    separate, explicit "or choose a file" link.
+// 2. Pasting plain text (e.g. a client's itinerary copied from Word) did
+//    nothing — the handler only recognized image/pdf clipboard items and
+//    silently ignored everything else, so people who instinctively clicked
+//    this prominent "click here, then paste" zone first (before finding the
+//    actual textarea further down) got no feedback at all. When onPlainText
+//    is supplied, plain-text paste now routes straight into it.
+function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, summary }) {
+  const fileInputRef = React.useRef(null);
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items || []);
+    const files = items
+      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
+      .map((x) => x.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      onFiles(files);
+      return;
+    }
+    if (onPlainText) {
+      const text = e.clipboardData.getData('text/plain');
+      if (text && text.trim()) {
+        e.preventDefault();
+        onPlainText(text);
+      }
+    }
+  };
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) onFiles(files);
+    e.target.value = '';
+  };
+  return (
+    <div
+      tabIndex={0}
+      onPaste={handlePaste}
+      style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+        <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
+          {extracting ? 'Reading file…' : hint}
+        </span>
+      </div>
+      <button
+        type="button"
+        disabled={extracting}
+        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+        style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: '#334e82', fontSize: 11.5, fontWeight: 700, textDecoration: 'underline', cursor: extracting ? 'wait' : 'pointer' }}
+      >
+        or choose a file to upload
+      </button>
+      <input ref={fileInputRef} type="file" accept={accept} multiple={!!multiple} onChange={handleFileChange} disabled={extracting} style={{ display: 'none' }} />
+      {summary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{summary}</div>}
+    </div>
+  );
+}
+
 function AddFlightModal({ deal, editing, onClose, onSaved }) {
   const emptySector = () => ({ from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '', airlineCode: '', airlineName: '' });
 
@@ -4202,24 +4283,6 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
     }
   };
 
-  const handleFiles = (e) => {
-    const files = Array.from(e.target.files || []);
-    processFiles(files);
-    e.target.value = '';
-  };
-
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
-  };
-
   const submit = async () => {
     if (!name.trim()) { setErr('Airline name is required'); return; }
     setSaving(true);
@@ -4259,16 +4322,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      <div tabIndex={0} onPaste={handlePaste} style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-          <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-          <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-            {extracting ? 'Reading file…' : 'Click here, then paste (Ctrl+V) — or choose a screenshot/PDF'}
-          </span>
-          <input type="file" accept="image/*,.pdf" multiple onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-        </label>
-        {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-      </div>
+      <PasteZone hint="Click here, then paste (Ctrl+V) a flight screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
 
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
@@ -4846,16 +4900,14 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
     e.target.value = '';
   };
 
-  const handlePaste = (e) => {
-    const items = Array.from(e.clipboardData.items || []);
-    const files = items
-      .filter((x) => x.type && (x.type.indexOf('image') === 0 || x.type === 'application/pdf'))
-      .map((x) => x.getAsFile())
-      .filter(Boolean);
-    if (files.length) {
-      e.preventDefault();
-      processFiles(files);
-    }
+  // Pasting a client's Word/PDF itinerary as plain text (not a screenshot)
+  // now lands straight in the itinerary field, wherever in the modal the
+  // paste happens — this was the actual gap vs V1: only image/pdf paste was
+  // ever handled, so a plain-text paste onto the AI zone (the first, most
+  // prominent thing in the modal) silently did nothing.
+  const handlePlainText = (text) => {
+    setForm((f) => ({ ...f, itinerary: f.itinerary ? f.itinerary + '\n\n' + text : text }));
+    window.veToast && window.veToast('Itinerary text pasted ✓', 'success');
   };
 
   const submit = async () => {
@@ -4894,22 +4946,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Land Package' : '+ Add Land Package / Itinerary'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      {!editing && (
-        <div
-          tabIndex={0}
-          onPaste={handlePaste}
-          style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
-        >
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: extracting ? 'wait' : 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
-            <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-              {extracting ? 'Reading itinerary…' : 'Click here, then paste (Ctrl+V) — or choose a DMC quote/itinerary file'}
-            </span>
-            <input type="file" accept="image/*,.pdf" onChange={handleFiles} disabled={extracting} style={{ display: 'none' }} />
-          </label>
-          {aiSummary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{aiSummary}</div>}
-        </div>
-      )}
+      <PasteZone hint="Click here, then paste (Ctrl+V) a DMC quote/itinerary — screenshot, PDF, or plain text" accept="image/*,.pdf" onFiles={processFiles} onPlainText={handlePlainText} extracting={extracting} summary={aiSummary} />
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Package Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. ABC DMC — Bali 5N Land Package" style={inputStyle} />
