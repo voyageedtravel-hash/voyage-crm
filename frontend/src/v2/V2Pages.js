@@ -4102,6 +4102,40 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   );
 }
 
+// Defined at module scope (not inside AddFlightModal) — a component defined
+// inside another component's function body gets a NEW function identity on
+// every parent re-render, which makes React treat it as a brand-new
+// component type and remount its DOM nodes. For a text input, that means
+// losing focus after every single keystroke (looked like the box "freezing"
+// after each letter). Keeping this stable at module scope fixes that.
+function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, label }) {
+  return (
+    <div style={{ border: '1px dashed #d4e0f5', borderRadius: 9, padding: '10px 12px', marginBottom: 8, background: '#fff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: .6, color: '#94a3b8' }}>{label}</span>
+        {showRemove && <button onClick={onRemove} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.from} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ from: v, fromName: lookupAirport(v) || sector.fromName }); }} placeholder="From (DEL)" style={inputStyle} />
+        <input value={sector.to} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ to: v, toName: lookupAirport(v) || sector.toName }); }} placeholder="To (SGN)" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.fromName} onChange={(e) => onChange({ fromName: e.target.value })} placeholder="From city" style={inputStyle} />
+        <input value={sector.toName} onChange={(e) => onChange({ toName: e.target.value })} placeholder="To city" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={sector.date} onChange={(e) => onChange({ date: e.target.value })} placeholder="6 Oct 2026" style={inputStyle} />
+        <input value={sector.depTime} onChange={(e) => onChange({ depTime: e.target.value })} placeholder="Dep 23:35" style={inputStyle} />
+        <input value={sector.arrTime} onChange={(e) => onChange({ arrTime: e.target.value })} placeholder="Arr 06:05" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+        <input value={sector.airlineName || ''} onChange={(e) => onChange({ airlineName: e.target.value })} placeholder="Airline (per-leg, optional)" style={inputStyle} />
+        <input value={sector.airlineCode || ''} onChange={(e) => onChange({ airlineCode: e.target.value.toUpperCase() })} placeholder="Code" style={inputStyle} />
+      </div>
+    </div>
+  );
+}
+
 function AddFlightModal({ deal, editing, onClose, onSaved }) {
   const emptySector = () => ({ from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '', airlineCode: '', airlineName: '' });
 
@@ -4222,31 +4256,6 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
     }
   };
 
-  const SectorRow = ({ sector, i, onChange, onRemove, showRemove, label }) => (
-    <div style={{ border: '1px dashed #d4e0f5', borderRadius: 9, padding: '10px 12px', marginBottom: 8, background: '#fff' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: .6, color: '#94a3b8' }}>{label}</span>
-        {showRemove && <button onClick={onRemove} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-        <input value={sector.from} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ from: v, fromName: lookupAirport(v) || sector.fromName }); }} placeholder="From (DEL)" style={inputStyle} />
-        <input value={sector.to} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ to: v, toName: lookupAirport(v) || sector.toName }); }} placeholder="To (SGN)" style={inputStyle} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-        <input value={sector.fromName} onChange={(e) => onChange({ fromName: e.target.value })} placeholder="From city" style={inputStyle} />
-        <input value={sector.toName} onChange={(e) => onChange({ toName: e.target.value })} placeholder="To city" style={inputStyle} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
-        <input value={sector.date} onChange={(e) => onChange({ date: e.target.value })} placeholder="6 Oct 2026" style={inputStyle} />
-        <input value={sector.depTime} onChange={(e) => onChange({ depTime: e.target.value })} placeholder="Dep 23:35" style={inputStyle} />
-        <input value={sector.arrTime} onChange={(e) => onChange({ arrTime: e.target.value })} placeholder="Arr 06:05" style={inputStyle} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
-        <input value={sector.airlineName || ''} onChange={(e) => onChange({ airlineName: e.target.value })} placeholder="Airline (per-leg, optional)" style={inputStyle} />
-        <input value={sector.airlineCode || ''} onChange={(e) => onChange({ airlineCode: e.target.value.toUpperCase() })} placeholder="Code" style={inputStyle} />
-      </div>
-    </div>
-  );
 
   return (
     <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
@@ -4278,7 +4287,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         <div>
           <div style={{ fontSize: 10, color: '#f97316', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>OUTBOUND SECTOR</div>
           {sectors.map((s, i) => (
-            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+            <SectorRowV2FlightBase key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
               onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
           ))}
           <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Sector</button>
@@ -4289,14 +4298,14 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         <div>
           <div style={{ fontSize: 10, color: '#15803d', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>OUTBOUND</div>
           {sectors.map((s, i) => (
-            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+            <SectorRowV2FlightBase key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
               onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
           ))}
           <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82', marginBottom: 12 }}>+ Add Outbound Sector</button>
           <div style={{ borderTop: '1px dashed #c2d2ee', margin: '10px 0' }} />
           <div style={{ fontSize: 10, color: '#4169E1', fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>RETURN</div>
           {returnSectors.map((s, i) => (
-            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={returnSectors.length > 1}
+            <SectorRowV2FlightBase key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={returnSectors.length > 1}
               onChange={(patch) => updSector(returnSectors, setReturnSectors, i, patch)} onRemove={() => rmSector(setReturnSectors)(i)} />
           ))}
           <button type="button" onClick={() => addSector(setReturnSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Return Sector</button>
@@ -4307,7 +4316,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         <div>
           <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>SECTORS (IN JOURNEY ORDER)</div>
           {sectors.map((s, i) => (
-            <SectorRow key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
+            <SectorRowV2FlightBase key={i} sector={s} i={i} label={`Sector ${i + 1}`} showRemove={sectors.length > 1}
               onChange={(patch) => updSector(sectors, setSectors, i, patch)} onRemove={() => rmSector(setSectors)(i)} />
           ))}
           <button type="button" onClick={() => addSector(setSectors)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Sector</button>
