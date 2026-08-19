@@ -2057,9 +2057,9 @@ function buildProposalHTMLV2(deal, opts) {
     });
   })();
 
-  const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+  const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
   const parseDaysV2 = (text) => {
-    const raw = (text || '').split(/\n+/).map((x) => x.trim().replace(/^#+\s*/, '')).filter(Boolean);
+    const raw = (text || '').split(/\n+/).map((x) => x.trim().replace(/^[#*>_\s-]+/, '').replace(/\*\*/g, '')).filter(Boolean);
     const firstHdr = raw.findIndex((l) => dayHdr.test(l));
     if (firstHdr < 0) return raw.length > 15 ? [] : raw; // safety: if no day headers found and text is huge, return empty rather than 72 "days"
     const out = []; let cur = null;
@@ -2083,7 +2083,7 @@ function buildProposalHTMLV2(deal, opts) {
   // intro paragraph out separately to show as a warm note above the days.
   const aiIntroText = (() => {
     if (!aiItineraryRaw) return '';
-    const raw = aiItineraryRaw.split(/\n+/).map((x) => x.trim().replace(/^#+\s*/, '')).filter(Boolean);
+    const raw = aiItineraryRaw.split(/\n+/).map((x) => x.trim().replace(/^[#*>_\s-]+/, '').replace(/\*\*/g, '')).filter(Boolean);
     const firstHdr = raw.findIndex((l) => dayHdr.test(l));
     if (firstHdr <= 0) return '';
     return raw.slice(0, firstHdr).filter((l) => !/^[-*_]{3,}$/.test(l)).join(' ');
@@ -3492,6 +3492,15 @@ function tripDayCountV2(deal) {
   if (dOnly) return Number(dOnly[1]);
   const nOnly = title.match(/(\d+)\s*Nights?\b/i);
   if (nOnly) return Number(nOnly[1]) + 1;
+  // Hotel nights + 1 — this is the SAME source the proposal header uses for
+  // its "N nights / N+1 days" line, so the AI is asked for exactly the number
+  // of days the client will see printed at the top of their proposal.
+  const hotelNights = (deal.hotelVendors || []).reduce((s, h) => {
+    let n = Number(h.nights);
+    if (!n && h.checkIn && h.checkOut) n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000);
+    return s + (n > 0 ? n : 0);
+  }, 0);
+  if (hotelNights > 0) return hotelNights + 1;
   // Flight span (first departure -> last arrival)
   const allDates = [];
   (deal.flightVendors || []).forEach((f) => {
@@ -3841,7 +3850,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   };
 
   const loadPropDays = () => {
-    const dayHdr = /^(?:#*\s*)?(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+    const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
     const src = deal.aiItineraryText || (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
     const lines = src.split(/\n+/).map((x) => x.trim()).filter(Boolean);
     const firstHdr = lines.findIndex((l) => dayHdr.test(l));
