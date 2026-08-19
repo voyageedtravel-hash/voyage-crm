@@ -2506,7 +2506,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
       <div style="font-size:11px;letter-spacing:4px;color:#f0c842;font-weight:700;margin-bottom:8px">LEARN · TRAVEL · EXPLORE</div>
       <div style="font-size:13px;opacity:.85;margin-bottom:16px">Reference: <b>${ref}</b></div>
       <div style="border-top:2px solid rgba(255,255,255,.5);padding-top:16px;font-size:14px;line-height:2">
-        📍 <b>${escHtml(deal.destination)}</b>${nightsTotal ? ` — ${nightsTotal} nights / ${nightsTotal + 1} days` : ''}<br>
+        📍 <b>${escHtml(deal.destination)}</b>${nightsTotal ? ` — ${nightsTotal} nights / ${tripDayCountV2(deal) || (nightsTotal + 1)} days` : ''}<br>
         📅 <b>${escHtml(deal.travelDates) || 'Dates to be confirmed'}</b><br>
         👥 <b>${deal.rooms || 1} room${Number(deal.rooms) === 1 ? '' : 's'}, ${pax}</b>
       </div>
@@ -3484,35 +3484,52 @@ function InvoiceModal({ deal, onClose }) {
 // nights and routinely stops short (a 7-day trip came back as 4-6 days).
 // Priority: explicit nights/days in the deal title, then flight span, then
 // hotel span, then a safe default.
+// Works out how many days the AI itinerary should cover. Uses the WIDEST
+// (most inclusive) of every signal available — title, hotel nights, and the
+// real flight+hotel date span — because under-counting silently drops real
+// travel days (e.g. an overnight/connecting flight where departure and
+// arrival fall on different calendar dates was previously invisible to the
+// hotel-nights-only calculation, cutting the itinerary short by exactly the
+// pre-arrival travel day).
 function tripDayCountV2(deal) {
+  const candidates = [];
+
   const title = String(deal.destination || deal.tripName || '');
   const nd = title.match(/(\d+)\s*N(?:ights?)?\s*[\/&+-]?\s*(\d+)\s*D(?:ays?)?/i);
-  if (nd) return Number(nd[2]);
-  const dOnly = title.match(/(\d+)\s*Days?\b/i);
-  if (dOnly) return Number(dOnly[1]);
-  const nOnly = title.match(/(\d+)\s*Nights?\b/i);
-  if (nOnly) return Number(nOnly[1]) + 1;
-  // Hotel nights + 1 — this is the SAME source the proposal header uses for
-  // its "N nights / N+1 days" line, so the AI is asked for exactly the number
-  // of days the client will see printed at the top of their proposal.
+  if (nd) candidates.push(Number(nd[2]));
+  else {
+    const dOnly = title.match(/(\d+)\s*Days?\b/i);
+    if (dOnly) candidates.push(Number(dOnly[1]));
+    const nOnly = title.match(/(\d+)\s*Nights?\b/i);
+    if (nOnly) candidates.push(Number(nOnly[1]) + 1);
+  }
+
   const hotelNights = (deal.hotelVendors || []).reduce((s, h) => {
     let n = Number(h.nights);
     if (!n && h.checkIn && h.checkOut) n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000);
     return s + (n > 0 ? n : 0);
   }, 0);
-  if (hotelNights > 0) return hotelNights + 1;
-  // Flight span (first departure -> last arrival)
+  if (hotelNights > 0) candidates.push(hotelNights + 1);
+
+  // Real span across every dated event — flight sectors (both onward AND
+  // return), hotel check-in/out. This is the ground truth: if the client
+  // departs on the 12th and the last hotel checks out on the 19th, the
+  // narrative needs to cover all 8 of those calendar days, whatever the
+  // package's marketing label says.
   const allDates = [];
   (deal.flightVendors || []).forEach((f) => {
     [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) allDates.push(s.date); });
   });
   (deal.hotelVendors || []).forEach((h) => { if (h.checkIn) allDates.push(h.checkIn); if (h.checkOut) allDates.push(h.checkOut); });
+  (deal.landVendors || []).forEach((l) => { if (l.startDate) allDates.push(l.startDate); if (l.endDate) allDates.push(l.endDate); });
+  (deal.cruiseVendors || []).forEach((c) => { if (c.checkIn) allDates.push(c.checkIn); if (c.checkOut) allDates.push(c.checkOut); });
   const valid = allDates.map((d) => new Date(d)).filter((d) => !isNaN(d)).sort((a, b) => a - b);
   if (valid.length >= 2) {
     const span = Math.round((valid[valid.length - 1] - valid[0]) / 86400000) + 1;
-    if (span > 0 && span < 40) return span;
+    if (span > 0 && span < 40) candidates.push(span);
   }
-  return 0; // unknown — prompt will omit the hard requirement
+
+  return candidates.length ? Math.max(...candidates) : 0;
 }
 
 const AI_VIBE_OPTIONS = [
