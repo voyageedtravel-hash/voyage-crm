@@ -3925,11 +3925,7 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
 // the intro tone and the itinerary the client sees are never out of sync. ──
 function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
-  const [step, setStep] = useState(deal.aiItineraryText ? 'options' : 'vibe');
-  const [vibe, setVibe] = useState(deal.aiItineraryVibe || 'auto');
-  const [genBusy, setGenBusy] = useState(false);
-  const [genErr, setGenErr] = useState('');
-  const [genProgress, setGenProgress] = useState('');
+  const [step, setStep] = useState('options'); // AI vibe/generation step removed — always start at options
 
   // Options step state — mirrors V1 exactly
   const [propFlights, setPropFlights] = useState('with'); // with | without | only
@@ -3942,22 +3938,6 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const [propDays, setPropDays] = useState(null); // null = auto, array = edited
 
   const sell = sellINR(deal);
-
-  const generateItinerary = async () => {
-    setGenBusy(true); setGenErr(''); setGenProgress('');
-    try {
-      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe, setGenProgress);
-      if (!complete) {
-        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days — please review before sending`, 'warning');
-      }
-      const updated = await patchDeal(deal._id, { aiItineraryText: text, aiItineraryVibe: vibe });
-      setDeal(updated);
-      onDealUpdated && onDealUpdated(updated);
-      setStep('options');
-      window.veToast && window.veToast(complete ? 'AI itinerary generated & attached ✓' : 'Itinerary attached — please review', complete ? 'success' : 'warning');
-    } catch (e) { setGenErr(e.message || 'Could not generate'); }
-    setGenBusy(false);
-  };
 
   const loadPropDays = () => {
     const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
@@ -3991,40 +3971,6 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
     setDeal(updated); onDealUpdated && onDealUpdated(updated);
   };
 
-  // Vibe step
-  if (step === 'vibe') {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-        <div style={{ background: '#fff', borderRadius: 18, width: 620, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 30px 80px rgba(0,0,0,.35)' }}>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>📄 Client Proposal</h3>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
-          </div>
-          <div style={{ padding: '18px 24px' }}>
-            <div style={{ fontSize: 13, color: '#33446b', fontWeight: 600, marginBottom: 4 }}>Ye trip kis type ke liye hai?</div>
-            <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 14 }}>AI isi ke hisaab se intro message aur day-wise itinerary likhega — yehi tone proposal PDF mein bhi jayegi.</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {AI_VIBE_OPTIONS.map((o) => (
-                <label key={o.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, cursor: 'pointer', border: '1px solid ' + (vibe === o.id ? '#c9a84c' : '#e3eaf7'), background: vibe === o.id ? '#fdf6e5' : '#fff', borderRadius: 10, padding: '9px 12px' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, color: '#0d1b3e' }}>
-                    <input type="radio" name="proposal-vibe" checked={vibe === o.id} onChange={() => setVibe(o.id)} style={{ accentColor: '#c9a84c' }} />
-                    {o.label}
-                  </span>
-                  <span style={{ fontSize: 10.5, color: '#6b7a99', marginLeft: 20 }}>{o.desc}</span>
-                </label>
-              ))}
-            </div>
-            {genErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 12, marginBottom: 12 }}>{genErr}</div>}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? `⏳ ${genProgress || 'Starting…'}` : '✨ Write Itinerary & Continue'}</button>
-              <button className="v2-cta" disabled={genBusy} onClick={() => setStep('options')} style={{ flex: 1, background: '#6b7a99' }}>Skip →</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Options step — mirrors V1 exactly
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -4049,9 +3995,9 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
         <input value={propCoverUrl} onChange={(e) => setPropCoverUrl(e.target.value)} placeholder="https://... (blank = auto/premium cover)" style={{ width: '100%', background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '10px 13px', fontSize: 12, outline: 'none', marginBottom: 18 }} />
 
         {deal.aiItineraryText && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0faf4', border: '1px solid #cfe9d6', borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 11.5, fontWeight: 700 }}>
-            <span style={{ color: '#15803d' }}>✓ AI itinerary attached ({AI_VIBE_OPTIONS.find((o) => o.id === deal.aiItineraryVibe)?.label || 'custom'})</span>
-            <button onClick={() => setStep('vibe')} style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'underline' }}>Change vibe</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 11.5, fontWeight: 700 }}>
+            <span style={{ color: '#8a6d1a' }}>⚠️ AI-generated itinerary is attached to this deal — review it carefully before sending, or remove it to use the Land Package itinerary instead.</span>
+            <button onClick={async () => { const updated = await patchDeal(deal._id, { aiItineraryText: '', aiItineraryVibe: '' }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', fontSize: 11, fontWeight: 700, textDecoration: 'underline', whiteSpace: 'nowrap', marginLeft: 10 }}>Remove</button>
           </div>
         )}
 
@@ -6568,7 +6514,6 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               try { w.document.write(buildQuotationHTMLV2(deal, deal.aiItineraryText || null)); w.document.close(); }
               catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
             }}>📋 Quotation PDF</button>
-            <button className="v2-hero-btn" onClick={() => setModal('aiItinerary')}>✨ AI Itinerary</button>
             <button className="v2-hero-btn" onClick={() => setModal('vouchers')}>🎫 Vouchers</button>
             <button className="v2-hero-btn" onClick={() => setModal('landVoucherAI')}>🗺️ Land Voucher (AI)</button>
             <button className="v2-hero-btn" onClick={() => setModal('invoice')}>🧾 Invoice</button>
@@ -7576,7 +7521,6 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'aiItinerary' && <AIItineraryModal deal={deal} onClose={() => setModal(null)} onSaved={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'invoice' && <InvoiceModal deal={deal} onClose={() => setModal(null)} />}
