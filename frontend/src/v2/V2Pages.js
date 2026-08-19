@@ -3524,6 +3524,106 @@ const AI_VIBE_OPTIONS = [
   { id: 'solo', label: '🎒 Solo Traveller', desc: 'Confident, easy-going — flexible, social touchpoints' },
 ];
 
+// Counts "Day N" headers in raw AI text — used to verify the model actually
+// wrote as many days as it was asked to, regardless of markdown styling.
+function countItineraryDaysV2(text) {
+  const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
+  const lines = (text || '').split(/\n+/).map((l) => l.trim().replace(/^[#*>_\s-]+/, '').replace(/\*\*/g, ''));
+  const nums = new Set();
+  lines.forEach((l) => {
+    const m = l.match(/^day[\s-]*(\d+)\b/i) || l.match(/^(\d+)(?:st|nd|rd|th)?\s+day\b/i);
+    if (m) nums.add(Number(m[1]));
+  });
+  return nums.size;
+}
+
+const ITINERARY_VIBE_INSTRUCTIONS = {
+  auto: 'First, infer the right tone from the pax breakdown and deal notes below (e.g. children present → family tone; 2 adults with no kids and a high budget → consider honeymoon or luxury; larger all-adult groups → friends trip). Then write in that inferred tone.',
+  family: 'Write for a FAMILY trip. Warm, reassuring, practical tone. Emphasize comfort, safety, kid-friendly pacing, multi-generational activities, and downtime. Avoid slang.',
+  bachelors: 'Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone — like a well-travelled friend planning the trip. Emphasize nightlife, adventure activities, group experiences, and flexibility. Keep it lively but still professional enough to send a client.',
+  honeymoon: 'Write for a HONEYMOON. Romantic, warm, intimate tone. Emphasize private experiences, candlelit dinners, sunset moments, and unhurried pacing. Elegant language, not over-the-top.',
+  luxury: 'Write for an UBER-LUXURY client. Sophisticated, understated, refined tone — think a five-star concierge letter. NO exclamation marks, no hard-sell language, no emojis in the prose (icons in headers are fine). Emphasize exclusivity, privacy, and seamlessness.',
+  solo: 'Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility, ease of getting around, safety notes, and opportunities to meet people or have quiet time as preferred.',
+};
+
+// ── Self-correcting itinerary generator ──────────────────────────────────
+// Does NOT trust the model to reliably stop at exactly the right day count —
+// after generating, it COUNTS the actual "Day N" headers written, and if
+// short, sends a follow-up "continue from Day X+1" turn using the real
+// conversation so far (not a fresh prompt), and repeats up to 3 times. This
+// makes correctness independent of token budget, prompt obedience, or how
+// verbose a particular tone turns out to be — the loop simply doesn't stop
+// until the target is met or the retry budget is exhausted (in which case it
+// returns whatever it has AND tells the caller so no shortfall ships silently).
+async function generateFullItineraryV2(deal, vibe) {
+  const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
+  const flights = (deal.flightVendors || []).map((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ')).join('; ');
+  const land = (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
+  const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
+  const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
+  const n = tripDayCountV2(deal);
+
+  const prompt = `Generate a client-ready itinerary for this trip.
+
+${ITINERARY_VIBE_INSTRUCTIONS[vibe] || ITINERARY_VIBE_INSTRUCTIONS.auto}
+
+Destination: ${destination(deal)}
+Dates: ${deal.travelDates || 'flexible'}
+Pax: ${pax}
+Client name: ${clientName(deal) || 'the traveller(s)'}
+Hotels: ${hotels || 'TBD'}
+Flights: ${flights || 'TBD'}
+Cruise: ${cruises || 'none'}
+Existing land itinerary notes: ${land || 'none'}
+${n ? `\n*** THIS ITINERARY MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Budget your writing so every day gets covered — do not spend most of your output on the first few days. ***` : ''}
+
+STRUCTURE (follow exactly):
+1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above. This is NOT a day and must not have a "Day" header.
+2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.
+3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". Date can go in parens AFTER the title.
+4. TRUTH ABOUT MEALS IS CRITICAL — never claim Breakfast/Lunch/Dinner is included unless the hotel meal plan or land notes actually say so. If not included, say "on own account" or omit. A false meal claim causes a real financial loss to the agency.
+5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers.`;
+
+  const system = 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.';
+
+  const messages = [{ role: 'user', content: prompt }];
+  let fullText = '';
+  let attempts = 0;
+  const MAX_ATTEMPTS = 4;
+
+  while (attempts < MAX_ATTEMPTS) {
+    attempts++;
+    const res = await fetch(`${apiBase()}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8000, system, messages }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.error) || 'AI error');
+    const chunk = (data.content || []).map((c) => c.text || '').join('');
+    fullText = fullText ? fullText + '\n' + chunk : chunk;
+    messages.push({ role: 'assistant', content: chunk });
+
+    const daysWritten = countItineraryDaysV2(fullText);
+    const hitTokenLimit = data.stop_reason === 'max_tokens';
+
+    if (!n || daysWritten >= n) {
+      // Target met (or unknown target — accept what we got)
+      return { text: fullText, daysWritten, targetDays: n, complete: true };
+    }
+    if (!hitTokenLimit && attempts > 1) {
+      // Model stopped voluntarily on a continuation turn without hitting the
+      // limit and still isn't at target — asking again is unlikely to help.
+      break;
+    }
+    // Ask it to continue, in-context, from exactly where it left off.
+    messages.push({ role: 'user', content: `Continue the SAME itinerary. You have written up to Day ${daysWritten} so far. Continue starting from Day ${daysWritten + 1}, in the exact same format and tone, through Day ${n}. Do NOT repeat any earlier days, do NOT re-introduce the trip — just continue the day-wise list.` });
+  }
+
+  const finalDays = countItineraryDaysV2(fullText);
+  return { text: fullText, daysWritten: finalDays, targetDays: n, complete: !n || finalDays >= n };
+}
+
+
 function AIItineraryModal({ deal, onClose, onSaved }) {
   const [result, setResult] = useState(deal.aiItineraryText || '');
   const [loading, setLoading] = useState(false);
@@ -3532,41 +3632,12 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
   const [attach, setAttach] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const vibeInstruction = (v) => ({
-    auto: `First, infer the right tone from the pax breakdown and deal notes below (e.g. children present → family tone; 2 adults with no kids and a high budget → consider honeymoon or luxury; larger all-adult groups → friends trip). Then write in that inferred tone.`,
-    family: `Write for a FAMILY trip. Warm, reassuring, practical tone. Emphasize comfort, safety, kid-friendly pacing, multi-generational activities, and downtime. Avoid slang.`,
-    bachelors: `Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone — like a well-travelled friend planning the trip. Emphasize nightlife, adventure activities, group experiences, and flexibility. Keep it lively but still professional enough to send a client.`,
-    honeymoon: `Write for a HONEYMOON. Romantic, warm, intimate tone. Emphasize private experiences, candlelit dinners, sunset moments, and unhurried pacing. Elegant language, not over-the-top.`,
-    luxury: `Write for an UBER-LUXURY client. Sophisticated, understated, refined tone — think a five-star concierge letter. NO exclamation marks, no hard-sell language, no emojis in the prose (icons in headers are fine). Emphasize exclusivity, privacy, and seamlessness.`,
-    solo: `Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility, ease of getting around, safety notes, and opportunities to meet people or have quiet time as preferred.`,
-  }[v] || '');
-
   const generate = async () => {
     setLoading(true); setErr('');
     try {
-      const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
-      const flights = (deal.flightVendors || []).map((f) => {
-        const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
-        return secs.map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ');
-      }).join('; ');
-      const land = (deal.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
-      const cruises = (deal.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
-      const pax = `${deal.adults || 0} adults${Number(deal.children) > 0 ? `, ${deal.children} children` : ''}${Number(deal.infants) > 0 ? `, ${deal.infants} infants` : ''}`;
-
-      const prompt = `Generate a client-ready itinerary for this trip.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(deal)}\nDates: ${deal.travelDates || 'flexible'}\nPax: ${pax}\nClient name: ${clientName(deal) || 'the traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land itinerary notes: ${land || 'none'}${(function(){ const n = tripDayCountV2(deal); return n ? `\n\n*** THIS ITINERARY MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Budget your writing: with ${n} days to cover, do NOT spend more than roughly 1/${n === 0 ? 1 : n} of your total output on any single day, even for exciting days like adventure activities. If you notice you are writing long, detailed entries, shorten the remaining days rather than risk not finishing. Reaching Day ${n} is more important than how long any individual day is. ***` : ''; })()}\n\nSTRUCTURE (follow exactly):\n1. Start with a short, warm 2-4 sentence introductory message addressed to the client by name, written in the tone above, setting up the excitement for the trip. This is NOT a day and must not have a "Day" header.\n2. Then a blank line, then each day formatted exactly as "Day 1: Title" on its own line followed by the details on the next lines. Include meals mentioned, transfers, sightseeing highlights, check-in/out notes, and a "Tip:" line where relevant.\n3. Day title MUST describe the ACTIVITY, not the date. Format: "Day 1: Arrival in Nairobi & transfer to Naivasha" — not "Day 1: Monday, 25 Aug 2026". If you want to show the date, put it in parentheses AFTER the title, e.g. "Day 1: Arrival in Nairobi (Mon, 25 Aug 2026)".\n4. TRUTH ABOUT MEALS IS CRITICAL — the client uses this itinerary to know what is included. NEVER write "Lunch" or "Dinner" or "Breakfast" as if a meal is included unless the land vendor notes or hotel meal plan actually say it is. If a meal is NOT included, either omit it entirely, or explicitly say "Lunch on own account" / "Dinner at own cost". A false meal claim causes a real financial loss to the agency. Only mention breakfast if the hotel meal plan includes it.\n5. Keep it practical and specific to the real hotel/flight/land data given — never invent confirmation numbers, but you can invent plausible sightseeing/activity suggestions consistent with the destination.`;
-
-      const res = await fetch(`${apiBase()}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 16000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Write detailed, practical, day-wise itineraries, matching the requested tone/vibe precisely — a bachelors trip and an uber-luxury honeymoon should read completely differently. Use Hinglish sparingly (mostly English with occasional Hindi), except for the uber-luxury tone which should stay in polished English throughout. Be specific about timings, meal suggestions, and practical tips.', messages: [{ role: 'user', content: prompt }] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'AI error');
-      const text = (data.content || []).map((c) => c.text || '').join('');
-      // Anthropic sets stop_reason='max_tokens' when it ran out of room mid-way.
-      // Surfacing this matters: a silently truncated itinerary reaches the client
-      // as a PDF missing its last days, which looks broken and costs credibility.
-      if (data.stop_reason === 'max_tokens') {
-        window.veToast && window.veToast('⚠️ Itinerary truncated mid-way — regenerate to get all days', 'warning');
+      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe);
+      if (!complete) {
+        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days after retrying — please review before sending`, 'warning');
       }
       setResult(text);
       if (attach) await doAttach(text);
@@ -3637,7 +3708,7 @@ function AIItineraryModal({ deal, onClose, onSaved }) {
               </div>
             </>
           )}
-          {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Writing your itinerary… (15-30 seconds)</div>}
+          {loading && <div style={{ textAlign: 'center', padding: '40px 10px', color: '#6b7a99' }}>⏳ Writing your itinerary… (may take up to a minute for longer trips — it auto-checks and continues if it stops early)</div>}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '12px 16px', borderRadius: 10, fontSize: 12.5 }}>{err}</div>}
           {result && (
             <>
@@ -3811,40 +3882,18 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
 
   const sell = sellINR(deal);
 
-  const vibeInstruction = (v) => ({
-    auto: 'First, infer the right tone from the pax breakdown and deal notes below. Then write in that inferred tone.',
-    family: 'Write for a FAMILY trip. Warm, reassuring tone. Emphasize comfort, safety, kid-friendly pacing.',
-    bachelors: 'Write for a BACHELORS/FRIENDS trip. Energetic, casual, fun tone. Emphasize nightlife, adventure, group experiences.',
-    honeymoon: 'Write for a HONEYMOON. Romantic, intimate tone. Emphasize private experiences, sunset moments.',
-    luxury: 'Write for an UBER-LUXURY client. Sophisticated, understated tone. NO exclamation marks.',
-    solo: 'Write for a SOLO TRAVELLER. Confident, easy-going tone. Emphasize flexibility.',
-  }[v] || '');
-
   const generateItinerary = async () => {
     setGenBusy(true); setGenErr('');
     try {
-      const d = deal;
-      const hotels = (d.hotelVendors || []).filter((h) => h.hotelName).map((h) => `${h.hotelName} (${h.city || ''}, ${h.checkIn || ''} → ${h.checkOut || ''}, MEAL PLAN: ${mealPlanLabel(h.mealPlan)})`).join('; ');
-      const flights = (d.flightVendors || []).map((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => `${s.from}→${s.to} ${s.date || ''}`).join(', ')).join('; ');
-      const land = (d.landVendors || []).map((l) => l.itinerary || '').filter(Boolean).join('\n');
-      const cruises = (d.cruiseVendors || []).map((c) => `${c.shipName || c.cruiseLine || 'Cruise'}: ${c.portOfEmbarkation}→${c.portOfDisembarkation}, ${c.checkIn}→${c.checkOut}${c.itinerary ? '\n' + c.itinerary : ''}`).join('\n');
-      const pax = `${d.adults || 0} adults${Number(d.children) > 0 ? `, ${d.children} children` : ''}${Number(d.infants) > 0 ? `, ${d.infants} infants` : ''}`;
-      const prompt = `Generate a client-ready itinerary.\n\n${vibeInstruction(vibe)}\n\nDestination: ${destination(d)}\nDates: ${d.travelDates || 'flexible'}\nPax: ${pax}\nClient: ${clientName(d) || 'traveller(s)'}\nHotels: ${hotels || 'TBD'}\nFlights: ${flights || 'TBD'}\nCruise: ${cruises || 'none'}\nExisting land notes: ${land || 'none'}${(function(){ const n = tripDayCountV2(d); return n ? `\n\n*** MUST COVER EXACTLY ${n} DAYS — Day 1 through Day ${n}. Budget your output roughly evenly across all ${n} days — do not let early days consume most of your output. Reaching Day ${n} matters more than how detailed any single day is. ***` : ''; })()}\n\nSTRUCTURE:\n1. Short 2-4 sentence intro addressed to client by name.\n2. Each day: "Day 1: <activity title>" (NOT the date — date goes in parens if at all). Then details on next lines.\n3. Only mention Breakfast/Lunch/Dinner as included when it TRULY is per hotel meal plan / land vendor notes. If a meal is not included, say "lunch on own" or omit. False meal claims cost the agency money.`;
-      const res = await fetch(`${apiBase()}/api/chat`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 16000, system: 'You are a senior travel itinerary writer for Voyage-Ed Travels, a premium Indian travel agency. Match the requested tone precisely. Be specific about timings and practical tips.', messages: [{ role: 'user', content: prompt }] }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'AI error');
-      const text = (data.content || []).map((c) => c.text || '').join('');
-      if (data.stop_reason === 'max_tokens') {
-        window.veToast && window.veToast('⚠️ Itinerary truncated mid-way — regenerate to get all days', 'warning');
+      const { text, daysWritten, targetDays, complete } = await generateFullItineraryV2(deal, vibe);
+      if (!complete) {
+        window.veToast && window.veToast(`⚠️ AI wrote ${daysWritten}/${targetDays} days after retrying — please review before sending`, 'warning');
       }
-      const updated = await patchDeal(d._id, { aiItineraryText: text, aiItineraryVibe: vibe });
+      const updated = await patchDeal(deal._id, { aiItineraryText: text, aiItineraryVibe: vibe });
       setDeal(updated);
       onDealUpdated && onDealUpdated(updated);
       setStep('options');
-      window.veToast && window.veToast('AI itinerary generated & attached ✓', 'success');
+      window.veToast && window.veToast(complete ? 'AI itinerary generated & attached ✓' : 'Itinerary attached — please review', complete ? 'success' : 'warning');
     } catch (e) { setGenErr(e.message || 'Could not generate'); }
     setGenBusy(false);
   };
@@ -3906,7 +3955,7 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
             </div>
             {genErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '10px 14px', borderRadius: 10, fontSize: 12, marginBottom: 12 }}>{genErr}</div>}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? '⏳ Writing itinerary… (15-30s)' : '✨ Write Itinerary & Continue'}</button>
+              <button className="v2-cta" disabled={genBusy} onClick={generateItinerary} style={{ flex: 2 }}>{genBusy ? '⏳ Writing itinerary… (up to a minute)' : '✨ Write Itinerary & Continue'}</button>
               <button className="v2-cta" disabled={genBusy} onClick={() => setStep('options')} style={{ flex: 1, background: '#6b7a99' }}>Skip →</button>
             </div>
           </div>
