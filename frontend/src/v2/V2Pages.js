@@ -335,8 +335,150 @@ function DailyBriefModal({ leads, booked, stats, onClose }) {
   );
 }
 
+// ── Backup, Email Backup & Restore — ports V1's data-safety toolkit into V2.
+// Backend endpoints (/api/backup/send-now, /api/backup/restore) are shared
+// with V1 and already live on the server; V2 only needed the UI. Restore
+// always previews (dry-run) before actually writing, and the backend takes
+// its own safety backup before a restore is applied. ──
+function BackupRestoreModal({ leads, onClose }) {
+  const [restorePreview, setRestorePreview] = useState(null); // {file, snapshot, report}
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreMode, setRestoreMode] = useState('merge'); // 'merge' | 'replace'
+  const [emailBusy, setEmailBusy] = useState(false);
+  const fileInputRef = React.useRef(null);
+
+  const downloadLocalBackup = () => {
+    const snap = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      source: 'voyage-crm V2 frontend',
+      deals: leads || [],
+      accounts: loadAccountsV2(),
+    };
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `voyage-crm-backup-${stamp}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    window.veToast && window.veToast('💾 Local backup downloaded', 'success');
+  };
+
+  const emailBackupNow = async () => {
+    if (!window.confirm('Backup email bhejein — voyageedtravel@gmail.com pe?')) return;
+    setEmailBusy(true);
+    try {
+      const res = await fetch(`${apiBase()}/api/backup/send-now`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() } });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+      window.veToast && window.veToast(`📧 Backup email sent to ${j.to} (${(j.bytes / 1024).toFixed(1)} KB)`, 'success');
+    } catch (e) { window.veToast && window.veToast('Backup email failed: ' + e.message, 'warning'); }
+    setEmailBusy(false);
+  };
+
+  const doRestoreDryRun = async (file) => {
+    setRestoreBusy(true);
+    try {
+      const text = await file.text();
+      let snapshot; try { snapshot = JSON.parse(text); } catch { throw new Error('File JSON valid nahi hai'); }
+      if (!snapshot.collections) throw new Error('Ye Voyage-Ed backup nahi lagta (collections missing)');
+      const res = await fetch(`${apiBase()}/api/backup/restore`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ snapshot, dryRun: true, mode: restoreMode }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+      setRestorePreview({ file: file.name, snapshot, report: j });
+    } catch (e) { window.veToast && window.veToast('Restore preview failed: ' + e.message, 'warning'); }
+    setRestoreBusy(false);
+  };
+
+  const doRestoreApply = async () => {
+    if (!restorePreview) return;
+    const modeWord = restoreMode === 'replace' ? 'REPLACE (existing data wipe hoga)' : 'MERGE (existing update hoga)';
+    if (!window.confirm(`⚠️ RESTORE CONFIRM\n\nMode: ${modeWord}\nBackup: ${restorePreview.file}\n\nRestore chalu karne se pehle current data ka SAFETY BACKUP email hoga.\n\nProceed?`)) return;
+    setRestoreBusy(true);
+    try {
+      const res = await fetch(`${apiBase()}/api/backup/restore`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ snapshot: restorePreview.snapshot, dryRun: false, mode: restoreMode }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+      setRestorePreview({ ...restorePreview, report: j, applied: true });
+      window.veToast && window.veToast('✅ Restore complete — safety backup bhi email ho gaya', 'success');
+    } catch (e) { window.veToast && window.veToast('Restore failed: ' + e.message, 'warning'); }
+    setRestoreBusy(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 560, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>💾 Backup &amp; Restore</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 8 }}>DOWNLOAD / EMAIL A BACKUP NOW</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="v2-cta" onClick={downloadLocalBackup} style={{ flex: 1 }}>💾 Download Backup</button>
+              <button className="v2-cta" onClick={emailBackupNow} disabled={emailBusy} style={{ flex: 1, background: '#0d1b3e' }}>{emailBusy ? '⏳ Sending…' : '📧 Email Backup'}</button>
+            </div>
+            <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 6 }}>Email backup sends the full server-side data to voyageedtravel@gmail.com.</div>
+          </div>
+
+          <div style={{ borderTop: '1px dashed #e3eaf7', paddingTop: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 8 }}>RESTORE FROM A BACKUP FILE</div>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {[['merge', '🔀 Merge (update hoga)'], ['replace', '⚠️ Replace (wipe hoga)']].map(([id, label]) => (
+                <button key={id} onClick={() => { setRestoreMode(id); setRestorePreview(null); }}
+                  style={{ flex: 1, background: restoreMode === id ? (id === 'replace' ? '#fef2f2' : '#f0f5ff') : '#fff', border: '2px solid ' + (restoreMode === id ? (id === 'replace' ? '#dc2626' : '#4169E1') : '#e3eaf7'), borderRadius: 10, padding: '10px 8px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: restoreMode === id ? (id === 'replace' ? '#dc2626' : '#334e82') : '#6b7a99' }}>{label}</button>
+              ))}
+            </div>
+
+            {!restorePreview && (
+              <>
+                <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) doRestoreDryRun(f); e.target.value = ''; }} />
+                <button className="v2-cta" disabled={restoreBusy} onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ width: '100%', background: '#6b7a99' }}>
+                  {restoreBusy ? '⏳ Reading file…' : '📂 Choose backup .json file'}
+                </button>
+              </>
+            )}
+
+            {restorePreview && !restorePreview.applied && (
+              <div style={{ background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '12px 14px' }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#0d1b3e', marginBottom: 6 }}>{restorePreview.file}</div>
+                <div style={{ fontSize: 11, color: '#7a5c10', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{JSON.stringify(restorePreview.report, null, 1).slice(0, 500)}</div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                  <button className="v2-cta" disabled={restoreBusy} onClick={doRestoreApply} style={{ flex: 1, background: restoreMode === 'replace' ? '#dc2626' : '#15803d' }}>
+                    {restoreBusy ? '⏳ Restoring…' : '✓ Confirm Restore'}
+                  </button>
+                  <button className="v2-cta" disabled={restoreBusy} onClick={() => setRestorePreview(null)} style={{ flex: 1, background: '#6b7a99' }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {restorePreview && restorePreview.applied && (
+              <div style={{ background: '#f0faf4', border: '1px solid #cfe9d6', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: '#15803d', fontWeight: 700 }}>
+                ✅ Restore complete. Refresh the page to see the restored data.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardV2({ leads, onDealClick }) {
   const [drilldown, setDrilldown] = useState(null); // null | {title, deals, columns}
+  const [showBackup, setShowBackup] = useState(false);
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
   const stats = useMemo(() => {
@@ -419,9 +561,12 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
+          <button className="v2-cta" onClick={() => setShowBackup(true)} style={{ fontSize: 12, background: '#6b7a99' }}>💾 Backup</button>
           <button className="v2-icon-btn" title="Quick add">⊕</button>
         </div>
       </div>
+
+      {showBackup && <BackupRestoreModal leads={leads} onClose={() => setShowBackup(false)} />}
 
       {/* Daily Brief modal */}
       {drilldown && drilldown.title === 'daily-brief' && (
@@ -3951,7 +4096,7 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
 // Step 2 is the actual proposal options (mirrors V1's Generate Proposal
 // panel) — both write to the SAME deal.aiItinerary* / generate options so
 // the intro tone and the itinerary the client sees are never out of sync. ──
-function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
+function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [step, setStep] = useState('options'); // AI vibe/generation step removed — always start at options
 
@@ -3964,8 +4109,87 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const [propCancelMode, setPropCancelMode] = useState('static');
   const [propCancelCustom, setPropCancelCustom] = useState('');
   const [propDays, setPropDays] = useState(null); // null = auto, array = edited
+  const [propCompareId, setPropCompareId] = useState('');
 
   const sell = sellINR(deal);
+
+  // ── Compare This Deal vs Another Deal — e.g. same client considering two
+  // different destinations/packages. Ported from V1: builds a side-by-side
+  // "choose your option" HTML page with a WhatsApp confirm link on each side.
+  // Compare candidates: same-client deals first (most likely comparison),
+  // falling back to all other deals so the dropdown is never empty even for
+  // a fresh client with only one destination linked.
+  const compareCandidates = (() => {
+    const myPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
+    const sameClient = (allLeads || []).filter((l) => {
+      if (l._id === deal._id) return false;
+      const lPhone = (l.contactNo || '').replace(/[^\d]/g, '');
+      return (myPhone && lPhone && myPhone === lPhone) || (clientName(l).toLowerCase() === clientName(deal).toLowerCase() && clientName(deal) !== 'Unknown');
+    });
+    return sameClient.length ? sameClient : (allLeads || []).filter((l) => l._id !== deal._id);
+  })();
+  const _cmpCalc = (d) => {
+    const netSell = Math.max(0, netSellINR(d));
+    const hotels = (d.hotelVendors || []).filter((h) => h.hotelName || h.city).map((h) => ({
+      city: h.city, name: h.hotelName, star: h.starRating, room: h.roomCategory,
+      n: Number(h.nights) || (h.checkIn && h.checkOut ? Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000) : 0),
+    }));
+    const nights = hotels.reduce((a, h) => a + (h.n || 0), 0);
+    const secs = [];
+    (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((x) => { if (x.from || x.to) secs.push(x); }));
+    const itin = (d.landVendors || []).map((l) => l.itinerary || '').join(' ');
+    const meals = [/breakfast/i.test(itin) || hotels.length ? '🍳 Breakfast' : '', /lunch/i.test(itin) ? '🥗 Lunch' : '', /dinner/i.test(itin) ? '🍽 Dinner' : ''].filter(Boolean);
+    const visa = (d.visaVendors || []).some((v) => (Number(v.sellingPrice) || 0) > 0 || (Number(v.costPrice) || 0) > 0);
+    const adults = Number(d.adults) || 0;
+    return { d, sell: netSell, hotels, nights, secs, meals, visa, adults, ref: d.dealNumber || 'VE-' + String(d._id || '').slice(-4).toUpperCase() };
+  };
+  const openComparison = () => {
+    const other = compareCandidates.find((x) => x._id === propCompareId);
+    if (!other) { window.veToast && window.veToast('Compare karne ke liye doosri deal chuno', 'warning'); return; }
+    const A = _cmpCalc(deal), B = _cmpCalc(other);
+    const w = window.open('', '_blank');
+    if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
+    const col = (X, tag, color) => {
+      const pp = X.adults > 0 && X.sell > 0 ? Math.round(X.sell / X.adults) : 0;
+      const wa = 'https://wa.me/917009659048?text=' + encodeURIComponent('I, ' + (clientName(deal) || 'the Client') + ', would like to CONFIRM ' + tag + ' (' + (destination(X.d) || '') + ', Ref: ' + X.ref + ') as per the comparison proposal.');
+      return `<div style="flex:1;min-width:270px;background:#fff;border:2px solid ${color};border-radius:18px;overflow:hidden;display:flex;flex-direction:column">
+        <div style="background:${color};color:#fff;padding:10px 16px;font-size:12px;font-weight:800;letter-spacing:1.5px;text-align:center">${tag}</div>
+        <div style="padding:16px 18px;flex:1">
+          <div style="font-family:Georgia,serif;font-size:17px;font-weight:700;color:#0d1b3e;line-height:1.3">${escHtml(destination(X.d) || '—')}</div>
+          <div style="font-size:11px;color:#7d8bab;margin:2px 0 10px">${X.nights ? X.nights + ' Nights / ' + (X.nights + 1) + ' Days' : ''}${X.d.travelDates ? ' · ' + escHtml(X.d.travelDates) : ''}</div>
+          ${X.sell > 0 ? `<div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:12px;padding:10px 14px;margin-bottom:12px"><div style="color:#f0c842;font-size:9px;letter-spacing:2px;font-weight:800">TOTAL PACKAGE</div><div style="color:#fff;font-size:22px;font-weight:800;font-family:Georgia,serif">₹${X.sell.toLocaleString('en-IN')}<span style="font-size:10px;font-weight:400"> /- all incl.</span></div>${pp ? `<div style="color:#c7d2ee;font-size:10px">≈ ₹${pp.toLocaleString('en-IN')} per person · ${X.adults} Adults</div>` : ''}</div>` : ''}
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin-bottom:5px">STAYS</div>
+          ${X.hotels.length ? X.hotels.map((h) => `<div style="font-size:11px;color:#33415e;padding:4px 0;border-bottom:1px dashed #eef2fa"><b>${escHtml(h.name || h.city || 'Hotel')}</b>${h.star ? ' ' + '⭐'.repeat(Math.min(5, Number(h.star) || 0)) : ''}<br><span style="color:#7d8bab;font-size:10px">${escHtml(h.city || '')}${h.room ? ' · ' + escHtml(h.room) : ''}${h.n ? ' · ' + h.n + 'N' : ''}</span></div>`).join('') : `<div style="font-size:11px;color:#9aa7c4">—</div>`}
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin:10px 0 5px">FLIGHTS</div>
+          <div style="font-size:11px;color:#33415e">${X.secs.length ? X.secs.slice(0, 4).map((x) => escHtml((x.from || '') + ' → ' + (x.to || ''))).join('<br>') + (X.secs.length > 4 ? '<br>+' + (X.secs.length - 4) + ' more' : '') : 'Not included'}</div>
+          <div style="font-size:9.5px;letter-spacing:1.5px;color:#c9961a;font-weight:800;margin:10px 0 5px">INCLUDED</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">${[...X.meals, X.visa ? '🛂 Visa' : '', '🚗 Transfers', '🤝 Trip Manager'].filter(Boolean).map((x) => `<span style="background:#f0faf4;border:1px solid #cfe9d6;color:#15803d;font-size:9px;font-weight:800;border-radius:20px;padding:4px 9px">${x}</span>`).join('')}</div>
+        </div>
+        <a href="${wa}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);color:#fff;text-align:center;padding:13px;font-size:13px;font-weight:800">✅ CHOOSE ${tag}</a>
+      </div>`;
+    };
+    const diff = Math.abs(A.sell - B.sell);
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voyage-Ed — Compare Your Options</title>
+    <style>body{font-family:'Segoe UI',system-ui,sans-serif;background:#eef2f9;margin:0;padding:0}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
+    <div style="max-width:860px;margin:0 auto;background:#f8fafd;min-height:100vh">
+      <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);padding:22px 28px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div style="background:#fff;border-radius:10px;padding:6px 12px"><img src="${VE_LOGO}" style="height:36px;display:block"/></div>
+        <div style="text-align:right;color:#fff"><div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">CHOOSE YOUR PERFECT OPTION</div><div style="font-size:12px;color:#c7d2ee">Specially prepared for <b style="color:#f0c842">${escHtml(clientName(deal)) || 'you'}</b></div></div>
+      </div>
+      <div style="padding:20px 22px">
+        ${A.sell > 0 && B.sell > 0 && diff > 0 ? `<div style="text-align:center;margin-bottom:14px;font-size:11.5px;color:#5a6b8c">Difference: <b style="color:#0d1b3e">₹${diff.toLocaleString('en-IN')}</b> — ${A.sell > B.sell ? 'OPTION A' : 'OPTION B'} is the premium pick ✨</div>` : ''}
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+          ${col(A, 'OPTION A', '#c9961a')}
+          ${col(B, 'OPTION B', '#1a3060')}
+        </div>
+        <div style="text-align:center;margin-top:16px">
+          <button class="noprint" onclick="window.print()" style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:10px;padding:12px 26px;cursor:pointer;font-weight:800;font-size:13px">🖨 Print / Save PDF</button>
+          <div style="font-size:9.5px;color:#9aa7c4;margin-top:10px">Prices subject to availability at time of booking · Full itinerary & T&C in the detailed proposal · Voyage-Ed Travels, GMADA Aerocity, Mohali · +91 70096 59048 · enquiry@voyage-ed.com</div>
+        </div>
+      </div>
+    </div></body></html>`);
+    w.document.close();
+  };
 
   const loadPropDays = () => {
     const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
@@ -4060,6 +4284,17 @@ function ProposalBuilderModal({ deal: initialDeal, onClose, onDealUpdated }) {
           <input type="checkbox" checked={false} disabled style={{ width: 17, height: 17 }} />
           <span style={{ fontSize: 12, fontWeight: 700, color: '#334e82' }}>3 options wali comparison PDF banao (client ko teeno choices dikhao)</span>
         </label>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>⚔️ COMPARE <span style={{ fontWeight: 400 }}>(Option A = yeh deal)</span></div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+          <select value={propCompareId} onChange={(e) => setPropCompareId(e.target.value)} style={{ flex: 1, background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 10, padding: '10px 13px', fontSize: 12, outline: 'none' }}>
+            <option value="">Option B chuno (doosri deal)...</option>
+            {compareCandidates.map((d) => (
+              <option key={d._id} value={d._id}>{clientName(d) || 'Client'} — {destination(d) || 'Deal'} ({d.dealNumber || ''})</option>
+            ))}
+          </select>
+          <button onClick={openComparison} disabled={!propCompareId} style={{ background: propCompareId ? 'linear-gradient(135deg,#f97316,#fb923c)' : '#e3eaf7', color: propCompareId ? '#fff' : '#94a3b8', border: 'none', borderRadius: 10, padding: '0 18px', cursor: propCompareId ? 'pointer' : 'default', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>⚔️ PDF</button>
+        </div>
 
         <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>✅ INCLUSIONS / ✖ EXCLUSIONS</div>
         {propInc == null && (
@@ -7500,7 +7735,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
-          {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
+          {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'invoice' && <InvoiceModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'vouchers' && <VouchersModal deal={deal} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
