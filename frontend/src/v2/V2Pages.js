@@ -481,24 +481,49 @@ function DashboardV2({ leads, onDealClick }) {
   const [showBackup, setShowBackup] = useState(false);
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
+
+  // Current 16→15 billing cycle. Revenue figures (TTV / GPM / Net) on the
+  // dashboard are scoped to THIS cycle only, so the headline numbers reflect
+  // the running period rather than an ever-growing all-time total. Money
+  // still owed in either direction stays all-time — see stats below.
+  const cycle = useMemo(() => cycleFor(new Date().toISOString().slice(0, 10)), []);
+  const cycleBooked = useMemo(() => booked.filter((d) => {
+    const fp = firstPaymentDateOf(d);
+    return cycle && fp && fp >= cycle.start && fp <= cycle.end;
+  }), [booked, cycle]);
+
   const stats = useMemo(() => {
-    let collections = 0, sell = 0, profit = 0, vendorPmts = 0, gst = 0, vendorPaid = 0;
-    booked.forEach((l) => {
-      collections += paidINR(l);
+    // Cycle-scoped revenue figures
+    let sell = 0, profit = 0, gst = 0, collections = 0, cycleCost = 0;
+    cycleBooked.forEach((l) => {
       sell += sellINR(l);
-      vendorPmts += costINR(l);
       profit += profitINR(l);
       gst += gstINR(l);
-      const vs = dealVendors(l);
-      vendorPaid += vs.reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      collections += paidINR(l);
+      cycleCost += costINR(l);
+    });
+    // All-time outstanding — these are live liabilities/receivables across
+    // every booked deal in the CRM, deliberately NOT limited to this cycle.
+    let vendorPmts = 0, vendorPaid = 0;
+    booked.forEach((l) => {
+      vendorPmts += costINR(l);
+      vendorPaid += dealVendors(l).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
     });
     const vendorDue = Math.max(0, vendorPmts - vendorPaid);
     const clientDue = booked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0);
-    return { collections, sell, bookings: booked.length, profit, vendorPmts, gst, netProfit: profit - gst, vendorPaid, vendorDue, clientDue };
-  }, [booked]);
+    return {
+      collections, sell, bookings: cycleBooked.length, profit, gst, netProfit: profit - gst, cycleCost,
+      vendorPmts, vendorPaid, vendorDue, clientDue,
+      allTimeBookings: booked.length,
+    };
+  }, [booked, cycleBooked]);
 
-  const openDrilldown = (title, filterFn, valueFn, valueLabel) => {
-    const deals = (filterFn ? booked.filter(filterFn) : booked).map((d) => ({
+  // scope: 'cycle' (this 16→15 period's bookings) or 'all' (every booked deal).
+  // Passing it explicitly keeps each drilldown list consistent with the KPI
+  // number that opened it — a cycle-scoped figure must not open an all-time list.
+  const openDrilldown = (title, filterFn, valueFn, valueLabel, scope = 'cycle') => {
+    const source = scope === 'all' ? booked : cycleBooked;
+    const deals = (filterFn ? source.filter(filterFn) : source).map((d) => ({
       deal: d, value: valueFn(d),
     })).sort((a, b) => b.value - a.value);
     setDrilldown({ title, deals, valueLabel });
@@ -599,68 +624,71 @@ function DashboardV2({ leads, onDealClick }) {
       <p className="v2-section-sub">Live numbers from your CRM</p>
 
       <div className="v2-kpi-grid">
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Collections Breakdown', null, paidINR, 'Collected')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Collections — This Cycle', null, paidINR, 'Collected', 'cycle')}>
           <div className="v2-kpi-icon green">◐</div>
           <div className="v2-kpi-label">Collections</div>
           <div className="v2-kpi-value">{fmtINR(stats.collections)}</div>
-          <div className="v2-kpi-delta up">▲ Click for breakdown</div>
+          <div className="v2-kpi-delta up">This cycle · Click for breakdown</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Balance Due', (d) => netSellINR(d) - paidINR(d) > 0, (d) => netSellINR(d) - paidINR(d), 'Due')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Balance Due — All Time', (d) => netSellINR(d) - paidINR(d) > 0, (d) => netSellINR(d) - paidINR(d), 'Due', 'all')}>
           <div className="v2-kpi-icon blue">◈</div>
           <div className="v2-kpi-label">Client Balance Due</div>
           <div className="v2-kpi-value">{fmtINR(stats.clientDue)}</div>
-          <div className="v2-kpi-delta">{stats.bookings} bookings · Click for deals</div>
+          <div className="v2-kpi-delta">All time · {stats.allTimeBookings} bookings</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Cost Breakdown', null, costINR, 'Cost')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Cost — All Time', null, costINR, 'Cost', 'all')}>
           <div className="v2-kpi-icon amber">◇</div>
           <div className="v2-kpi-label">Vendor Payments</div>
           <div className="v2-kpi-value">{fmtINR(stats.vendorPmts)}</div>
-          <div className="v2-kpi-delta">Paid: {fmtINR(stats.vendorPaid)} · Due: {fmtINR(stats.vendorDue)}</div>
+          <div className="v2-kpi-delta">All time · Due: {fmtINR(stats.vendorDue)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Profit Breakdown (GPM − GST)', null, (d) => profitINR(d) - gstINR(d), 'Net Profit')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Net Profit — This Cycle', null, (d) => profitINR(d) - gstINR(d), 'Net Profit', 'cycle')}>
           <div className="v2-kpi-icon gold">◆</div>
           <div className="v2-kpi-label">Net Profit</div>
           <div className="v2-kpi-value">{fmtINR(stats.netProfit)}</div>
-          <div className="v2-kpi-delta">GPM {fmtINR(stats.profit)} − GST {fmtINR(stats.gst)}</div>
+          <div className="v2-kpi-delta">This cycle · GPM {fmtINR(stats.profit)} − GST {fmtINR(stats.gst)}</div>
         </div>
       </div>
 
-      {/* Full V1-style booked breakdown — same source (stats/booked), same
-          formulas (sellINR/costINR/profitINR/gstINR/paidINR/netSellINR) as
-          V1's dealFinance()/rollup(), so these numbers are guaranteed to
-          match the V1 dashboard's "Booked" card grid exactly. */}
-      <h2 className="v2-section-title" style={{ marginTop: 8 }}>✅ Booked — {stats.bookings} deals</h2>
+      {/* Revenue figures below are scoped to the CURRENT 16→15 cycle (bucketed
+          by the date each booking's first client payment landed), while the
+          two "pending" cards stay all-time since money still owed isn't a
+          period figure. Each card's drilldown opens the matching dataset. */}
+      <h2 className="v2-section-title" style={{ marginTop: 8 }}>
+        ✅ Booked — {stats.bookings} deal{stats.bookings !== 1 ? 's' : ''}
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#c9961a', marginLeft: 10 }}>{cycle ? cycle.label : ''} (16→15 cycle)</span>
+      </h2>
       <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' }}>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Sale Price Breakdown', null, sellINR, 'Sale Price')}>
-          <div className="v2-kpi-label">Sale Price</div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Sale Price — This Cycle', null, sellINR, 'Sale Price', 'cycle')}>
+          <div className="v2-kpi-label">Sale Price (TTV)</div>
           <div className="v2-kpi-value">{fmtINR(stats.sell)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Cost Price Breakdown', null, costINR, 'Cost Price')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Cost Price — This Cycle', null, costINR, 'Cost Price', 'cycle')}>
           <div className="v2-kpi-label">Cost Price</div>
-          <div className="v2-kpi-value">{fmtINR(stats.vendorPmts)}</div>
+          <div className="v2-kpi-value">{fmtINR(stats.cycleCost)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Gross Profit Breakdown', null, profitINR, 'Gross Profit')}>
-          <div className="v2-kpi-label">Gross Profit</div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Gross Profit — This Cycle', null, profitINR, 'Gross Profit', 'cycle')}>
+          <div className="v2-kpi-label">Gross Profit (GPM)</div>
           <div className="v2-kpi-value" style={{ color: stats.profit >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(stats.profit)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Net (after GST) Breakdown', null, (d) => profitINR(d) - gstINR(d), 'Net')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Net (after GST) — This Cycle', null, (d) => profitINR(d) - gstINR(d), 'Net', 'cycle')}>
           <div className="v2-kpi-label">Net (after GST)</div>
           <div className="v2-kpi-value" style={{ color: stats.netProfit >= 0 ? '#f97316' : '#ef4444' }}>{fmtINR(stats.netProfit)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Paid Breakdown', null, (d) => dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0), 'Vendor Paid')}>
-          <div className="v2-kpi-label">Vendor Paid</div>
-          <div className="v2-kpi-value" style={{ color: '#4169E1' }}>{fmtINR(stats.vendorPaid)}</div>
-        </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Pending Breakdown', (d) => costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0) > 0, (d) => Math.max(0, costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0)), 'Vendor Pending')}>
-          <div className="v2-kpi-label">Vendor Pending</div>
-          <div className="v2-kpi-value" style={{ color: stats.vendorDue > 0 ? '#ef4444' : '#10b981' }}>{fmtINR(stats.vendorDue)}</div>
-        </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Received Breakdown', null, paidINR, 'Client Received')}>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Received — This Cycle', null, paidINR, 'Client Received', 'cycle')}>
           <div className="v2-kpi-label">Client Received</div>
           <div className="v2-kpi-value" style={{ color: '#10b981' }}>{fmtINR(stats.collections)}</div>
         </div>
-        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Pending Breakdown', (d) => netSellINR(d) - paidINR(d) > 0, (d) => Math.max(0, netSellINR(d) - paidINR(d)), 'Client Pending')}>
-          <div className="v2-kpi-label">Client Pending</div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Paid — All Time', null, (d) => dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0), 'Vendor Paid', 'all')}>
+          <div className="v2-kpi-label">Vendor Paid <span style={{ fontSize: 9, color: '#94a3b8' }}>(all time)</span></div>
+          <div className="v2-kpi-value" style={{ color: '#4169E1' }}>{fmtINR(stats.vendorPaid)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Vendor Pending — All Time', (d) => costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0) > 0, (d) => Math.max(0, costINR(d) - dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0)), 'Vendor Pending', 'all')}>
+          <div className="v2-kpi-label">Vendor Pending <span style={{ fontSize: 9, color: '#94a3b8' }}>(all time)</span></div>
+          <div className="v2-kpi-value" style={{ color: stats.vendorDue > 0 ? '#ef4444' : '#10b981' }}>{fmtINR(stats.vendorDue)}</div>
+        </div>
+        <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Client Pending — All Time', (d) => netSellINR(d) - paidINR(d) > 0, (d) => Math.max(0, netSellINR(d) - paidINR(d)), 'Client Pending', 'all')}>
+          <div className="v2-kpi-label">Client Pending <span style={{ fontSize: 9, color: '#94a3b8' }}>(all time)</span></div>
           <div className="v2-kpi-value" style={{ color: stats.clientDue > 0 ? '#f59e0b' : '#10b981' }}>{fmtINR(stats.clientDue)}</div>
         </div>
       </div>
@@ -9570,36 +9598,47 @@ function CycleTracker({ leads }) {
 // Filter by which date matters for the question being asked: when the enquiry
 // came in, when they travel, or when they actually booked (first payment).
 function DetailedReport({ leads }) {
-  const [dateType, setDateType] = useState('query'); // query | travel | booking
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // Three INDEPENDENT date ranges that combine (AND). Filtering only by one
+  // date type at a time was too limiting — e.g. "bookings made in this cycle
+  // that travel in December" needs booking-range AND travel-range together.
+  const [qFrom, setQFrom] = useState(''); const [qTo, setQTo] = useState('');
+  const [bFrom, setBFrom] = useState(''); const [bTo, setBTo] = useState('');
+  const [tFrom, setTFrom] = useState(''); const [tTo, setTTo] = useState('');
   const [stageFilter, setStageFilter] = useState('all'); // all | booked | queries
 
-  const dateOfDeal = (d) => {
-    if (dateType === 'booking') return firstPaymentDateOf(d);
-    if (dateType === 'travel') {
-      // travelDates is free text ("25-Aug to 01-Sep"); prefer the first real
-      // dated component we can find, which is far more reliable to compare.
-      const dates = [];
-      (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) dates.push(String(s.date).slice(0, 10)); }));
-      (d.hotelVendors || []).forEach((h) => { if (h.checkIn) dates.push(String(h.checkIn).slice(0, 10)); });
-      dates.sort();
-      return dates.length ? dates[0] : null;
-    }
-    return d.createdAt ? String(d.createdAt).slice(0, 10) : null;
+  const queryDateOf = (d) => (d.createdAt ? String(d.createdAt).slice(0, 10) : null);
+  const bookingDateOf = (d) => firstPaymentDateOf(d);
+  // travelDates is free text ("25-Aug to 01-Sep"), so for reliable range
+  // comparison use the earliest real dated component on the deal instead.
+  const travelDateOf = (d) => {
+    const dates = [];
+    (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) dates.push(String(s.date).slice(0, 10)); }));
+    (d.hotelVendors || []).forEach((h) => { if (h.checkIn) dates.push(String(h.checkIn).slice(0, 10)); });
+    (d.cruiseVendors || []).forEach((c) => { if (c.checkIn) dates.push(String(c.checkIn).slice(0, 10)); });
+    dates.sort();
+    return dates.length ? dates[0] : null;
+  };
+
+  const inRange = (val, from, to) => {
+    if (!from && !to) return true;      // this filter not in use
+    if (!val) return false;             // filter active but deal has no such date
+    if (from && val < from) return false;
+    if (to && val > to) return false;
+    return true;
   };
 
   const rows = useMemo(() => {
     return (leads || []).filter((d) => {
       if (stageFilter === 'booked' && !isBookedStage(d)) return false;
       if (stageFilter === 'queries' && isBookedStage(d)) return false;
-      const dt = dateOfDeal(d);
-      if (from && (!dt || dt < from)) return false;
-      if (to && (!dt || dt > to)) return false;
-      if ((from || to) && !dt) return false;
-      return true;
-    }).sort((a, b) => String(dateOfDeal(b) || '').localeCompare(String(dateOfDeal(a) || '')));
-  }, [leads, dateType, from, to, stageFilter]);
+      return inRange(queryDateOf(d), qFrom, qTo)
+        && inRange(bookingDateOf(d), bFrom, bTo)
+        && inRange(travelDateOf(d), tFrom, tTo);
+    }).sort((a, b) => String(queryDateOf(b) || '').localeCompare(String(queryDateOf(a) || '')));
+  }, [leads, qFrom, qTo, bFrom, bTo, tFrom, tTo, stageFilter]);
+
+  const anyFilter = qFrom || qTo || bFrom || bTo || tFrom || tTo;
+  const clearAll = () => { setQFrom(''); setQTo(''); setBFrom(''); setBTo(''); setTFrom(''); setTTo(''); };
 
   const totals = useMemo(() => ({
     ttv: rows.reduce((s, d) => s + netSellINR(d), 0),
@@ -9642,7 +9681,7 @@ function DetailedReport({ leads }) {
       return [
         d.dealNumber || '', clientName(d), d.contactNo || '', d.email || '', stageOf(d), d.leadSource || '', d.priority || '',
         d.createdAt ? String(d.createdAt).slice(0, 10) : '', firstPaymentDateOf(d) || '', d.travelDates || '',
-        (() => { const dd = []; (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) dd.push(String(s.date).slice(0, 10)); })); (d.hotelVendors || []).forEach((h) => { if (h.checkIn) dd.push(String(h.checkIn).slice(0, 10)); }); dd.sort(); return dd[0] || ''; })(),
+        travelDateOf(d) || '',
         destination(d), n(d.adults), n(d.children), n(d.infants), n(d.adults) + n(d.children) + n(d.infants),
         ...vendorCols(d, 'flightVendors'), ...vendorCols(d, 'hotelVendors'), ...vendorCols(d, 'landVendors'),
         ...vendorCols(d, 'trainVendors'), ...vendorCols(d, 'visaVendors'), ...vendorCols(d, 'cruiseVendors'),
@@ -9653,7 +9692,7 @@ function DetailedReport({ leads }) {
         (d.remarks || '').replace(/\n/g, ' '),
       ];
     });
-    downloadCSV(`voyage-report-${dateType}-${from || 'all'}-to-${to || 'all'}.csv`, [header, ...body]);
+    downloadCSV(`voyage-report-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...body]);
   };
 
   return (
@@ -9663,25 +9702,32 @@ function DetailedReport({ leads }) {
         {rows.length > 0 && <button className="v2-view-all" onClick={exportAll}>⬇ Export Full Excel (CSV)</button>}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        {[['query', '📥 Date of Query'], ['booking', '💰 Date of Booking'], ['travel', '✈️ Date of Travel']].map(([id, label]) => (
-          <button key={id} onClick={() => setDateType(id)}
-            style={{ background: dateType === id ? '#0d1b3e' : '#f4f7fc', color: dateType === id ? '#fff' : '#334e82', border: '1px solid ' + (dateType === id ? '#0d1b3e' : '#d4e0f5'), borderRadius: 10, padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>
+      <div style={{ background: '#f9fafc', border: '1px solid #e8ecf5', borderRadius: 12, padding: '14px 16px', marginBottom: 16 }}>
+        <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 10 }}>DATE FILTERS — MIX &amp; MATCH ANY COMBINATION</div>
+        {[
+          ['📥 Date of Query', qFrom, setQFrom, qTo, setQTo],
+          ['💰 Date of Booking', bFrom, setBFrom, bTo, setBTo],
+          ['✈️ Date of Travel', tFrom, setTFrom, tTo, setTTo],
+        ].map(([label, fromV, setFromV, toV, setToV]) => (
+          <div key={label} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ minWidth: 140, fontSize: 12, fontWeight: 700, color: (fromV || toV) ? '#0d1b3e' : '#94a3b8' }}>{label}</span>
+            <input type="date" value={fromV} onChange={(e) => setFromV(e.target.value)} style={{ ...inputStyle, width: 165 }} />
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>to</span>
+            <input type="date" value={toV} onChange={(e) => setToV(e.target.value)} style={{ ...inputStyle, width: 165 }} />
+            {(fromV || toV) && <button onClick={() => { setFromV(''); setToV(''); }} style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>✕</button>}
+          </div>
         ))}
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
-        <div><div className="v2-detail-field-label" style={{ marginBottom: 4 }}>From</div><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={inputStyle} /></div>
-        <div><div className="v2-detail-field-label" style={{ marginBottom: 4 }}>To</div><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={inputStyle} /></div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Show</div>
-          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} style={inputStyle}>
-            <option value="all">All deals</option>
-            <option value="booked">Bookings only</option>
-            <option value="queries">Queries only (not booked)</option>
-          </select>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginTop: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Show</div>
+            <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} style={inputStyle}>
+              <option value="all">All deals</option>
+              <option value="booked">Bookings only</option>
+              <option value="queries">Queries only (not booked)</option>
+            </select>
+          </div>
+          {anyFilter && <button onClick={clearAll} style={{ background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#7d8bab' }}>↺ Clear all dates</button>}
         </div>
-        {(from || to) && <button onClick={() => { setFrom(''); setTo(''); }} style={{ background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#7d8bab' }}>↺ Clear</button>}
       </div>
 
       <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', marginBottom: 16 }}>
@@ -9696,14 +9742,16 @@ function DetailedReport({ leads }) {
       ) : (
         <div style={{ maxHeight: 420, overflowY: 'auto' }}>
           <table className="info" style={{ width: '100%' }}>
-            <thead><tr><th>Client</th><th>Destination</th><th>Stage</th><th>Date</th><th style={{ textAlign: 'right' }}>TTV</th><th style={{ textAlign: 'right' }}>GPM</th><th style={{ textAlign: 'right' }}>Due</th></tr></thead>
+            <thead><tr><th>Client</th><th>Destination</th><th>Stage</th><th>Query</th><th>Booked</th><th>Travel</th><th style={{ textAlign: 'right' }}>TTV</th><th style={{ textAlign: 'right' }}>GPM</th><th style={{ textAlign: 'right' }}>Due</th></tr></thead>
             <tbody>
               {rows.map((d) => (
                 <tr key={d._id}>
                   <td>{clientName(d)}{d.dealNumber ? <span style={{ fontSize: 9.5, color: '#8a6d1f', background: '#faf1dc', borderRadius: 5, padding: '1px 5px', marginLeft: 5, fontFamily: 'monospace' }}>{d.dealNumber}</span> : null}</td>
                   <td>{destination(d) || '—'}</td>
                   <td style={{ fontSize: 11.5 }}>{stageOf(d)}</td>
-                  <td style={{ fontSize: 11.5, color: '#6b7a99' }}>{dateOfDeal(d) || '—'}</td>
+                  <td style={{ fontSize: 11, color: '#6b7a99' }}>{queryDateOf(d) || '—'}</td>
+                  <td style={{ fontSize: 11, color: '#6b7a99' }}>{bookingDateOf(d) || '—'}</td>
+                  <td style={{ fontSize: 11, color: '#6b7a99' }}>{travelDateOf(d) || '—'}</td>
                   <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(netSellINR(d))}</td>
                   <td style={{ textAlign: 'right', fontFamily: 'monospace', color: profitINR(d) >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(profitINR(d))}</td>
                   <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#f59e0b' }}>{fmtINR(Math.max(0, netSellINR(d) - paidINR(d)))}</td>
