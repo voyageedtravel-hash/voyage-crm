@@ -586,6 +586,7 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
+          <button className="v2-cta" onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('reports')} style={{ fontSize: 12, background: '#334e82' }}>📊 Reports</button>
           <button className="v2-cta" onClick={() => setShowBackup(true)} style={{ fontSize: 12, background: '#6b7a99' }}>💾 Backup</button>
           <button className="v2-icon-btn" title="Quick add">⊕</button>
         </div>

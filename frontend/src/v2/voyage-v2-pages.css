@@ -1010,7 +1010,10 @@
   font-family: 'Playfair Display', serif;
   font-size: 26px;
   font-weight: 600;
-  color: #fff;
+  /* !important needed: voyage-theme.css sets `h1..h6 { color: navy !important }`
+     globally, which otherwise wins over this and renders the name in navy on
+     the navy header — making it invisible. */
+  color: #fff !important;
   margin: 4px 0;
   letter-spacing: -0.3px;
 }
@@ -1720,7 +1723,10 @@
   color: inherit;
 }
 
-.v2-side-card.ai .v2-side-title { color: #fff; }
+/* !important needed for the same reason as .v2-detail-name — the global
+   `h1..h6 { color: navy !important }` in voyage-theme.css would otherwise
+   render this h4 in navy on the dark AI card, making it unreadable. */
+.v2-side-card.ai .v2-side-title { color: #fff !important; }
 
 .v2-ai-body {
   font-size: 13px;
