@@ -924,6 +924,46 @@ const csvEscape = (v) => {
   const s = String(v == null ? '' : v);
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
+// ── 16-to-15 billing cycle helpers ───────────────────────────────────────
+// The business runs on a 16th→15th cycle, not calendar months. A deal counts
+// in the cycle in which its money actually arrived (first client payment) —
+// NOT when the enquiry was created. So an enquiry raised 14 July that only
+// converted and got paid on 18 July belongs to the 16-Jul→15-Aug cycle.
+const firstPaymentDateOf = (d) => {
+  const dates = (d.clientPayments || [])
+    .map((p) => p.date)
+    .filter(Boolean)
+    .map((x) => String(x).slice(0, 10))
+    .sort();
+  return dates.length ? dates[0] : null;
+};
+
+// Returns {start, end, label} for the cycle containing a given date.
+const cycleFor = (dateStr) => {
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  // On/after the 16th the cycle starts this month; before the 16th it started last month.
+  const startD = day >= 16 ? new Date(y, m, 16) : new Date(y, m - 1, 16);
+  const endD = new Date(startD.getFullYear(), startD.getMonth() + 1, 15);
+  const iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  const fmt = (x) => x.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return { start: iso(startD), end: iso(endD), label: `${fmt(startD)} – ${fmt(endD)} ${endD.getFullYear()}` };
+};
+
+// Walks back N cycles from today, newest first — used to populate the picker.
+const recentCycles = (count) => {
+  const out = [];
+  let cur = cycleFor(new Date().toISOString().slice(0, 10));
+  for (let i = 0; i < count && cur; i++) {
+    out.push(cur);
+    const prevDay = new Date(cur.start);
+    prevDay.setDate(prevDay.getDate() - 1);
+    cur = cycleFor(prevDay.toISOString().slice(0, 10));
+  }
+  return out;
+};
+
 const downloadCSV = (filename, rows) => {
   const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }); // BOM so ₹/Excel render correctly
@@ -9437,6 +9477,246 @@ Cash locations and booked deals list are passed in the user turn.`;
    V1's Reports screen does, just run against the same MongoDB data
    V2 already has loaded. ───────────────────────────────────────── */
 
+// ── 16→15 Cycle Tracker ──────────────────────────────────────────────────
+// Cycle-scoped: TTV / GPM / Net Profit count ONLY bookings whose first client
+// payment landed inside the selected cycle, so past cycles stay locked and
+// don't shift as older deals get topped up.
+// All-time (deliberately NOT cycle-scoped): vendor payments still pending and
+// client collections still pending — these are live liabilities/receivables,
+// so they must show the full outstanding position across every deal in the
+// CRM regardless of which cycle created them.
+function CycleTracker({ leads }) {
+  const cycles = useMemo(() => recentCycles(18), []);
+  const [cycleIdx, setCycleIdx] = useState(0);
+  const cycle = cycles[cycleIdx];
+
+  const data = useMemo(() => {
+    if (!cycle) return null;
+    const inCycle = (leads || []).filter((d) => {
+      if (!isBookedStage(d)) return false;
+      const fp = firstPaymentDateOf(d);
+      return fp && fp >= cycle.start && fp <= cycle.end;
+    });
+    const ttv = inCycle.reduce((s, d) => s + netSellINR(d), 0);
+    const cost = inCycle.reduce((s, d) => s + costINR(d), 0);
+    const gpm = inCycle.reduce((s, d) => s + profitINR(d), 0);
+    const gst = inCycle.reduce((s, d) => s + gstINR(d), 0);
+    const collectedThisCycle = inCycle.reduce((s, d) => s + paidINR(d), 0);
+
+    // All-time outstanding across the WHOLE CRM (every booked deal, any cycle)
+    const allBooked = (leads || []).filter(isBookedStage);
+    const vendorPending = allBooked.reduce((s, d) => {
+      const vs = dealVendors(d);
+      const c = vs.reduce((a, v) => a + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+      const p = vs.reduce((a, v) => a + sumBy(v.payments, 'amount'), 0);
+      return s + Math.max(0, c - p);
+    }, 0);
+    const clientPending = allBooked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0);
+
+    return { inCycle, ttv, cost, gpm, gst, net: gpm - gst, collectedThisCycle, vendorPending, clientPending };
+  }, [leads, cycle]);
+
+  if (!cycle || !data) return null;
+
+  return (
+    <div className="v2-panel" style={{ marginBottom: 24 }}>
+      <div className="v2-panel-header">
+        <h3 className="v2-panel-title">📆 Cycle Tracker (16th → 15th)</h3>
+        <select value={cycleIdx} onChange={(e) => setCycleIdx(Number(e.target.value))}
+          style={{ background: '#f4f7fc', border: '1px solid #d4e0f5', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontWeight: 700, color: '#334e82', outline: 'none' }}>
+          {cycles.map((c, i) => <option key={c.start} value={i}>{c.label}{i === 0 ? ' (current)' : ''}</option>)}
+        </select>
+      </div>
+      <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+        Counts a booking in the cycle its <b>first payment</b> arrived — not when the enquiry was made.
+      </p>
+
+      <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginBottom: 8 }}>THIS CYCLE ONLY — {data.inCycle.length} NEW BOOKING{data.inCycle.length !== 1 ? 'S' : ''}</div>
+      <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', marginBottom: 20 }}>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">TTV (Sale Value)</div><div className="v2-kpi-value">{fmtINR(data.ttv)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Cost</div><div className="v2-kpi-value">{fmtINR(data.cost)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">GPM (Gross Profit)</div><div className="v2-kpi-value" style={{ color: data.gpm >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(data.gpm)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Net Profit (after GST)</div><div className="v2-kpi-value" style={{ color: data.net >= 0 ? '#f97316' : '#ef4444' }}>{fmtINR(data.net)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Collected (these bookings)</div><div className="v2-kpi-value" style={{ color: '#10b981' }}>{fmtINR(data.collectedThisCycle)}</div></div>
+      </div>
+
+      <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#dc2626', fontWeight: 800, marginBottom: 8 }}>ALL-TIME OUTSTANDING — ACROSS EVERY DEAL IN CRM</div>
+      <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', marginBottom: 16 }}>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Vendor Payment Pending</div><div className="v2-kpi-value" style={{ color: data.vendorPending > 0 ? '#ef4444' : '#10b981' }}>{fmtINR(data.vendorPending)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Client Collection Pending</div><div className="v2-kpi-value" style={{ color: data.clientPending > 0 ? '#f59e0b' : '#10b981' }}>{fmtINR(data.clientPending)}</div></div>
+      </div>
+
+      {data.inCycle.length > 0 && (
+        <table className="info" style={{ width: '100%' }}>
+          <thead><tr><th>Client</th><th>Destination</th><th>Booked On</th><th style={{ textAlign: 'right' }}>TTV</th><th style={{ textAlign: 'right' }}>GPM</th></tr></thead>
+          <tbody>
+            {data.inCycle.map((d) => (
+              <tr key={d._id}>
+                <td>{clientName(d)}{d.dealNumber ? <span style={{ fontSize: 9.5, color: '#8a6d1f', background: '#faf1dc', borderRadius: 5, padding: '1px 5px', marginLeft: 5, fontFamily: 'monospace' }}>{d.dealNumber}</span> : null}</td>
+                <td>{destination(d) || '—'}</td>
+                <td style={{ fontSize: 11.5, color: '#6b7a99' }}>{firstPaymentDateOf(d)}</td>
+                <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(netSellINR(d))}</td>
+                <td style={{ textAlign: 'right', fontFamily: 'monospace', color: profitINR(d) >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(profitINR(d))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ── Detailed date-range report + full Excel/CSV export ───────────────────
+// Filter by which date matters for the question being asked: when the enquiry
+// came in, when they travel, or when they actually booked (first payment).
+function DetailedReport({ leads }) {
+  const [dateType, setDateType] = useState('query'); // query | travel | booking
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [stageFilter, setStageFilter] = useState('all'); // all | booked | queries
+
+  const dateOfDeal = (d) => {
+    if (dateType === 'booking') return firstPaymentDateOf(d);
+    if (dateType === 'travel') {
+      // travelDates is free text ("25-Aug to 01-Sep"); prefer the first real
+      // dated component we can find, which is far more reliable to compare.
+      const dates = [];
+      (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) dates.push(String(s.date).slice(0, 10)); }));
+      (d.hotelVendors || []).forEach((h) => { if (h.checkIn) dates.push(String(h.checkIn).slice(0, 10)); });
+      dates.sort();
+      return dates.length ? dates[0] : null;
+    }
+    return d.createdAt ? String(d.createdAt).slice(0, 10) : null;
+  };
+
+  const rows = useMemo(() => {
+    return (leads || []).filter((d) => {
+      if (stageFilter === 'booked' && !isBookedStage(d)) return false;
+      if (stageFilter === 'queries' && isBookedStage(d)) return false;
+      const dt = dateOfDeal(d);
+      if (from && (!dt || dt < from)) return false;
+      if (to && (!dt || dt > to)) return false;
+      if ((from || to) && !dt) return false;
+      return true;
+    }).sort((a, b) => String(dateOfDeal(b) || '').localeCompare(String(dateOfDeal(a) || '')));
+  }, [leads, dateType, from, to, stageFilter]);
+
+  const totals = useMemo(() => ({
+    ttv: rows.reduce((s, d) => s + netSellINR(d), 0),
+    cost: rows.reduce((s, d) => s + costINR(d), 0),
+    gpm: rows.reduce((s, d) => s + profitINR(d), 0),
+    paid: rows.reduce((s, d) => s + paidINR(d), 0),
+  }), [rows]);
+
+  // Full export — one row per deal, every parameter we hold, including a
+  // flattened breakdown of each vendor type's cost/sell so the sheet can be
+  // pivoted without opening the CRM.
+  const exportAll = () => {
+    const vendorCols = (d, key, label) => {
+      const list = d[key] || [];
+      const names = list.map((v) => v.name || v.hotelName || v.shipName || '').filter(Boolean).join(' | ');
+      const cp = list.reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+      const sp = list.reduce((s, v) => s + toINR(v.sellingPrice, v.currency, v.exchangeRate), 0);
+      const paid = list.reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      return [names, cp, sp, paid, Math.max(0, cp - paid)];
+    };
+    const header = [
+      'Deal No', 'Client Name', 'Mobile', 'Email', 'Stage', 'Lead Source', 'Priority',
+      'Date of Query', 'Date of Booking (1st payment)', 'Travel Dates (text)', 'First Travel Date',
+      'Destination', 'Adults', 'Children', 'Infants', 'Total Pax',
+      'Flight Vendors', 'Flight CP', 'Flight SP', 'Flight Paid', 'Flight Due',
+      'Hotel Vendors', 'Hotel CP', 'Hotel SP', 'Hotel Paid', 'Hotel Due',
+      'Land Vendors', 'Land CP', 'Land SP', 'Land Paid', 'Land Due',
+      'Train Vendors', 'Train CP', 'Train SP', 'Train Paid', 'Train Due',
+      'Visa Vendors', 'Visa CP', 'Visa SP', 'Visa Paid', 'Visa Due',
+      'Cruise Vendors', 'Cruise CP', 'Cruise SP', 'Cruise Paid', 'Cruise Due',
+      'Insurance Vendors', 'Insurance CP', 'Insurance SP', 'Insurance Paid', 'Insurance Due',
+      'Total Sale (TTV)', 'Refunded', 'Net Sale', 'Total Cost', 'GPM', 'GST Mode', 'GST', 'Net Profit',
+      'Client Paid', 'Client Balance Due', 'Vendor Total Paid', 'Vendor Total Due',
+      'Travellers', 'Remarks',
+    ];
+    const body = rows.map((d) => {
+      const vAll = dealVendors(d);
+      const vPaid = vAll.reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      const vCost = costINR(d);
+      return [
+        d.dealNumber || '', clientName(d), d.contactNo || '', d.email || '', stageOf(d), d.leadSource || '', d.priority || '',
+        d.createdAt ? String(d.createdAt).slice(0, 10) : '', firstPaymentDateOf(d) || '', d.travelDates || '',
+        (() => { const dd = []; (d.flightVendors || []).forEach((f) => [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => { if (s.date) dd.push(String(s.date).slice(0, 10)); })); (d.hotelVendors || []).forEach((h) => { if (h.checkIn) dd.push(String(h.checkIn).slice(0, 10)); }); dd.sort(); return dd[0] || ''; })(),
+        destination(d), n(d.adults), n(d.children), n(d.infants), n(d.adults) + n(d.children) + n(d.infants),
+        ...vendorCols(d, 'flightVendors'), ...vendorCols(d, 'hotelVendors'), ...vendorCols(d, 'landVendors'),
+        ...vendorCols(d, 'trainVendors'), ...vendorCols(d, 'visaVendors'), ...vendorCols(d, 'cruiseVendors'),
+        ...vendorCols(d, 'insuranceVendors'),
+        sellINR(d), refundedINR(d), netSellINR(d), vCost, profitINR(d), d.gstMode || 'profit', Math.round(gstINR(d)), Math.round(profitINR(d) - gstINR(d)),
+        paidINR(d), Math.max(0, netSellINR(d) - paidINR(d)), vPaid, Math.max(0, vCost - vPaid),
+        (d.travellers || []).map((t) => [t.salutation, t.firstName, t.lastName].filter(Boolean).join(' ')).join(' | '),
+        (d.remarks || '').replace(/\n/g, ' '),
+      ];
+    });
+    downloadCSV(`voyage-report-${dateType}-${from || 'all'}-to-${to || 'all'}.csv`, [header, ...body]);
+  };
+
+  return (
+    <div className="v2-panel" style={{ marginBottom: 24 }}>
+      <div className="v2-panel-header">
+        <h3 className="v2-panel-title">📊 Detailed Report &amp; Export</h3>
+        {rows.length > 0 && <button className="v2-view-all" onClick={exportAll}>⬇ Export Full Excel (CSV)</button>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {[['query', '📥 Date of Query'], ['booking', '💰 Date of Booking'], ['travel', '✈️ Date of Travel']].map(([id, label]) => (
+          <button key={id} onClick={() => setDateType(id)}
+            style={{ background: dateType === id ? '#0d1b3e' : '#f4f7fc', color: dateType === id ? '#fff' : '#334e82', border: '1px solid ' + (dateType === id ? '#0d1b3e' : '#d4e0f5'), borderRadius: 10, padding: '9px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+        <div><div className="v2-detail-field-label" style={{ marginBottom: 4 }}>From</div><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={inputStyle} /></div>
+        <div><div className="v2-detail-field-label" style={{ marginBottom: 4 }}>To</div><input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={inputStyle} /></div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Show</div>
+          <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)} style={inputStyle}>
+            <option value="all">All deals</option>
+            <option value="booked">Bookings only</option>
+            <option value="queries">Queries only (not booked)</option>
+          </select>
+        </div>
+        {(from || to) && <button onClick={() => { setFrom(''); setTo(''); }} style={{ background: 'transparent', border: '1px solid #e3eaf7', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#7d8bab' }}>↺ Clear</button>}
+      </div>
+
+      <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', marginBottom: 16 }}>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Records</div><div className="v2-kpi-value">{rows.length}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">TTV</div><div className="v2-kpi-value">{fmtINR(totals.ttv)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">GPM</div><div className="v2-kpi-value" style={{ color: '#10b981' }}>{fmtINR(totals.gpm)}</div></div>
+        <div className="v2-kpi-card"><div className="v2-kpi-label">Collected</div><div className="v2-kpi-value" style={{ color: '#10b981' }}>{fmtINR(totals.paid)}</div></div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 13, color: '#6b7a99' }}>No records in this date range.</div>
+      ) : (
+        <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+          <table className="info" style={{ width: '100%' }}>
+            <thead><tr><th>Client</th><th>Destination</th><th>Stage</th><th>Date</th><th style={{ textAlign: 'right' }}>TTV</th><th style={{ textAlign: 'right' }}>GPM</th><th style={{ textAlign: 'right' }}>Due</th></tr></thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={d._id}>
+                  <td>{clientName(d)}{d.dealNumber ? <span style={{ fontSize: 9.5, color: '#8a6d1f', background: '#faf1dc', borderRadius: 5, padding: '1px 5px', marginLeft: 5, fontFamily: 'monospace' }}>{d.dealNumber}</span> : null}</td>
+                  <td>{destination(d) || '—'}</td>
+                  <td style={{ fontSize: 11.5 }}>{stageOf(d)}</td>
+                  <td style={{ fontSize: 11.5, color: '#6b7a99' }}>{dateOfDeal(d) || '—'}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(netSellINR(d))}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace', color: profitINR(d) >= 0 ? '#10b981' : '#ef4444' }}>{fmtINR(profitINR(d))}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#f59e0b' }}>{fmtINR(Math.max(0, netSellINR(d) - paidINR(d)))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsV2({ leads }) {
   const bookedDeals = useMemo(() => leads.filter(isBookedStage), [leads]);
 
@@ -9498,9 +9778,12 @@ function ReportsV2({ leads }) {
       <div className="v2-page-header">
         <div>
           <h1 className="v2-page-title">Reports</h1>
-          <p className="v2-page-sub">Repeat customers, vendor performance, and monthly P&amp;L — from your real booked deals</p>
+          <p className="v2-page-sub">Cycle tracker, detailed exports, repeat customers, vendor performance and monthly P&amp;L — from your real booked deals</p>
         </div>
       </div>
+
+      <CycleTracker leads={leads} />
+      <DetailedReport leads={leads} />
 
       <div className="v2-panel" style={{ marginBottom: 24 }}>
         <div className="v2-panel-header">
