@@ -1524,6 +1524,15 @@ const COUNTRY_OUTLINES = {
     bounds: [[8, 102], [24, 110]],
     path: "M105,23 L106,22 L107,21 L108,20 L108,19 L107,18 L106,17 L107,16 L108,15 L109,14 L109,13 L108,12 L107,11 L106,10 L105,9 L104,9 L104,10 L105,11 L106,12 L106,13 L107,14 L106,15 L105,16 L104,17 L103,18 L103,19 L104,20 L104,21 L104,22 L105,23 Z",
   },
+  thailand: {
+    // Real approximate boundary points (lat,lng), so the projection stays
+    // consistent with actual city coordinates — the earlier hand-sketched
+    // path used a coordinate scale that didn't match its own stated bounds
+    // (the southern peninsula subpath went to "lat 38", far outside the
+    // declared 5–21° range), which would have rendered a distorted shape.
+    bounds: [[6, 97], [21, 106]],
+    path: "M100.1,20.3 L104.8,18.3 L105.0,15.2 L102.3,12.5 L99.2,10.5 L99.3,9.1 L99.9,8.4 L100.6,6.9 L99.6,7.2 L98.4,7.9 L98.6,9.9 L98.9,14.0 L97.9,19.3 Z",
+  },
 };
 
 // ─── Mapbox Static Images API ────────────────────────────────────────────
@@ -1625,9 +1634,11 @@ function detectMapRegionV2(stops) {
     if (c) countries.add(c.toLowerCase());
     if (/india|delhi|mumbai|chennai|kolkata|bengal|jaipur|goa|kerala|rajasthan|kashmir|himachal|uttarakhand|agra/i.test(s.name || '')) countries.add('india');
     if (/vietnam|hanoi|saigon|ho chi|da nang|hoi an|hue|phu quoc|halong|ha long/i.test(s.name || '')) countries.add('vietnam');
+    if (/thailand|bangkok|pattaya|phuket|krabi|chiang mai|koh samui|samui/i.test(s.name || '')) countries.add('thailand');
   });
   if (countries.has('india') && countries.size === 1) return 'india';
   if (countries.has('vietnam') && countries.size === 1) return 'vietnam';
+  if (countries.has('thailand') && countries.size === 1) return 'thailand';
   return null;
 }
 
