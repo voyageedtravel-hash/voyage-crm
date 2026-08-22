@@ -1849,14 +1849,43 @@ const lookupCountry = (city) => CITY_COUNTRY[(city || '').toLowerCase().trim()] 
 const lookupAirline = (code) => AIRLINE_MAP[(code || '').toUpperCase().trim()] || '';
 const lookupAirport = (code) => AIRPORT_MAP[(code || '').toUpperCase().trim()] || '';
 
+// Fetch live FX rates once per session (foreign → INR incl. markup) so a
+// vendor CP entered in USD/EUR/JPY auto-fills the exchange rate the moment
+// the currency changes — user can still edit the rate afterwards. Rates
+// cached in localStorage so a refresh doesn't wait for the network again.
+const useFxRates = () => {
+  const [fx, setFx] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ve_fx') || 'null')?.rates || null; }
+    catch { return null; }
+  });
+  useEffect(() => {
+    fetch(`${apiBase()}/api/fx-rates`)
+      .then((r) => r.json())
+      .then((d) => { if (d && d.rates) { setFx(d.rates); try { localStorage.setItem('ve_fx', JSON.stringify(d)); } catch { /* ignore quota */ } } })
+      .catch(() => { /* keep cached rates */ });
+  }, []);
+  return fx;
+};
+
 function CurrencyCostRow({ form, setForm }) {
+  const fxRates = useFxRates();
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const onCurrency = (e) => {
+    const c = e.target.value;
+    setForm((f) => {
+      // Auto-fill rate on currency change. INR clears the rate; foreign
+      // currencies fill from live FX (only if user hadn't already typed one).
+      if (c === 'INR') return { ...f, currency: c, exchangeRate: '' };
+      const auto = fxRates && fxRates[c] ? String(fxRates[c]) : f.exchangeRate;
+      return { ...f, currency: c, exchangeRate: f.exchangeRate || auto || '' };
+    });
+  };
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <div>
           <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Currency</div>
-          <select value={form.currency} onChange={set('currency')} style={inputStyle}>
+          <select value={form.currency} onChange={onCurrency} style={inputStyle}>
             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
@@ -1871,8 +1900,16 @@ function CurrencyCostRow({ form, setForm }) {
       </div>
       {form.currency !== 'INR' && (
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Exchange Rate (1 {form.currency} = ? INR)</div>
-          <input type="number" value={form.exchangeRate} onChange={set('exchangeRate')} placeholder="e.g. 86" style={inputStyle} />
+          <div className="v2-detail-field-label" style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Exchange Rate (1 {form.currency} = ? INR)</span>
+            {fxRates && fxRates[form.currency] && (
+              <button type="button" onClick={() => setForm((f) => ({ ...f, exchangeRate: String(fxRates[form.currency]) }))}
+                style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 10.5, fontWeight: 700, textDecoration: 'underline' }}
+                title={`Live rate: ${fxRates[form.currency]}`}>↻ use live ({fxRates[form.currency]})</button>
+            )}
+          </div>
+          <input type="number" value={form.exchangeRate} onChange={set('exchangeRate')} placeholder={fxRates && fxRates[form.currency] ? `Auto: ${fxRates[form.currency]}` : 'e.g. 86'} style={inputStyle} />
+          {form.costPrice && form.exchangeRate && <div style={{ fontSize: 10.5, color: '#7d8bab', marginTop: 4 }}>≈ ₹{(Number(form.costPrice) * Number(form.exchangeRate)).toLocaleString('en-IN', { maximumFractionDigits: 0 })} INR</div>}
         </div>
       )}
     </>
@@ -1994,8 +2031,23 @@ function RoomAssignmentBlock({ hotel, deal, onUpdate }) {
   );
 }
 
-function PaxRatesFields({ form, setForm }) {
+function PaxRatesFields({ form, setForm, deal }) {
   const rates = form.paxRates || {};
+  const counts = { adult: n((deal || {}).adults), child: n((deal || {}).children), infant: n((deal || {}).infants) };
+  const totalCost = PAX_RATE_TYPES.reduce((s, [k]) => s + (Number(rates[k + 'C']) || 0) * counts[k], 0);
+  const totalSell = PAX_RATE_TYPES.reduce((s, [k]) => s + (Number(rates[k + 'S']) || 0) * counts[k], 0);
+
+  // When per-pax pricing is on, keep the vendor's TOTAL costPrice/sellingPrice
+  // in sync with (per-pax rate × pax count). Otherwise the vendor's cost never
+  // gets counted in the deal's costINR() rollup even though the user filled in
+  // detailed per-pax rates — exactly the "CP nahi utha ra" bug. In the vendor's
+  // native currency; toINR() takes care of conversion downstream.
+  useEffect(() => {
+    if (!form.paxPricing) return;
+    if (String(form.costPrice) !== String(totalCost)) setForm((f) => ({ ...f, costPrice: totalCost ? String(totalCost) : '' }));
+    if (String(form.sellingPrice) !== String(totalSell)) setForm((f) => ({ ...f, sellingPrice: totalSell ? String(totalSell) : '' }));
+  }, [form.paxPricing, totalCost, totalSell]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const setRate = (key, val) => setForm((f) => ({ ...f, paxRates: { ...(f.paxRates || {}), [key]: val } }));
   return (
     <div style={{ background: '#f9fafc', borderRadius: 10, padding: 12 }}>
@@ -2005,33 +2057,29 @@ function PaxRatesFields({ form, setForm }) {
           checked={!!form.paxPricing}
           onChange={(e) => setForm((f) => ({ ...f, paxPricing: e.target.checked }))}
         />
-        Use per-traveller rates (for accurate cancellation proration)
+        Use per-traveller rates (auto-fills total cost/sell above)
       </label>
       {form.paxPricing && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5 }}></div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>COST</div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>SELL</div>
-          {PAX_RATE_TYPES.map(([key, label]) => (
-            <React.Fragment key={key}>
-              <div style={{ fontSize: 12, color: '#33446b', alignSelf: 'center' }}>{label}</div>
-              <input
-                type="number"
-                value={rates[key + 'C'] || ''}
-                onChange={(e) => setRate(key + 'C', e.target.value)}
-                placeholder="0"
-                style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}
-              />
-              <input
-                type="number"
-                value={rates[key + 'S'] || ''}
-                onChange={(e) => setRate(key + 'S', e.target.value)}
-                placeholder="0"
-                style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}
-              />
-            </React.Fragment>
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 60px', gap: 10, alignItems: 'center' }}>
+            <div />
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>PER-PAX COST</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>PER-PAX SELL</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#9aa7c4', letterSpacing: 0.5, textAlign: 'center' }}>COUNT</div>
+            {PAX_RATE_TYPES.map(([key, label]) => (
+              <React.Fragment key={key}>
+                <div style={{ fontSize: 12, color: '#33446b' }}>{label}</div>
+                <input type="number" value={rates[key + 'C'] || ''} onChange={(e) => setRate(key + 'C', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }} />
+                <input type="number" value={rates[key + 'S'] || ''} onChange={(e) => setRate(key + 'S', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }} />
+                <div style={{ fontSize: 11.5, color: '#7d8bab', textAlign: 'center', fontWeight: 700 }}>× {counts[key]}</div>
+              </React.Fragment>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: '#0d1b3e', marginTop: 10, padding: '8px 10px', background: '#eef7ee', borderRadius: 6, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+            <span>Auto-total → Cost: {totalCost.toLocaleString('en-IN')}</span>
+            <span>Sell: {totalSell.toLocaleString('en-IN')}</span>
+          </div>
+        </>
       )}
     </div>
   );
@@ -4190,6 +4238,22 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
   const [propCancelCustom, setPropCancelCustom] = useState('');
   const [propDays, setPropDays] = useState(null); // null = auto, array = edited
   const [propCompareId, setPropCompareId] = useState('');
+  // Local, unsaved copy of pricing rows so typing doesn't fire an async
+  // patchDeal on every keystroke — that pattern silently overwrote user
+  // input with stale server-response values, making digits appear to
+  // vanish as they typed. Saved on blur / Save button below.
+  const [localPricingRows, setLocalPricingRows] = useState(() => deal.pricingRows || []);
+  const [pricingDirty, setPricingDirty] = useState(false);
+
+  const savePricingRows = async () => {
+    if (!pricingDirty) return;
+    const updated = await patchDeal(deal._id, { pricingRows: localPricingRows });
+    setDeal(updated); onDealUpdated && onDealUpdated(updated); setPricingDirty(false);
+  };
+  useEffect(() => { if (!pricingDirty) setLocalPricingRows(deal.pricingRows || []); }, [deal.pricingRows, pricingDirty]);
+  const updRow = (id, patch) => { setLocalPricingRows((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r)); setPricingDirty(true); };
+  const addRow = () => { setLocalPricingRows((rs) => [...rs, { id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '', pp: '' }]); setPricingDirty(true); };
+  const rmRow = (id) => { setLocalPricingRows((rs) => rs.filter((r) => r.id !== id)); setPricingDirty(true); };
 
   const sell = sellINR(deal);
 
@@ -4340,22 +4404,25 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
           <button onClick={extendQuoteVT} title="+7 din" style={{ background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 800, color: '#334e82' }}>🔄 +7d</button>
         </div>
 
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6 }}>💺 OCCUPANCY PRICING <span style={{ fontWeight: 400 }}>(optional — sharing-wise per person)</span></div>
-        {!(deal.pricingRows && deal.pricingRows.length) ? (
-          <button onClick={async () => { const updated = await patchDeal(deal._id, { pricingRows: [{ id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '2', pp: '' }] }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 14 }}>➕ Twin/Single/Triple/Child-wise pricing likho</button>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>💺 OCCUPANCY PRICING <span style={{ fontWeight: 400 }}>(optional — sharing-wise per person)</span></span>
+          {pricingDirty && <button onClick={savePricingRows} style={{ background: '#15803d', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 10.5, fontWeight: 800 }}>💾 Save</button>}
+        </div>
+        {!localPricingRows.length ? (
+          <button onClick={() => { addRow(); }} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 10, padding: 11, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginBottom: 14 }}>➕ Twin/Single/Triple/Child-wise pricing likho</button>
         ) : (
-          <div style={{ marginBottom: 14, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }}>
-            {(deal.pricingRows || []).map((r, i) => (
+          <div style={{ marginBottom: 14, background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 12px' }} onBlur={savePricingRows}>
+            {localPricingRows.map((r, i) => (
               <div key={r.id || i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
-                <select value={r.cat} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, cat: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ flex: 2, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', background: '#fff' }}>
+                <select value={r.cat} onChange={(e) => updRow(r.id, { cat: e.target.value })} onBlur={savePricingRows} style={{ flex: 2, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', background: '#fff' }}>
                   {['Adult — Twin Sharing', 'Adult — Single Occupancy', 'Adult — Triple Sharing', 'Child With Bed (2–11 yrs)', 'Child Without Bed (2–11 yrs)', 'Infant (0–2 yrs)', 'Extra Adult / Mattress'].map((c) => <option key={c}>{c}</option>)}
                 </select>
-                <input value={r.count || ''} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, count: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} placeholder="Pax" style={{ width: 50, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'center' }} />
-                <input value={r.pp || ''} onChange={async (e) => { const rows = (deal.pricingRows || []).map((x) => x.id === r.id ? { ...x, pp: e.target.value } : x); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} placeholder="₹ per person" style={{ width: 90, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'right' }} />
-                <button onClick={async () => { const rows = (deal.pricingRows || []).filter((x) => x.id !== r.id); const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ background: 'transparent', border: '1px solid #fdeaea', color: '#b91c1c', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+                <input value={r.count || ''} onChange={(e) => updRow(r.id, { count: e.target.value })} onBlur={savePricingRows} placeholder="Pax" style={{ width: 50, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'center' }} />
+                <input value={r.pp || ''} onChange={(e) => updRow(r.id, { pp: e.target.value })} onBlur={savePricingRows} placeholder="₹ per person" style={{ width: 90, border: '1px solid #d4e0f5', borderRadius: 8, padding: 7, fontSize: 11, outline: 'none', textAlign: 'right' }} />
+                <button onClick={() => { rmRow(r.id); }} style={{ background: 'transparent', border: '1px solid #fdeaea', color: '#b91c1c', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
               </div>
             ))}
-            <button onClick={async () => { const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '', pp: '' }]; const updated = await patchDeal(deal._id, { pricingRows: rows }); setDeal(updated); onDealUpdated && onDealUpdated(updated); }} style={{ width: '100%', background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#334e82' }}>+ Row</button>
+            <button onClick={addRow} style={{ width: '100%', background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#334e82' }}>+ Row</button>
           </div>
         )}
 
@@ -4702,10 +4769,13 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
         if (next.exchangeRate !== undefined) setExchangeRate(next.exchangeRate);
       }} />
-      <PaxRatesFields form={{ paxPricing, paxRates }} setForm={(fn) => {
-        const next = typeof fn === 'function' ? fn({ paxPricing, paxRates }) : fn;
+      <PaxRatesFields form={{ paxPricing, paxRates, costPrice, sellingPrice }} deal={deal} setForm={(fn) => {
+        const cur = { paxPricing, paxRates, costPrice, sellingPrice };
+        const next = typeof fn === 'function' ? fn(cur) : fn;
         if (next.paxPricing !== undefined) setPaxPricing(next.paxPricing);
         if (next.paxRates !== undefined) setPaxRates(next.paxRates);
+        if (next.costPrice !== undefined) setCostPrice(next.costPrice);
+        if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
       }} />
     </ModalShell>
   );
@@ -4894,7 +4964,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
     </ModalShell>
   );
 }
@@ -5121,7 +5191,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
         />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
     </ModalShell>
   );
 }
@@ -5238,7 +5308,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
         />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
     </ModalShell>
   );
 }
@@ -5305,7 +5375,7 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
         </select>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
     </ModalShell>
   );
 }
@@ -5501,7 +5571,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port-by-Port Itinerary</div>
         <textarea value={form.itinerary} onChange={set('itinerary')} rows={4} placeholder="Day 1: Embarkation at Barcelona&#10;Day 2: At Sea&#10;Day 3: Marseille, France" style={{ ...inputStyle, resize: 'vertical' }} />
@@ -5690,7 +5760,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
         </div>
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
     </ModalShell>
   );
 }
@@ -6655,6 +6725,49 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     return [deal, ...others];
   }, [deal, allLeads]);
 
+  // ── Add another destination for the SAME client without re-entering their
+  // details — ports V1's addDestination(). Both deals share an enquiryId so
+  // they show up together in the linkedDeals list above. Creates a fresh
+  // blank deal with the same client identity + pax breakdown, stamps both
+  // sides with a common enquiryId if one wasn't set, and navigates to the
+  // new deal so the user lands ready to enter its destination.
+  const addDestination = async () => {
+    if (!clientName(deal) || clientName(deal) === 'Unknown') { window.veToast && window.veToast('Pehle client ka naam bharo', 'warning'); return; }
+    setBusy(true);
+    try {
+      const eid = deal.enquiryId || ('enq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
+      // Backfill enquiryId onto the current deal if it wasn't set yet
+      if (!deal.enquiryId) {
+        const updated = await patchDeal(deal._id, { enquiryId: eid });
+        setDeal(updated); onDealUpdated && onDealUpdated(updated);
+      }
+      // Create a sibling deal — clone client identity + pax, blank destination/pricing
+      const sibling = {
+        clientName: deal.clientName, contactNo: deal.contactNo, email: deal.email,
+        leadSource: deal.leadSource, priority: deal.priority, modeOfQuery: deal.modeOfQuery,
+        adults: deal.adults, children: deal.children, infants: deal.infants,
+        enquiryId: eid,
+        stage: 'New Lead',
+        destination: '',
+        travelDates: '',
+        remarks: '',
+      };
+      const res = await fetch(`${apiBase()}/api/leads`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(sibling),
+      });
+      const created = await res.json();
+      if (!res.ok) throw new Error(created.error || 'Failed to create sibling');
+      window.veToast && window.veToast('➕ Naya destination add ho gaya — same client, alag package', 'success');
+      // Jump to the new deal
+      if (window.__voyagePagesOpenDeal) window.__voyagePagesOpenDeal(created);
+      else if (onDealUpdated) { onDealUpdated(created); setDeal(created); }
+    } catch (e) {
+      window.veToast && window.veToast('Add destination failed: ' + e.message, 'warning');
+    }
+    setBusy(false);
+  };
+
   const waPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
   const waNum = waPhone.length === 10 ? '91' + waPhone : waPhone;
   const waLink = () => {
@@ -6801,6 +6914,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             {linkedDeals.length > 1 && (
               <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
             )}
+            <button className="v2-hero-btn" onClick={addDestination} disabled={busy} title="Same client ke liye naya destination banao — details automatic copy ho jayengi">➕ Add Destination</button>
             <button className="v2-hero-btn gold" onClick={() => setModal('proposalBuilder')}>📄 Proposal PDF</button>
             <button className="v2-hero-btn" onClick={() => {
               const w = window.open('', '_blank');
@@ -10115,6 +10229,13 @@ export default function V2Pages() {
     });
     window.scrollTo(0, 0);
   }, []);
+
+  // Expose openDeal globally so nested modals/actions (like Add Destination
+  // creating a sibling deal) can jump to the new deal without prop-drilling.
+  useEffect(() => {
+    window.__voyagePagesOpenDeal = openDeal;
+    return () => { if (window.__voyagePagesOpenDeal === openDeal) delete window.__voyagePagesOpenDeal; };
+  }, [openDeal]);
 
   const goBack = useCallback(() => {
     setRoute(window.__voyagePagesPrevRoute || 'leads');
