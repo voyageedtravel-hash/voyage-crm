@@ -1558,17 +1558,27 @@ const AIRPORT_COORDS = {
   SGN: [10.82, 106.65], HAN: [21.22, 105.81], DAD: [16.04, 108.20], PQC: [10.23, 103.97],
   REP: [13.41, 103.81], PNH: [11.55, 104.84], RGN: [16.91, 96.13], MLE: [4.19, 73.53],
   CMB: [7.18, 79.88], KTM: [27.70, 85.36], DAC: [23.84, 90.40],
-  LHR: [51.47, -0.45], LGW: [51.15, -0.19], CDG: [49.01, 2.55], FRA: [50.04, 8.56],
+  // Europe — extended for the new continental map region
+  LHR: [51.47, -0.45], LGW: [51.15, -0.19], CDG: [49.01, 2.55], ORY: [48.72, 2.36], FRA: [50.04, 8.56],
   AMS: [52.31, 4.76], ZUR: [47.46, 8.55], VIE: [48.11, 16.57], FCO: [41.80, 12.25],
-  BCN: [41.30, 2.08], MAD: [40.47, -3.56], MXP: [45.63, 8.72], VCE: [45.50, 12.35],
-  ATH: [37.94, 23.95], IST: [41.28, 28.75], MUC: [48.35, 11.79], PRG: [50.10, 14.26],
-  LIS: [38.77, -9.13], DUB: [53.42, -6.27], GVA: [46.24, 6.11],
+  BCN: [41.30, 2.08], MAD: [40.47, -3.56], MXP: [45.63, 8.72], LIN: [45.45, 9.28], VCE: [45.50, 12.35],
+  ATH: [37.94, 23.95], IST: [41.28, 28.75], SAW: [40.90, 29.31], MUC: [48.35, 11.79], PRG: [50.10, 14.26],
+  LIS: [38.77, -9.13], DUB: [53.42, -6.27], GVA: [46.24, 6.11], BER: [52.36, 13.50], TXL: [52.56, 13.29],
+  BUD: [47.44, 19.26], CPH: [55.62, 12.66], ARN: [59.65, 17.92], OSL: [60.19, 11.10],
+  HEL: [60.32, 24.97], WAW: [52.17, 20.97], NAP: [40.89, 14.29], PMI: [39.55, 2.74],
+  JTR: [36.40, 25.48], JMK: [37.44, 25.35], NCE: [43.66, 7.22], MRS: [43.44, 5.22], ZAG: [45.74, 16.07],
+  DBV: [42.56, 18.27], SPU: [43.54, 16.30], SZG: [47.79, 13.00], INN: [47.26, 11.34],
+  FLR: [43.81, 11.20], PSA: [43.68, 10.39],
+  // Sri Lanka
   CAI: [30.11, 31.41], JNB: [-26.14, 28.25], NBO: [-1.32, 36.93],
   SYD: [-33.94, 151.18], MEL: [-37.67, 144.84], PER: [-31.94, 115.97], BNE: [-27.38, 153.12],
   AKL: [-37.01, 174.79], LAX: [33.94, -118.41], JFK: [40.64, -73.78], ORD: [41.98, -87.90],
   YYZ: [43.68, -79.63], YVR: [49.19, -123.18], GRU: [-23.43, -46.47],
   TBS: [41.67, 44.95], BUS: [41.61, 41.60], GYD: [40.47, 50.05], EVN: [40.15, 44.40],
   ALA: [43.35, 77.04], NQZ: [51.02, 71.47], TAS: [41.26, 69.28],
+  // Bhutan, Malaysia extras, Bali extras
+  PBH: [27.40, 89.42], PEN: [5.30, 100.28], LGK: [6.33, 99.73], JHB: [1.64, 103.67],
+  BKI: [5.94, 116.05], KCH: [1.48, 110.35],
 };
 
 const CITY_COORDS = {
@@ -1596,23 +1606,46 @@ const CITY_COORDS = {
   seminyak: [-8.69, 115.17], nusa: [-8.80, 115.22], jakarta: [-6.21, 106.85],
   "siem reap": [13.36, 103.86], "phnom penh": [11.56, 104.92],
   // Middle East
-  dubai: [25.20, 55.27], "abu dhabi": [24.45, 54.38], sharjah: [25.35, 55.39],
+  dubai: [25.20, 55.27], "abu dhabi": [24.45, 54.38], sharjah: [25.35, 55.39], ajman: [25.41, 55.44],
+  "ras al khaimah": [25.79, 55.94], fujairah: [25.13, 56.34],
   doha: [25.29, 51.53], muscat: [23.59, 58.41],
   // Indian Ocean
   male: [4.18, 73.51], maldives: [3.20, 73.22], colombo: [6.93, 79.86], kandy: [7.29, 80.64],
   bentota: [6.42, 80.00], galle: [6.03, 80.22], ella: [6.87, 81.05], sigiriya: [7.96, 80.76],
+  "nuwara eliya": [6.97, 80.77], dambulla: [7.86, 80.65], habarana: [8.03, 80.75],
+  yala: [6.36, 81.51], mirissa: [5.94, 80.45], negombo: [7.21, 79.84], trincomalee: [8.59, 81.21],
   kathmandu: [27.72, 85.32], pokhara: [28.21, 83.99],
-  // Europe
+  // Europe — extended with cruise/tour hubs
   london: [51.51, -0.13], paris: [48.86, 2.35], rome: [41.90, 12.50], venice: [45.44, 12.32],
   milan: [45.46, 9.19], florence: [43.77, 11.26], barcelona: [41.39, 2.17], madrid: [40.42, -3.70],
   amsterdam: [52.37, 4.90], frankfurt: [50.11, 8.68], munich: [48.14, 11.58], zurich: [47.38, 8.54],
   vienna: [48.21, 16.37], prague: [50.08, 14.44], lisbon: [38.72, -9.14], dublin: [53.35, -6.26],
   geneva: [46.20, 6.14], athens: [37.98, 23.73], istanbul: [41.01, 28.98], santorini: [36.39, 25.46],
   interlaken: [46.69, 7.86], lucerne: [47.05, 8.31],
+  berlin: [52.52, 13.40], budapest: [47.50, 19.05], copenhagen: [55.68, 12.57], stockholm: [59.33, 18.07],
+  oslo: [59.91, 10.75], helsinki: [60.17, 24.94], warsaw: [52.23, 21.01], naples: [40.85, 14.27],
+  "palma": [39.57, 2.65], "palma de mallorca": [39.57, 2.65], ibiza: [38.91, 1.43],
+  mykonos: [37.44, 25.33], nice: [43.71, 7.26], monaco: [43.73, 7.42], cannes: [43.55, 7.02],
+  marseille: [43.30, 5.37], dubrovnik: [42.65, 18.09], split: [43.51, 16.44], zagreb: [45.81, 15.98],
+  salzburg: [47.81, 13.06], innsbruck: [47.27, 11.39], hallstatt: [47.56, 13.65],
+  brussels: [50.85, 4.35], bruges: [51.21, 3.22], edinburgh: [55.95, -3.19], oxford: [51.75, -1.26],
+  reykjavik: [64.15, -21.94], porto: [41.16, -8.63], seville: [37.39, -5.99], granada: [37.18, -3.60],
+  cinque: [44.13, 9.71], "cinque terre": [44.13, 9.71], sorrento: [40.63, 14.38], capri: [40.55, 14.24],
+  positano: [40.63, 14.48], pisa: [43.72, 10.40], "san marino": [43.94, 12.45],
   // Caucasus / Central Asia
   tbilisi: [41.72, 44.78], batumi: [41.64, 41.64], kazbegi: [42.66, 44.64], baku: [40.41, 49.87],
   yerevan: [40.18, 44.51], almaty: [43.24, 76.89], astana: [51.17, 71.45], tashkent: [41.30, 69.24],
-  samarkand: [39.65, 66.96],
+  samarkand: [39.65, 66.96], mtskheta: [41.85, 44.72], gudauri: [42.47, 44.48], kutaisi: [42.27, 42.71],
+  borjomi: [41.84, 43.38],
+  // Bhutan
+  thimphu: [27.47, 89.64], paro: [27.43, 89.42], punakha: [27.59, 89.87], bumthang: [27.55, 90.75],
+  phobjikha: [27.46, 90.18], wangdue: [27.49, 89.90],
+  // Malaysia extras
+  melaka: [2.19, 102.25], malacca: [2.19, 102.25], "kota kinabalu": [5.98, 116.07], "johor bahru": [1.49, 103.76],
+  // Bali extras
+  jimbaran: [-8.79, 115.16], canggu: [-8.65, 115.14], uluwatu: [-8.82, 115.09], sanur: [-8.68, 115.26],
+  "nusa dua": [-8.80, 115.22], "nusa penida": [-8.73, 115.55], "gili trawangan": [-8.35, 116.03],
+  lombok: [-8.65, 116.32], yogyakarta: [-7.80, 110.36], jogja: [-7.80, 110.36],
   // Africa / Americas / Oceania
   cairo: [30.04, 31.24], nairobi: [-1.29, 36.82], naivasha: [-0.72, 36.43], nakuru: [-0.30, 36.08],
   "maasai mara": [-1.49, 35.14], mara: [-1.49, 35.14], amboseli: [-2.65, 37.26],
@@ -1641,6 +1674,51 @@ const COUNTRY_OUTLINES = {
     // declared 5–21° range), which would have rendered a distorted shape.
     bounds: [[6, 97], [21, 106]],
     path: "M100.1,20.3 L104.8,18.3 L105.0,15.2 L102.3,12.5 L99.2,10.5 L99.3,9.1 L99.9,8.4 L100.6,6.9 L99.6,7.2 L98.4,7.9 L98.6,9.9 L98.9,14.0 L97.9,19.3 Z",
+  },
+  // ─── Newly added regions ────────────────────────────────────────────
+  // Simplified outlines — real coastlines are far too complex to hand-write,
+  // so these are approximate polygons that: (a) have correct bounds so city
+  // markers project accurately, (b) look recognizable enough to give visual
+  // context. When the user has set a Mapbox token, none of this matters —
+  // the real basemap gets used automatically instead. This is only the
+  // no-token fallback.
+  europe: {
+    // Continental Europe from Iberia to the Urals, Sicily to North Cape.
+    // Covers all major cruise/tour destinations plus UK for cross-Channel.
+    bounds: [[35, -12], [72, 42]],
+    path: "M-9,42 L-9,44 L-6,44 L-2,48 L1,50 L3,52 L5,53 L7,53 L9,54 L11,56 L13,58 L15,60 L18,63 L22,66 L25,68 L28,69 L31,70 L34,70 L36,68 L38,66 L40,62 L40,58 L38,54 L36,50 L34,46 L32,44 L28,42 L24,41 L20,40 L17,39 L14,37 L12,38 L9,38 L6,36 L3,36 L0,36 L-3,36 L-6,37 L-9,38 L-10,40 L-9,42 Z",
+  },
+  bali: {
+    // Bali is a small island; also handles nearby Lombok/Nusa Penida trips.
+    // Tight bounds so city markers (Ubud, Kuta, Denpasar) spread out nicely.
+    bounds: [[-9.0, 114.4], [-8.0, 115.75]],
+    path: "M114.5,-8.4 L114.6,-8.35 L114.85,-8.3 L115.15,-8.28 L115.4,-8.3 L115.6,-8.4 L115.7,-8.55 L115.6,-8.7 L115.4,-8.8 L115.15,-8.85 L114.85,-8.85 L114.6,-8.8 L114.5,-8.65 L114.45,-8.5 L114.5,-8.4 Z",
+  },
+  uae: {
+    // Dubai + Abu Dhabi + Sharjah cluster on the Gulf coast.
+    bounds: [[22, 51], [26.5, 56.5]],
+    path: "M51.5,24.5 L51.8,25 L52.5,25.4 L53.5,25.7 L54.5,25.9 L55.3,26.1 L56,26.3 L56.3,25.7 L56.1,25 L55.5,24.4 L54.5,24 L53.5,23.5 L52.5,23.2 L51.8,23.5 L51.5,24.5 Z",
+  },
+  srilanka: {
+    // Sri Lanka is a compact island — Colombo, Kandy, Galle, Ella, Sigiriya.
+    bounds: [[5.7, 79.4], [10.0, 82.1]],
+    path: "M79.7,8.5 L80,9.4 L80.5,9.7 L81,9.7 L81.5,9.3 L81.7,8.5 L81.8,7.5 L81.7,6.5 L81.3,5.9 L80.7,5.9 L80.2,6.3 L79.8,7.2 L79.6,8 L79.7,8.5 Z",
+  },
+  malaysia: {
+    // Peninsular Malaysia + Singapore (Malaysia does most of the coastline;
+    // Singapore appears as a marker in the south).
+    bounds: [[0.5, 99.0], [7.5, 105.0]],
+    path: "M100,6.5 L100.5,6.8 L101.5,6.5 L102.5,6.3 L103,5.5 L103.5,4.5 L104,3.5 L104.3,2.5 L104.2,1.5 L103.8,1.2 L103.2,1.3 L102.5,1.5 L102,2 L101.5,2.5 L101,3.5 L100.5,4.5 L100.2,5.5 L100,6.5 Z",
+  },
+  bhutan: {
+    // Small Himalayan kingdom — Thimphu, Paro, Punakha, Bumthang.
+    bounds: [[26.5, 88.5], [28.5, 92.2]],
+    path: "M88.7,26.9 L89,27.4 L89.6,27.9 L90.5,28.2 L91.5,28.3 L92,28 L92.1,27.4 L91.8,26.9 L91,26.7 L90,26.7 L89.3,26.75 L88.7,26.9 Z",
+  },
+  georgia: {
+    // Caucasus region — Tbilisi, Batumi, Kazbegi.
+    bounds: [[40.9, 39.9], [43.7, 46.9]],
+    path: "M40,42 L40.5,43 L41.5,43.5 L43,43.5 L44.5,43.4 L46,43 L46.7,42.5 L46.6,41.7 L45.5,41.3 L44,41.2 L42.5,41.2 L41.5,41.5 L40.5,41.7 L40,42 Z",
   },
 };
 
@@ -1741,13 +1819,29 @@ function detectMapRegionV2(stops) {
     const key = String(s.name || '').toLowerCase().trim();
     const c = CITY_COUNTRY[key];
     if (c) countries.add(c.toLowerCase());
-    if (/india|delhi|mumbai|chennai|kolkata|bengal|jaipur|goa|kerala|rajasthan|kashmir|himachal|uttarakhand|agra/i.test(s.name || '')) countries.add('india');
-    if (/vietnam|hanoi|saigon|ho chi|da nang|hoi an|hue|phu quoc|halong|ha long/i.test(s.name || '')) countries.add('vietnam');
-    if (/thailand|bangkok|pattaya|phuket|krabi|chiang mai|koh samui|samui/i.test(s.name || '')) countries.add('thailand');
+    const name = s.name || '';
+    if (/india|delhi|mumbai|chennai|kolkata|bengal|jaipur|goa|kerala|rajasthan|kashmir|himachal|uttarakhand|agra|udaipur|jodhpur|shimla|manali|leh|ladakh|amritsar|varanasi|rishikesh|haridwar|jaisalmer/i.test(name)) countries.add('india');
+    if (/vietnam|hanoi|saigon|ho chi|da nang|hoi an|hue|phu quoc|halong|ha long|sapa|nha trang|dalat|ninh binh/i.test(name)) countries.add('vietnam');
+    if (/thailand|bangkok|pattaya|phuket|krabi|chiang mai|koh samui|samui|hua hin|ayutthaya/i.test(name)) countries.add('thailand');
+    if (/bali|denpasar|ubud|kuta|seminyak|nusa|jimbaran|canggu|uluwatu|sanur/i.test(name)) countries.add('bali');
+    if (/uae|dubai|abu dhabi|sharjah|ajman|ras al khaimah|rak\b|fujairah/i.test(name)) countries.add('uae');
+    if (/sri ?lanka|colombo|kandy|galle|bentota|sigiriya|ella|nuwara|dambulla|habarana|yala|mirissa/i.test(name)) countries.add('srilanka');
+    if (/malaysia|kuala lumpur|\bkl\b|langkawi|penang|melaka|malacca|kota kinabalu|singapore/i.test(name)) countries.add('malaysia');
+    if (/bhutan|thimphu|paro|punakha|phobjikha|bumthang|wangdue/i.test(name)) countries.add('bhutan');
+    if (/georgia|tbilisi|batumi|kazbegi|mtskheta|gudauri|kutaisi|borjomi|azerbaijan|baku|armenia|yerevan/i.test(name)) countries.add('georgia');
+    // Broad European catch-all — any major European city triggers the
+    // continent view so cross-country tours (Paris + Rome, London + Amsterdam,
+    // MSC Med cruises) render on one map instead of falling back to no map.
+    if (/london|paris|rome|venice|milan|florence|naples|barcelona|madrid|amsterdam|frankfurt|munich|berlin|zurich|geneva|vienna|prague|lisbon|dublin|athens|santorini|mykonos|istanbul|budapest|copenhagen|stockholm|oslo|interlaken|lucerne|nice|monaco|dubrovnik|split|salzburg|innsbruck|europe/i.test(name)) countries.add('europe');
   });
-  if (countries.has('india') && countries.size === 1) return 'india';
-  if (countries.has('vietnam') && countries.size === 1) return 'vietnam';
-  if (countries.has('thailand') && countries.size === 1) return 'thailand';
+  // A single-country trip gets that country's outline.
+  // Multi-country trips within Europe render as one European map.
+  if (countries.size === 1) {
+    const only = [...countries][0];
+    if (COUNTRY_OUTLINES[only]) return only;
+  }
+  // Mixed European destinations across countries (all inside europe bounds)
+  if (countries.size > 1 && [...countries].every((c) => c === 'europe' || ['georgia'].includes(c))) return 'europe';
   return null;
 }
 
