@@ -6415,6 +6415,61 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 
 /* ─── DEAL DETAIL ────────────────────────────────────── */
 
+// ── Vendor payment history strip ────────────────────────────────────────
+// Shows every individual payment made to a vendor (kab kab, kaunse mode se,
+// kis reference se), matching V1's flight/hotel/land vendor cards. Rendered
+// below the progress bar inside each vendor card. Delete works via a single
+// patchDeal that rewrites the vendor's payments array.
+function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
+  const payments = vendor.payments || [];
+  if (!payments.length) return null;
+
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    try {
+      const dt = new Date(d);
+      if (isNaN(dt)) return String(d);
+      return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    } catch { return String(d); }
+  };
+
+  const removePayment = async (pmtId) => {
+    if (!window.confirm('Ye payment entry delete karni hai?')) return;
+    const nextVendors = (deal[arrayKey] || []).map((v) => v.id === vendor.id
+      ? { ...v, payments: (v.payments || []).filter((p) => p.id !== pmtId) }
+      : v);
+    const updated = await patchDeal(deal._id, { [arrayKey]: nextVendors });
+    onDealUpdated && onDealUpdated(updated);
+    window.veToast && window.veToast('Payment entry removed', 'success');
+  };
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #d4e0f5' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#4169E1', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>
+        Payment history ({payments.length} {payments.length === 1 ? 'entry' : 'entries'})
+      </div>
+      {payments.map((p, i) => (
+        <div key={p.id || i} style={{ display: 'grid', gridTemplateColumns: '22px 1fr 1.4fr 1fr 2fr 22px', gap: 8, alignItems: 'center', padding: '5px 8px', background: i % 2 === 0 ? '#f9fafc' : '#fff', borderRadius: 6, fontSize: 11.5 }}>
+          <span style={{ color: '#94a3b8', fontWeight: 700 }}>#{i + 1}</span>
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0d1b3e' }}>₹{(Number(p.amount) || 0).toLocaleString('en-IN')}</span>
+          <span style={{ color: '#334e82', fontWeight: 600 }}>{p.mode || '—'}</span>
+          <span style={{ color: '#6b7a99' }}>{fmtDate(p.date)}</span>
+          <span style={{ color: '#6b7a99', fontStyle: p.note ? 'normal' : 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.note}>
+            {p.note || 'no note'}
+          </span>
+          <button
+            onClick={() => removePayment(p.id)}
+            title="Delete this payment entry"
+            style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, padding: 0 }}
+            onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+            onMouseLeave={(e) => e.currentTarget.style.color = '#cbd5e1'}
+          >✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
@@ -7386,6 +7441,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={f} arrayKey="flightVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7477,6 +7533,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={t} arrayKey="trainVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7584,6 +7641,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={h} arrayKey="hotelVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7653,6 +7711,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={v} arrayKey="visaVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7727,6 +7786,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={l} arrayKey="landVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7789,6 +7849,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={c} arrayKey="cruiseVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
@@ -7842,6 +7903,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                           </div>
                         </div>
                       )}
+                      <VendorPaymentHistory vendor={ins} arrayKey="insuranceVendors" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
                     </div>
                   );
                 })}
