@@ -112,10 +112,39 @@ const authHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// Cached-fallback for the leads list. V1 kept a shadow copy of the whole
+// deals array in localStorage under a "_BACKUP" key and restored from it
+// when the primary key was corrupt. V2's data lives on the server, so the
+// equivalent safety net is: mirror every successful fetch into localStorage
+// and hand it back if the next fetch fails (network drop, server hiccup)
+// so the user can keep reading their data instead of staring at an error
+// screen. The `stale` flag lets the UI show a banner explaining that
+// what's shown may be a few minutes behind reality.
+const LEADS_CACHE_KEY = 'voyage_leads_cache_v1';
+const loadLeadsCache = () => {
+  try {
+    const raw = localStorage.getItem(LEADS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed; // { items, savedAt }
+  } catch { return null; }
+};
+const saveLeadsCache = (items) => {
+  try { localStorage.setItem(LEADS_CACHE_KEY, JSON.stringify({ items, savedAt: new Date().toISOString() })); }
+  catch { /* quota / private mode — ignore */ }
+};
+
 function useLeads() {
-  const [items, setItems] = useState([]);
+  // Prime from cache so the app renders instantly on a fresh page load
+  // instead of a blank screen — the network fetch below overrides once
+  // fresh data arrives.
+  const initialCache = loadLeadsCache();
+  const [items, setItems] = useState(initialCache ? initialCache.items : []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [stale, setStale] = useState(false);
+  const [staleSince, setStaleSince] = useState(initialCache ? initialCache.savedAt : null);
   const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
@@ -125,11 +154,22 @@ function useLeads() {
       .then((r) => r.ok ? r.json() : Promise.reject(r.status))
       .then((data) => {
         if (cancelled) return;
-        setItems(Array.isArray(data) ? data : (data.leads || []));
+        const list = Array.isArray(data) ? data : (data.leads || []);
+        setItems(list);
         setLoading(false);
+        setStale(false);
+        setStaleSince(null);
+        saveLeadsCache(list);
       })
       .catch((e) => {
         if (cancelled) return;
+        // Server unreachable — hand back the cache so the user isn't blocked.
+        const cache = loadLeadsCache();
+        if (cache && cache.items.length) {
+          setItems(cache.items);
+          setStale(true);
+          setStaleSince(cache.savedAt);
+        }
         setError(String(e));
         setLoading(false);
       });
@@ -138,7 +178,7 @@ function useLeads() {
 
   const refetch = useCallback(() => setReloadTick((t) => t + 1), []);
 
-  return { items, loading, error, refetch };
+  return { items, loading, error, refetch, stale, staleSince };
 }
 
 function useTasks() {
@@ -4781,68 +4821,100 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   );
 }
 
+// Module-scope (not inside AddTrainModal) — see the same-named comment on
+// SectorRowV2FlightBase for why. Defining this inside the parent function
+// makes React see a new component identity every render and remount inputs,
+// dropping focus after each keystroke ("freezing" the box).
+function SegmentRowV2TrainBase({ seg, onChange, onRemove, showRemove, label }) {
+  return (
+    <div style={{ border: '1px dashed #d4e0f5', borderRadius: 9, padding: '10px 12px', marginBottom: 8, background: '#fff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: .6, color: '#94a3b8' }}>{label}</span>
+        {showRemove && <button onClick={onRemove} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginBottom: 8 }}>
+        <input value={seg.trainNo || ''} onChange={(e) => onChange({ trainNo: e.target.value })} placeholder="12951" style={inputStyle} />
+        <input value={seg.trainName || ''} onChange={(e) => onChange({ trainName: e.target.value })} placeholder="Rajdhani Express" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={seg.from || ''} onChange={(e) => onChange({ from: e.target.value.toUpperCase() })} placeholder="From code (NDLS)" style={inputStyle} />
+        <input value={seg.to || ''} onChange={(e) => onChange({ to: e.target.value.toUpperCase() })} placeholder="To code (MMCT)" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={seg.fromStation || ''} onChange={(e) => onChange({ fromStation: e.target.value })} placeholder="From station name" style={inputStyle} />
+        <input value={seg.toStation || ''} onChange={(e) => onChange({ toStation: e.target.value })} placeholder="To station name" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <input value={seg.date || ''} onChange={(e) => onChange({ date: e.target.value })} placeholder="15 Oct 2026" style={inputStyle} />
+        <input value={seg.depTime || ''} onChange={(e) => onChange({ depTime: e.target.value })} placeholder="Dep 1630" style={inputStyle} />
+        <input value={seg.arrTime || ''} onChange={(e) => onChange({ arrTime: e.target.value })} placeholder="Arr 0800" style={inputStyle} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <select value={seg.classOfTravel || '3A'} onChange={(e) => onChange({ classOfTravel: e.target.value })} style={inputStyle}>
+          {TRAIN_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <input value={seg.coach || ''} onChange={(e) => onChange({ coach: e.target.value })} placeholder="Coach" style={inputStyle} />
+        <input value={seg.pnr || ''} onChange={(e) => onChange({ pnr: e.target.value })} placeholder="PNR" style={inputStyle} />
+      </div>
+    </div>
+  );
+}
+
 function AddTrainModal({ deal, editing, onClose, onSaved }) {
-  const [form, setForm] = useState(() => {
-    if (editing) {
-      const first = (editing.segments || [])[0] || {};
-      return {
-        name: editing.name || '', currency: editing.currency || 'INR',
-        costPrice: editing.costPrice != null ? String(editing.costPrice) : '',
-        sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
-        exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
-        trainNo: first.trainNo || '', trainName: first.trainName || '',
-        from: first.from || '', fromStation: first.fromStation || '', to: first.to || '', toStation: first.toStation || '',
-        date: first.date || '', depTime: first.depTime || '', arrTime: first.arrTime || '',
-        classOfTravel: first.classOfTravel || '3A', pnr: first.pnr || '',
-        paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
-      };
-    }
-    return {
-      name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
-      trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '',
-      date: '', depTime: '', arrTime: '', classOfTravel: '3A', pnr: '',
-      paxPricing: false, paxRates: {},
-    };
-  });
-  const [aiSegments, setAiSegments] = useState(() => editing ? (editing.segments || null) : null);
-  const [aiReturnSegments, setAiReturnSegments] = useState(() => editing ? (editing.returnSegments || null) : null);
+  const emptySeg = () => ({ trainNo: '', trainName: '', from: '', fromStation: '', to: '', toStation: '', date: '', depTime: '', arrTime: '', classOfTravel: '3A', coach: '', pnr: '' });
+
+  const [name, setName] = useState(editing ? (editing.name || '') : '');
+  const [currency, setCurrency] = useState(editing ? (editing.currency || 'INR') : 'INR');
+  const [costPrice, setCostPrice] = useState(editing && editing.costPrice != null ? String(editing.costPrice) : '');
+  const [sellingPrice, setSellingPrice] = useState(editing && editing.sellingPrice != null ? String(editing.sellingPrice) : '');
+  const [exchangeRate, setExchangeRate] = useState(editing && editing.exchangeRate != null ? String(editing.exchangeRate) : '');
+  const [paxPricing, setPaxPricing] = useState(editing ? !!editing.paxPricing : false);
+  const [paxRates, setPaxRates] = useState(editing ? (editing.paxRates || {}) : {});
+
+  // Trip type + multi-segment support — V1 lets a single train vendor hold
+  // multiple legs (Delhi→Agra→Mumbai transit), and a separate return list.
+  // V2 was silently capping the manual form at the first segment even though
+  // the schema already stored an array, so a real multi-leg trip could only
+  // be captured through AI extract, not by hand.
+  const [tripType, setTripType] = useState(editing ? (editing.tripType || ((editing.returnSegments && editing.returnSegments.length) ? 'return' : (editing.segments && editing.segments.length > 1 ? 'multi-city' : 'one-way'))) : 'one-way');
+  const [segments, setSegments] = useState(editing && editing.segments && editing.segments.length ? editing.segments : [emptySeg()]);
+  const [returnSegments, setReturnSegments] = useState(editing && editing.returnSegments && editing.returnSegments.length ? editing.returnSegments : [emptySeg()]);
+
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const updSeg = (list, setList, i, patch) => setList((arr) => arr.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+  const addSeg = (setList) => setList((arr) => [...arr, emptySeg()]);
+  const rmSeg = (setList) => (i) => setList((arr) => arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr);
 
   const processFiles = async (files) => {
     if (!files.length) return;
-    setExtracting(true);
-    setErr('');
+    setExtracting(true); setErr('');
     try {
       const j = await runAIExtract('train', files);
       const mapSeg = (x) => ({
         trainNo: x.trainNo || '', trainName: x.trainName || '',
-        from: x.from || '', fromStation: x.fromStation || '', to: x.to || '', toStation: x.toStation || '',
+        from: (x.from || '').toUpperCase(), fromStation: x.fromStation || '', to: (x.to || '').toUpperCase(), toStation: x.toStation || '',
         date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
-        classOfTravel: x.classOfTravel || '', coach: x.coach || '', pnr: x.pnr || '',
+        classOfTravel: x.classOfTravel || '3A', coach: x.coach || '', pnr: x.pnr || '',
       });
       const segs = (j.segments || []).map(mapSeg);
       const retSegs = (j.returnSegments || []).map(mapSeg);
       if (!segs.length) throw new Error('No train details found in this file');
-      setAiSegments(segs);
-      setAiReturnSegments(retSegs);
-      const first = segs[0];
-      setForm((f) => ({
-        ...f,
-        name: j.vendorName || first.trainName || f.name,
-        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
-        trainNo: first.trainNo, trainName: first.trainName,
-        from: first.from, fromStation: first.fromStation, to: first.to, toStation: first.toStation,
-        date: first.date, depTime: first.depTime, arrTime: first.arrTime,
-        classOfTravel: first.classOfTravel || f.classOfTravel, pnr: first.pnr,
-      }));
+
+      let type = retSegs.length ? 'return' : (segs.length > 1 ? 'multi-city' : 'one-way');
+      setTripType(type);
+      setSegments(segs);
+      setReturnSegments(retSegs.length ? retSegs : [emptySeg()]);
+      if (!name.trim()) setName(j.vendorName || segs[0].trainName || '');
+      if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
+
       const totalLegs = segs.length + retSegs.length;
       setAiSummary(
         totalLegs > 1
-          ? `✓ Extracted ${segs.length} outbound + ${retSegs.length} return segment${retSegs.length !== 1 ? 's' : ''} — all will be saved.`
+          ? `✓ Extracted ${segs.length} outbound + ${retSegs.length} return segment${retSegs.length !== 1 ? 's' : ''} — all editable below.`
           : '✓ Extracted — review the fields below before saving.'
       );
       window.veToast && window.veToast('Train details extracted ✓', 'success');
@@ -4853,37 +4925,23 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
     }
   };
 
-  const handleFiles = (e) => {
-    const files = Array.from(e.target.files || []);
-    processFiles(files);
-    e.target.value = '';
-  };
-
   const submit = async () => {
-    if (!form.name.trim() && !form.trainName.trim()) { setErr('Train name is required'); return; }
-    setSaving(true);
-    setErr('');
+    const validSegs = segments.filter((s) => s.from || s.to || s.trainName);
+    if (!name.trim() && !validSegs.length) { setErr('Train name is required'); return; }
+    if (!validSegs.length) { setErr('Add at least one segment'); return; }
+    setSaving(true); setErr('');
     try {
-      const firstLeg = {
-        trainNo: form.trainNo, trainName: form.trainName,
-        from: form.from, fromStation: form.fromStation, to: form.to, toStation: form.toStation,
-        date: form.date, depTime: form.depTime, arrTime: form.arrTime,
-        classOfTravel: form.classOfTravel, pnr: form.pnr,
-      };
-      const finalSegments = (aiSegments && aiSegments.length) ? [firstLeg, ...aiSegments.slice(1)] : [firstLeg];
       const vendorFields = {
-        name: form.name || form.trainName,
-        currency: form.currency,
-        costPrice: Number(form.costPrice) || 0,
-        sellingPrice: Number(form.sellingPrice) || 0,
-        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
-        tripType: aiReturnSegments && aiReturnSegments.length ? 'return' : 'one-way',
-        isInternational: false,
-        segments: finalSegments,
-        returnSegments: aiReturnSegments || [],
-        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        name: name || validSegs[0].trainName,
+        currency,
+        costPrice: Number(costPrice) || 0,
+        sellingPrice: Number(sellingPrice) || 0,
+        exchangeRate: currency === 'INR' ? 1 : (Number(exchangeRate) || 0),
+        tripType,
+        segments: validSegs,
+        returnSegments: tripType === 'return' ? returnSegments.filter((s) => s.from || s.to || s.trainName) : [],
+        paxPricing, paxRates: paxPricing ? paxRates : {},
       };
-
       if (editing) {
         const updatedList = (deal.trainVendors || []).map((t) => t.id === editing.id ? { ...t, ...vendorFields } : t);
         const updated = await patchDeal(deal._id, { trainVendors: updatedList });
@@ -4891,7 +4949,6 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         onSaved(updated);
         return;
       }
-
       const newVendor = { id: 'tr_' + Date.now(), ...vendorFields, payments: [] };
       const updated = await patchDeal(deal._id, { trainVendors: [...(deal.trainVendors || []), newVendor] });
       window.veToast && window.veToast('Train added ✓', 'success');
@@ -4904,67 +4961,66 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Train' : '+ Add Train'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      {!editing && (
-        <PasteZone hint="Click here, then paste (Ctrl+V) a ticket screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+      <PasteZone hint="Click here, then paste (Ctrl+V) a ticket screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Booking Name</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="IRCTC / agent name (optional — auto-fills from train name)" style={inputStyle} />
+      </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 4 }}>TRIP TYPE</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+        {[['one-way', '→ One Way'], ['return', '⇄ Return'], ['multi-city', '⊞ Multi Segment']].map(([v, l]) => (
+          <button key={v} type="button" onClick={() => setTripType(v)}
+            style={{ flex: 1, border: '1px solid ' + (tripType === v ? '#f97316' : '#c2d2ee'), background: tripType === v ? '#f9731610' : 'transparent', color: tripType === v ? '#f97316' : '#6b7a99', borderRadius: 20, padding: '7px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{l}</button>
+        ))}
+      </div>
+
+      {tripType !== 'return' && (
+        <div>
+          <div style={{ fontSize: 10, color: '#f97316', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>{tripType === 'multi-city' ? 'SEGMENTS (IN JOURNEY ORDER)' : 'SEGMENT'}</div>
+          {segments.map((s, i) => (
+            <SegmentRowV2TrainBase key={i} seg={s} label={`Segment ${i + 1}`} showRemove={segments.length > 1}
+              onChange={(patch) => updSeg(segments, setSegments, i, patch)} onRemove={() => rmSeg(setSegments)(i)} />
+          ))}
+          <button type="button" onClick={() => addSeg(setSegments)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Segment</button>
+        </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+
+      {tripType === 'return' && (
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Train No.</div>
-          <input value={form.trainNo} onChange={set('trainNo')} placeholder="12951" style={inputStyle} />
+          <div style={{ fontSize: 10, color: '#15803d', fontWeight: 700, letterSpacing: 1.5, marginTop: 8, marginBottom: 6 }}>OUTBOUND</div>
+          {segments.map((s, i) => (
+            <SegmentRowV2TrainBase key={i} seg={s} label={`Segment ${i + 1}`} showRemove={segments.length > 1}
+              onChange={(patch) => updSeg(segments, setSegments, i, patch)} onRemove={() => rmSeg(setSegments)(i)} />
+          ))}
+          <button type="button" onClick={() => addSeg(setSegments)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82', marginBottom: 12 }}>+ Add Outbound Segment</button>
+          <div style={{ borderTop: '1px dashed #c2d2ee', margin: '10px 0' }} />
+          <div style={{ fontSize: 10, color: '#4169E1', fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>RETURN</div>
+          {returnSegments.map((s, i) => (
+            <SegmentRowV2TrainBase key={i} seg={s} label={`Segment ${i + 1}`} showRemove={returnSegments.length > 1}
+              onChange={(patch) => updSeg(returnSegments, setReturnSegments, i, patch)} onRemove={() => rmSeg(setReturnSegments)(i)} />
+          ))}
+          <button type="button" onClick={() => addSeg(setReturnSegments)} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: '#334e82' }}>+ Add Return Segment</button>
         </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Train Name *</div>
-          <input value={form.trainName} onChange={set('trainName')} placeholder="Rajdhani Express" style={inputStyle} />
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (station code)</div>
-          <input value={form.from} onChange={set('from')} placeholder="NDLS" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (station code)</div>
-          <input value={form.to} onChange={set('to')} placeholder="MMCT" style={inputStyle} />
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>From (station name)</div>
-          <input value={form.fromStation} onChange={set('fromStation')} placeholder="New Delhi" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>To (station name)</div>
-          <input value={form.toStation} onChange={set('toStation')} placeholder="Mumbai Central" style={inputStyle} />
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
-          <input value={form.date} onChange={set('date')} placeholder="15 Oct 2026" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Dep Time</div>
-          <input value={form.depTime} onChange={set('depTime')} placeholder="1630" style={inputStyle} />
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Arr Time</div>
-          <input value={form.arrTime} onChange={set('arrTime')} placeholder="0800" style={inputStyle} />
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Class</div>
-          <select value={form.classOfTravel} onChange={set('classOfTravel')} style={inputStyle}>
-            {TRAIN_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>PNR</div>
-          <input value={form.pnr} onChange={set('pnr')} placeholder="10-digit PNR" style={inputStyle} />
-        </div>
-      </div>
-      <CurrencyCostRow form={form} setForm={setForm} />
-      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
+      )}
+
+      <CurrencyCostRow form={{ currency, costPrice, sellingPrice, exchangeRate }} setForm={(fn) => {
+        const cur = { currency, costPrice, sellingPrice, exchangeRate };
+        const next = typeof fn === 'function' ? fn(cur) : fn;
+        if (next.currency !== undefined) setCurrency(next.currency);
+        if (next.costPrice !== undefined) setCostPrice(next.costPrice);
+        if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
+        if (next.exchangeRate !== undefined) setExchangeRate(next.exchangeRate);
+      }} />
+      <PaxRatesFields form={{ paxPricing, paxRates, costPrice, sellingPrice }} deal={deal} setForm={(fn) => {
+        const cur = { paxPricing, paxRates, costPrice, sellingPrice };
+        const next = typeof fn === 'function' ? fn(cur) : fn;
+        if (next.paxPricing !== undefined) setPaxPricing(next.paxPricing);
+        if (next.paxRates !== undefined) setPaxRates(next.paxRates);
+        if (next.costPrice !== undefined) setCostPrice(next.costPrice);
+        if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
+      }} />
     </ModalShell>
   );
 }
@@ -6613,6 +6669,82 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     }
   };
 
+  // ── Receipt generator ─────────────────────────────────────────────────
+  // Opens a print-ready receipt in a new tab for a specific client payment.
+  // Ports V1's Receipt component but skips the modal preview step (people
+  // print or Save-as-PDF straight from the browser). Receipt no. combines
+  // deal number + payment sequence so it's stable across reprints and can
+  // be traced back — matters for GST / bookkeeping reconciliation.
+  const printReceipt = (payment) => {
+    const idx = (deal.clientPayments || []).findIndex((p) => p === payment);
+    const seq = idx >= 0 ? String(idx + 1).padStart(2, '0') : String(Date.now()).slice(-4);
+    const rcpNo = `${deal.dealNumber || 'VE'}-R${seq}`;
+    const money = (n) => '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const dateFmt = (d) => {
+      if (!d) return '—';
+      try { const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return String(d); }
+    };
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt ${rcpNo}</title>
+<style>
+  @page{size:A5;margin:14mm}
+  body{font-family:'Segoe UI',system-ui,sans-serif;color:#1a2c52;max-width:640px;margin:0 auto;padding:32px 40px;background:#fff}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c9961a;padding-bottom:16px;margin-bottom:22px}
+  .logo{font-family:'Playfair Display',Georgia,serif;font-size:26px;font-weight:800;color:#0d1b3e;letter-spacing:-.5px}
+  .tag{font-size:9px;letter-spacing:2.5px;color:#c9961a;font-weight:800;margin-top:2px}
+  .subhead{text-align:right}
+  .subhead .label{font-size:9px;letter-spacing:2px;color:#6b7a99;font-weight:700}
+  .subhead .val{font-family:monospace;font-size:14px;font-weight:800;color:#0d1b3e;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  th,td{padding:9px 4px;font-size:12.5px;border-bottom:1px dashed #e3eaf7;text-align:left;vertical-align:top}
+  th{font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800;width:38%}
+  td{color:#0d1b3e;font-weight:600}
+  .amount-box{background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border-radius:12px;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;margin:20px 0 24px}
+  .amount-box .lbl{font-size:10px;letter-spacing:2.5px;color:#f0c842;font-weight:800}
+  .amount-box .val{font-family:Georgia,serif;font-size:24px;font-weight:800}
+  .footer{text-align:center;font-size:10px;color:#6b7a99;margin-top:22px;line-height:1.7}
+  .footer .co{font-weight:700;color:#0d1b3e}
+  .sig{margin-top:36px;display:flex;justify-content:space-between;font-size:10px;color:#6b7a99}
+  .sig .line{border-top:1px solid #94a3b8;width:170px;padding-top:4px;text-align:center}
+  @media print{.noprint{display:none}}
+</style></head><body>
+  <div class="hdr">
+    <div><div class="logo">Voyage-Ed Travels</div><div class="tag">Payment Receipt</div></div>
+    <div class="subhead">
+      <div class="label">RECEIPT NO</div><div class="val">${esc(rcpNo)}</div>
+      <div class="label" style="margin-top:8px">DATE</div><div class="val">${esc(dateFmt(payment.date || new Date()))}</div>
+    </div>
+  </div>
+  <table>
+    <tr><th>Received From</th><td>${esc(clientName(deal))}${deal.contactNo ? ' · ' + esc(deal.contactNo) : ''}</td></tr>
+    ${deal.email ? `<tr><th>Email</th><td>${esc(deal.email)}</td></tr>` : ''}
+    <tr><th>Booking Ref</th><td>${esc(deal.dealNumber || '—')}${destination(deal) ? ' · ' + esc(destination(deal)) : ''}</td></tr>
+    ${deal.travelDates ? `<tr><th>Travel</th><td>${esc(deal.travelDates)}</td></tr>` : ''}
+    <tr><th>Mode of Payment</th><td>${esc(payment.mode || 'Cash')}</td></tr>
+    ${payment.note ? `<tr><th>Reference / Note</th><td>${esc(payment.note)}</td></tr>` : ''}
+  </table>
+  <div class="amount-box"><span class="lbl">AMOUNT RECEIVED</span><span class="val">${money(payment.amount)}</span></div>
+  <table>
+    <tr><th>Total Package Value</th><td>${money(sellINR(deal))}</td></tr>
+    <tr><th>Total Received (incl. this)</th><td>${money(paidINR(deal))}</td></tr>
+    <tr><th>Balance Due</th><td style="color:${netSellINR(deal) - paidINR(deal) > 0 ? '#dc2626' : '#15803d'}">${money(Math.max(0, netSellINR(deal) - paidINR(deal)))}</td></tr>
+  </table>
+  <div class="sig"><div class="line">Received By (Voyage-Ed)</div><div class="line">Client Signature</div></div>
+  <div class="footer">
+    <div class="co">Voyage-Ed Travels</div>
+    Cabin 1, SCO 1072-1073, Sector 22B, Chandigarh 160022 · +91 70096 59048 · enquiry@voyage-ed.com<br>
+    Computer-generated receipt — no physical signature required. Retain for your records.
+  </div>
+  <div class="noprint" style="text-align:center;margin-top:26px">
+    <button onclick="window.print()" style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:8px;padding:11px 24px;font-weight:800;font-size:12px;cursor:pointer">🖨 Print / Save as PDF</button>
+  </div>
+</body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { window.veToast && window.veToast('Popup blocked — allow popups for this site', 'warning'); return; }
+    w.document.write(html); w.document.close();
+  };
+
   const deletePayment = async (payment) => {
     if (!window.confirm('Delete this payment record? This does not undo the payment itself — use it only to fix a mistaken entry.')) return;
     setBusy(true);
@@ -8167,6 +8299,11 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
                         <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
                         <div className="v2-schedule-status paid">Paid</div>
                       </div>
+                      <button
+                        onClick={() => printReceipt(p)}
+                        title="Print / Save receipt PDF for this payment"
+                        style={{ background: 'none', border: 'none', color: '#0d1b3e', cursor: 'pointer', fontSize: 14 }}
+                      >🧾</button>
                       <button
                         onClick={() => deletePayment(p)}
                         disabled={busy}
@@ -10322,7 +10459,7 @@ const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals',
 export default function V2Pages() {
   const [route, setRoute] = useState('dashboard');
   const [selectedDeal, setSelectedDeal] = useState(null);
-  const { items, loading, error, refetch } = useLeads();
+  const { items, loading, error, refetch, stale, staleSince } = useLeads();
   const { tasks, refetch: refetchTasks } = useTasks();
 
   const navigate = useCallback((key) => {
@@ -10378,7 +10515,11 @@ export default function V2Pages() {
     );
   }
 
-  if (error) {
+  // Only fully block the UI when the server is unreachable AND we have no
+  // cached data to fall back on. If cache exists the user can keep working;
+  // a stale banner (rendered below the header via StaleBanner) tells them
+  // what they're seeing may be a few minutes behind.
+  if (error && !items.length) {
     return (
       <main className="v2-page">
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, padding: 24, color: '#dc2626' }}>
@@ -10392,8 +10533,20 @@ export default function V2Pages() {
     );
   }
 
+  const staleBanner = (stale && staleSince) ? (
+    <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', color: '#7a5c10', padding: '9px 14px', borderRadius: 10, fontSize: 12.5, margin: '10px 20px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 16 }}>⚠️</span>
+      <span style={{ flex: 1 }}>Server se connect nahi ho paya — dikha rahe hain <b>cached data</b> ({new Date(staleSince).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} tak ka). Naye edits jab connection wapas aayega tab save honge.</span>
+      <button onClick={refetch} style={{ background: '#7a5c10', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>↻ Retry</button>
+    </div>
+  ) : null;
+
+  // Wrap every route in a fragment so the stale banner can sit above the
+  // page content without changing existing layouts.
+  const wrap = (child) => <>{staleBanner}{child}</>;
+
   if (route === 'deal' && selectedDeal) {
-    return (
+    return wrap(
       <DealDetailV2
         deal={selectedDeal}
         allLeads={items}
@@ -10402,35 +10555,15 @@ export default function V2Pages() {
       />
     );
   }
-  if (route === 'deals') {
-    return <LeadsV2 leads={items} onDealClick={openDeal} mode="booked" onLeadCreated={refetch} />;
-  }
-  if (route === 'leads') {
-    return <LeadsV2 leads={items} onDealClick={openDeal} mode="active" onLeadCreated={refetch} />;
-  }
-  if (route === 'clients') {
-    return <ClientsV2 leads={items} onDealClick={openDeal} />;
-  }
-  if (route === 'proposals') {
-    return <ProposalsV2 leads={items} onDealClick={openDeal} />;
-  }
-  if (route === 'vendors') {
-    return <VendorsV2 leads={items} />;
-  }
-  if (route === 'visa') {
-    return <VisaFilingsV2 leads={items} onDealClick={openDeal} />;
-  }
-  if (route === 'tasks') {
-    return <TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />;
-  }
-  if (route === 'accounts') {
-    return <AccountsV2 leads={items} onDealClick={openDeal} />;
-  }
-  if (route === 'reports') {
-    return <ReportsV2 leads={items} />;
-  }
-  if (route === 'users') {
-    return <UsersV2 />;
-  }
-  return <DashboardV2 leads={items} onDealClick={openDeal} />;
+  if (route === 'deals') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="booked" onLeadCreated={refetch} />);
+  if (route === 'leads') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="active" onLeadCreated={refetch} />);
+  if (route === 'clients') return wrap(<ClientsV2 leads={items} onDealClick={openDeal} />);
+  if (route === 'proposals') return wrap(<ProposalsV2 leads={items} onDealClick={openDeal} />);
+  if (route === 'vendors') return wrap(<VendorsV2 leads={items} />);
+  if (route === 'visa') return wrap(<VisaFilingsV2 leads={items} onDealClick={openDeal} />);
+  if (route === 'tasks') return wrap(<TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />);
+  if (route === 'accounts') return wrap(<AccountsV2 leads={items} onDealClick={openDeal} />);
+  if (route === 'reports') return wrap(<ReportsV2 leads={items} />);
+  if (route === 'users') return wrap(<UsersV2 />);
+  return wrap(<DashboardV2 leads={items} onDealClick={openDeal} />);
 }
