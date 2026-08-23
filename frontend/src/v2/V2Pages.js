@@ -6823,6 +6823,68 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     setBusy(false);
   };
 
+  // ── Duplicate this entire deal — everything copied over (vendors, tiers,
+  // pricing, itinerary, remarks) EXCEPT the money already flowing (client
+  // payments, refunds, cancellations, vendor payment history) and the
+  // record identity (fresh _id, no enquiryId link). Vendors keep their
+  // details but get new ids so future edits don't touch the original deal's
+  // vendors. Used for e.g. same package repeat clients or a rebook after
+  // cancellation. Ports V1's duplicateDeal() with the addition of new
+  // vendor-id generation which V1's frontend-only local storage didn't need.
+  const duplicateDeal = async () => {
+    if (!window.confirm('Is deal ki full copy banani hai? Client name pe "(Copy)" lag jayega, payments aur refunds reset ho jayenge — baaki sab (vendors, itinerary, pricing, remarks) as-is copy hoga.')) return;
+    setBusy(true);
+    try {
+      const newVendorId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const cloneVendor = (v, prefix) => ({ ...v, id: newVendorId(prefix), payments: [] });
+      const nowIso = new Date().toISOString();
+      const src = deal;
+      const copy = {
+        // Client identity — kept, with "(Copy)" suffix so the two are distinguishable at a glance
+        clientName: (src.clientName || 'Client') + ' (Copy)',
+        contactNo: src.contactNo, email: src.email,
+        leadSource: src.leadSource, priority: src.priority, modeOfQuery: src.modeOfQuery,
+        adults: src.adults, children: src.children, infants: src.infants,
+        // Deliberately DROPPED from the copy — a duplicate is a fresh enquiry:
+        //   enquiryId (would link to source), _id (must be new record),
+        //   dealNumber (backend re-assigns), clientPayments, refunds,
+        //   cancellations, auditLog, createdAt (server sets fresh)
+        // Trip content — copied as-is
+        destination: src.destination, travelDates: src.travelDates, remarks: src.remarks,
+        // Vendors — deep-copy each list, mint fresh ids so future edits don't leak back to the source deal, and reset per-vendor payment history
+        flightVendors: (src.flightVendors || []).map((v) => cloneVendor(v, 'fl')),
+        trainVendors: (src.trainVendors || []).map((v) => cloneVendor(v, 'tr')),
+        hotelVendors: (src.hotelVendors || []).map((v) => cloneVendor(v, 'ht')),
+        landVendors: (src.landVendors || []).map((v) => cloneVendor(v, 'ln')),
+        visaVendors: (src.visaVendors || []).map((v) => cloneVendor(v, 'vs')),
+        cruiseVendors: (src.cruiseVendors || []).map((v) => cloneVendor(v, 'cr')),
+        insuranceVendors: (src.insuranceVendors || []).map((v) => cloneVendor(v, 'is')),
+        // Deal-level pricing / display — copied
+        gstMode: src.gstMode, pricingRows: src.pricingRows,
+        tiers: src.tiers, useTiers: src.useTiers,
+        aiItineraryText: src.aiItineraryText, aiItineraryVibe: src.aiItineraryVibe,
+        // Fresh stage — a duplicate always starts as an unactioned new lead
+        stage: 'New Lead',
+        // Travellers reset — those were specific to the source booking; user
+        // should re-add for the new enquiry (avoids stale traveller refs
+        // inside vendor.travellerIds later).
+        travellers: [],
+      };
+      const res = await fetch(`${apiBase()}/api/leads`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(copy),
+      });
+      const created = await res.json();
+      if (!res.ok) throw new Error(created.error || 'Duplicate failed');
+      window.veToast && window.veToast('⧉ Deal duplicate ho gayi — payments/refunds fresh, baaki sab as-is. Client name update kar lo ✏️', 'success');
+      if (window.__voyagePagesOpenDeal) window.__voyagePagesOpenDeal(created);
+      else if (onDealUpdated) { onDealUpdated(created); setDeal(created); }
+    } catch (e) {
+      window.veToast && window.veToast('Duplicate failed: ' + e.message, 'warning');
+    }
+    setBusy(false);
+  };
+
   const waPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
   const waNum = waPhone.length === 10 ? '91' + waPhone : waPhone;
   const waLink = () => {
@@ -6970,6 +7032,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
               <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
             )}
             <button className="v2-hero-btn" onClick={addDestination} disabled={busy} title="Same client ke liye naya destination banao — details automatic copy ho jayengi">➕ Add Destination</button>
+            <button className="v2-hero-btn" onClick={duplicateDeal} disabled={busy} title="Full duplicate — vendors/itinerary/pricing copy, payments/refunds fresh">⧉ Duplicate</button>
             <button className="v2-hero-btn gold" onClick={() => setModal('proposalBuilder')}>📄 Proposal PDF</button>
             <button className="v2-hero-btn" onClick={() => {
               const w = window.open('', '_blank');
