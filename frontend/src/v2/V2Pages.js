@@ -597,22 +597,21 @@ function DashboardV2({ leads, onDealClick }) {
   // the running period rather than an ever-growing all-time total. Money
   // still owed in either direction stays all-time — see stats below.
   const cycle = useMemo(() => cycleFor(new Date().toISOString().slice(0, 10)), []);
-  const cycleBooked = useMemo(() => booked.filter((d) => {
-    // Pick the date this deal actually converted to Booked. In priority:
-    // (1) the "Booked" entry in the audit log if the stage change was logged,
-    // (2) the first client payment date (typical converter for older deals),
-    // (3) createdAt as a last resort. Using this instead of ONLY first payment
-    // date means a deal that got a small advance in July but was booked today
-    // still shows in today's cycle — matches user's mental model that "abhi
-    // book kiya to abhi count hona chahiye". Otherwise deals with any earlier
-    // advance payment silently fell into previous cycles and never appeared.
-    const bookedLog = (d.auditLog || []).find((l) => /booked|booking/i.test(l.title || ''));
-    const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
-    const fp = firstPaymentDateOf(d);
-    const created = d.createdAt ? String(d.createdAt).slice(0, 10) : null;
-    const anchor = bookedAt || fp || created;
-    return cycle && anchor && anchor >= cycle.start && anchor <= cycle.end;
-  }), [booked, cycle]);
+  const cycleBucketing = useMemo(() => {
+    // Return per-deal bucketing info so a diagnostic panel below can show
+    // exactly why any booked deal is (or isn't) in the current cycle.
+    return booked.map((d) => {
+      const bookedLog = (d.auditLog || []).find((l) => /booked|booking/i.test(l.title || ''));
+      const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
+      const fp = firstPaymentDateOf(d);
+      const created = d.createdAt ? String(d.createdAt).slice(0, 10) : null;
+      const anchor = bookedAt || fp || created;
+      const source = bookedAt ? 'Booked-log' : fp ? 'First-payment' : created ? 'Created' : 'NONE';
+      const inCycle = cycle && anchor && anchor >= cycle.start && anchor <= cycle.end;
+      return { d, bookedAt, fp, created, anchor, source, inCycle };
+    });
+  }, [booked, cycle]);
+  const cycleBooked = useMemo(() => cycleBucketing.filter((x) => x.inCycle).map((x) => x.d), [cycleBucketing]);
 
   const stats = useMemo(() => {
     // Cycle-scoped revenue figures
@@ -783,6 +782,34 @@ function DashboardV2({ leads, onDealClick }) {
         ✅ Booked — {stats.bookings} deal{stats.bookings !== 1 ? 's' : ''}
         <span style={{ fontSize: 12, fontWeight: 600, color: '#c9961a', marginLeft: 10 }}>{cycle ? cycle.label : ''} (16→15 cycle)</span>
       </h2>
+      {(() => {
+        // Show a diagnostic strip if there are booked deals that DIDN'T make
+        // it into the current cycle — so the owner can see at a glance why
+        // (which date each deal is being anchored to) instead of guessing.
+        // Only renders when there's something worth explaining.
+        const excluded = cycleBucketing.filter((x) => !x.inCycle);
+        if (excluded.length === 0) return null;
+        return (
+          <details style={{ background: '#f9fafc', border: '1px solid #e3eaf7', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
+            <summary style={{ cursor: 'pointer', color: '#6b7a99', fontWeight: 600 }}>ℹ️ {excluded.length} booked deal{excluded.length !== 1 ? 's' : ''} outside this cycle — click to see why</summary>
+            <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>Cycle is anchored to (in order): "Stage → Booked" audit entry, then first client payment, then createdAt. Deals below fall outside {cycle && cycle.start} → {cycle && cycle.end}.</div>
+            <table style={{ width: '100%', fontSize: 11, fontFamily: 'monospace' }}>
+              <thead><tr style={{ color: '#6b7a99', textAlign: 'left' }}><th>Deal</th><th>Booked-log</th><th>First-pmt</th><th>Created</th><th>Anchor</th></tr></thead>
+              <tbody>
+                {excluded.slice(0, 20).map((x, i) => (
+                  <tr key={i} style={{ borderTop: '1px dashed #e3eaf7' }}>
+                    <td style={{ padding: '4px 0' }}>{clientName(x.d)} <span style={{ color: '#94a3b8' }}>{x.d.dealNumber || ''}</span></td>
+                    <td>{x.bookedAt || <span style={{ color: '#cbd5e1' }}>—</span>}</td>
+                    <td>{x.fp || <span style={{ color: '#cbd5e1' }}>—</span>}</td>
+                    <td>{x.created || <span style={{ color: '#cbd5e1' }}>—</span>}</td>
+                    <td><b>{x.anchor || 'NONE'}</b> <span style={{ color: '#94a3b8' }}>({x.source})</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        );
+      })()}
       <div className="v2-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' }}>
         <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Sale Price — This Cycle', null, sellINR, 'Sale Price', 'cycle')}>
           <div className="v2-kpi-label">Sale Price (TTV)</div>
