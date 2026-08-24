@@ -598,8 +598,20 @@ function DashboardV2({ leads, onDealClick }) {
   // still owed in either direction stays all-time — see stats below.
   const cycle = useMemo(() => cycleFor(new Date().toISOString().slice(0, 10)), []);
   const cycleBooked = useMemo(() => booked.filter((d) => {
+    // Pick the date this deal actually converted to Booked. In priority:
+    // (1) the "Booked" entry in the audit log if the stage change was logged,
+    // (2) the first client payment date (typical converter for older deals),
+    // (3) createdAt as a last resort. Using this instead of ONLY first payment
+    // date means a deal that got a small advance in July but was booked today
+    // still shows in today's cycle — matches user's mental model that "abhi
+    // book kiya to abhi count hona chahiye". Otherwise deals with any earlier
+    // advance payment silently fell into previous cycles and never appeared.
+    const bookedLog = (d.auditLog || []).find((l) => /booked|booking/i.test(l.title || ''));
+    const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
     const fp = firstPaymentDateOf(d);
-    return cycle && fp && fp >= cycle.start && fp <= cycle.end;
+    const created = d.createdAt ? String(d.createdAt).slice(0, 10) : null;
+    const anchor = bookedAt || fp || created;
+    return cycle && anchor && anchor >= cycle.start && anchor <= cycle.end;
   }), [booked, cycle]);
 
   const stats = useMemo(() => {
@@ -6831,9 +6843,20 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const saveClientEdit = async () => {
     setSavingClient(true);
     try {
+      // Log every save. Two cases where we anchor a "Stage → Booked" entry
+      // for cycle bucketing:
+      //   (a) stage just flipped INTO Booked in THIS save, or
+      //   (b) deal is already Booked but has NO booking log yet (legacy deals
+      //       saved before this logging was added — anchor them the first
+      //       time the user re-saves so they show up on the dashboard).
+      const auditEntries = [logEntry('Client details updated')];
+      const wasBooked = /booked|completed/i.test(String(deal.stage || ''));
+      const willBeBooked = /booked|completed/i.test(String(clientForm.stage || ''));
+      const hasBookedLog = (deal.auditLog || []).some((l) => /booked|booking/i.test(l.title || ''));
+      if (willBeBooked && (!wasBooked || !hasBookedLog)) auditEntries.push(logEntry(`Stage → Booked`));
       const updated = await patchDeal(deal._id, {
         ...clientForm,
-        auditLog: [...(deal.auditLog || []), logEntry('Client details updated')],
+        auditLog: [...(deal.auditLog || []), ...auditEntries],
       });
       window.veToast && window.veToast('Saved ✓', 'success');
       setEditingClient(false);
