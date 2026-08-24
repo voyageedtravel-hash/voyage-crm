@@ -10956,7 +10956,15 @@ export default function V2Pages() {
     setSelectedDeal(null);
   }, []);
 
-  if (loading) {
+  // Loading gate ONLY on first-ever load (no items yet). Subsequent refetches
+  // must be silent — otherwise every save fires refetch() → loading=true →
+  // this gate → the entire deal-detail page (and any open modal!) unmounts
+  // before the save's server response even arrives, wiping in-flight modal
+  // state and making it look like nothing saved. This bug was causing
+  // "V2 me kuch bhi daal ra hu toh save nai ho ra" — actions WERE saving to
+  // the server, but the refetch remount was throwing away modal state and
+  // toast timing so it appeared as if saves were failing.
+  if (loading && !items.length) {
     return (
       <main className="v2-page">
         <div style={{ textAlign: 'center', padding: 80, color: '#6b7a99' }}>
