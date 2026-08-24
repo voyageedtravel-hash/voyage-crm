@@ -9398,15 +9398,13 @@ const saveAccountsV2 = (a) => {
 
 function AccountsV2({ leads, onDealClick }) {
   const [accounts, setAccounts] = useState(loadAccountsV2);
-  const [showLedgerForm, setShowLedgerForm] = useState(false);
-  const [ledgerForm, setLedgerForm] = useState({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
-  const [showAdvisor, setShowAdvisor] = useState(false);
-  const [advChat, setAdvChat] = useState([]); // {role:'user'|'assistant', content, suggestData?}
-  const [advInput, setAdvInput] = useState('');
-  const [advBusy, setAdvBusy] = useState(false);
   const [acctAiInput, setAcctAiInput] = useState('');
   const [acctAiBusy, setAcctAiBusy] = useState(false);
   const [acctAiProposal, setAcctAiProposal] = useState(null);
+  const [acctOpenMonth, setAcctOpenMonth] = useState(null);
+  const [unlockAsk, setUnlockAsk] = useState(null); // {monthKey}
+  const [unlockPw, setUnlockPw] = useState('');
+  const [unlockBusy, setUnlockBusy] = useState(false);
 
   const persist = (updater) => {
     setAccounts((prev) => {
@@ -9416,370 +9414,166 @@ function AccountsV2({ leads, onDealClick }) {
     });
   };
 
+  const inr = (x) => '₹' + Math.round(Number(x) || 0).toLocaleString('en-IN');
+  const uid2 = () => 'ac_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
+  // ── Cash + Bank
   const totalCash = (accounts.cashLocations || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
-  const bankBalance = Number(accounts.bankBalance) || 0;
+  const bank = Number(accounts.bankBalance) || 0;
 
-  // Real, live figures from actual deal data — not something stored
-  // separately, so this always reflects the current MongoDB state.
-  const bookedDeals = leads.filter(isBookedStage);
-  const totalReceived = bookedDeals.reduce((s, d) => s + paidINR(d), 0);
-  const totalOwedToVendors = bookedDeals.reduce((s, d) => {
-    const vendors = dealVendors(d);
-    const paidToVendors = vendors.reduce((vs, v) => vs + sumBy(v.payments, 'amount'), 0);
-    const cost = vendors.reduce((vs, v) => vs + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
-    return s + Math.max(0, cost - paidToVendors);
-  }, 0);
-
-  // ── Receivables — every booked deal with a positive client balance,
-  // same formula as the dashboard's "Client Balance Due" KPI. ──
-  const receivables = bookedDeals
-    .map((d) => ({ d, amount: Math.max(0, balanceINR(d)) }))
-    .filter((r) => r.amount > 0.5)
-    .sort((a, b) => b.amount - a.amount);
+  // ── Receivables from booked deals (kya lena hai clients se)
+  const bookedD = useMemo(() => (leads || []).filter(isBookedStage), [leads]);
+  const receivables = useMemo(() => bookedD
+    .filter((d) => netSellINR(d) - paidINR(d) > 0.5)
+    .map((d) => ({ d, amount: netSellINR(d) - paidINR(d) }))
+    .sort((a, b) => b.amount - a.amount)
+  , [bookedD]);
   const totalReceivable = receivables.reduce((s, r) => s + r.amount, 0);
 
-  // ── Payables — grouped by vendor NAME + kind across every booked deal,
-  // matching V1's grouping exactly (so "ABC Tours" across 3 deals shows
-  // as one line with a 3-deal breakdown, not three separate lines). ──
-  const payables = (() => {
+  // ── Payables to vendors, grouped by vendor name (kya dena hai vendors ko)
+  const { payables, totalPayable } = useMemo(() => {
     const map = new Map();
-    bookedDeals.forEach((d) => {
+    bookedD.forEach((d) => {
       const vs = [
         ...(d.hotelVendors || []).map((v) => ({ ...v, _k: 'Hotel', _n: v.hotelName || v.name })),
         ...(d.flightVendors || []).map((v) => ({ ...v, _k: 'Flight', _n: v.name })),
         ...(d.trainVendors || []).map((v) => ({ ...v, _k: 'Train', _n: v.name })),
         ...(d.landVendors || []).map((v) => ({ ...v, _k: 'Land', _n: v.name })),
         ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
-        ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.cruiseLine || v.name })),
+        ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.name })),
+        ...(d.insuranceVendors || []).map((v) => ({ ...v, _k: 'Insurance', _n: v.name })),
       ];
       vs.forEach((v) => {
         const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
         const paid = sumBy(v.payments, 'amount');
         const bal = cost - paid;
         if (bal <= 0.5) return;
-        const key = `${(v._n || '(vendor)').trim().toLowerCase()}::${v._k}`;
+        const key = `${((v._n) || '(vendor)').trim().toLowerCase()}::${v._k}`;
         if (!map.has(key)) map.set(key, { name: v._n || '(vendor)', kind: v._k, amount: 0, breakdown: [] });
         const g = map.get(key);
         g.amount += bal;
         g.breakdown.push({ d, amount: bal });
       });
     });
-    return [...map.values()].sort((a, b) => b.amount - a.amount);
-  })();
-  const totalPayable = payables.reduce((s, p) => s + p.amount, 0);
+    const list = [...map.values()].sort((a, b) => b.amount - a.amount);
+    return { payables: list, totalPayable: list.reduce((s, p) => s + p.amount, 0) };
+  }, [bookedD]);
 
-  // ── Snapshot — booked GPM (all-time) minus this month's committed
-  // expenses/salaries/GST, same as V1's top card. ──
-  const nowSnap = new Date();
-  const thisMonthKeySnap = `${nowSnap.getFullYear()}-${String(nowSnap.getMonth() + 1).padStart(2, '0')}`;
-  const thisMonthExpense = (accounts.ledger || []).filter((r) => String(r.date).startsWith(thisMonthKeySnap) && ['expense', 'salary', 'gst'].includes(r.kind)).reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const bookedGpm = bookedDeals.reduce((s, d) => s + profitINR(d), 0);
-  const forfeitTotal = bookedDeals.reduce((s, d) => s + (Number(d.forfeitAmount) || 0), 0);
-  const netAfterExpenses = bookedGpm - forfeitTotal - thisMonthExpense;
+  // ── Ledger snapshot
+  const ledger = useMemo(() => [...(accounts.ledger || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))), [accounts.ledger]);
+  const now = new Date();
+  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const thisMonthRows = ledger.filter((r) => String(r.date).startsWith(thisMonthKey));
+  const thisMonthExpense = thisMonthRows
+    .filter((r) => ['expense', 'salary', 'gst'].includes(r.kind))
+    .reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const bookedGpm = bookedD.reduce((s, d) => s + profitINR(d), 0);
+  const netAfterExpenses = bookedGpm - thisMonthExpense;
 
-  const addCashLoc = () => persist((a) => ({ ...a, cashLocations: [...(a.cashLocations || []), { id: 'cl_' + Date.now(), name: 'New location', amount: '', note: '' }] }));
-  const updCashLoc = (id, key, val) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).map((c) => c.id === id ? { ...c, [key]: val } : c) }));
-  const rmCashLoc = (id) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).filter((c) => c.id !== id) }));
+  const kindColor = (k) => ({ expense: '#dc2626', salary: '#b45309', gst: '#4169E1', income: '#15803d', transfer: '#4169E1', receivable: '#0e7490', payable: '#7c3aed', other: '#64748b' }[k] || '#64748b');
+  const kindLabel = (k) => ({ expense: 'Expense', salary: 'Salary', gst: 'GST', income: 'Income', transfer: 'Transfer', receivable: 'Receivable', payable: 'Payable', other: 'Other' }[k] || k);
 
-  const addLedgerEntry = () => {
-    if (!ledgerForm.amount || Number(ledgerForm.amount) <= 0) { window.veToast && window.veToast('Enter a valid amount', 'warning'); return; }
-    const mk = ledgerForm.date ? ledgerForm.date.slice(0, 7) : '';
-    const nowKeyCheck = new Date().toISOString().slice(0, 7);
-    const lockedCheck = mk && mk < nowKeyCheck && !((accounts.frozenMonths || {})[mk] || {}).unlocked;
-    if (lockedCheck) { window.veToast && window.veToast(`${mk} is locked — unlock it first (below) to add entries there`, 'warning'); return; }
-    persist((a) => ({
-      ...a,
-      ledger: [...(a.ledger || []), { id: 'lg_' + Date.now(), ...ledgerForm, amount: Number(ledgerForm.amount), source: 'manual' }],
-    }));
-    setLedgerForm({ date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '' });
-    setShowLedgerForm(false);
-    window.veToast && window.veToast('Ledger entry added ✓', 'success');
-  };
-  const rmLedgerEntry = (id) => persist((a) => ({ ...a, ledger: (a.ledger || []).filter((l) => l.id !== id) }));
-
-  // Recurring expenses/income — templates the person fires manually each
-  // month (no server-side cron on a static site, so "automatic" would be
-  // dishonest — this is a one-click "run this month's recurring items"
-  // instead, which is safe and predictable).
-  const currentMonthKey = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
-  const addRecurring = () => persist((a) => ({
-    ...a,
-    recurring: [...(a.recurring || []), { id: 'rc_' + Date.now(), name: 'New recurring item', amount: '', kind: 'expense', dayOfMonth: 1, lastMaterialized: '' }],
-  }));
-  const updRecurring = (id, key, val) => persist((a) => ({
-    ...a,
-    recurring: (a.recurring || []).map((r) => r.id === id ? { ...r, [key]: val } : r),
-  }));
-  const rmRecurring = (id) => persist((a) => ({ ...a, recurring: (a.recurring || []).filter((r) => r.id !== id) }));
-
-  const pendingRecurring = (accounts.recurring || []).filter((r) => r.lastMaterialized !== currentMonthKey && Number(r.amount) > 0);
-
-  const runRecurringThisMonth = () => {
-    if (!pendingRecurring.length) { window.veToast && window.veToast('Nothing pending for this month', 'info'); return; }
-    persist((a) => {
-      const newEntries = pendingRecurring.map((r) => ({
-        id: 'lg_' + Date.now() + '_' + r.id,
-        date: new Date().toISOString().slice(0, 10),
-        kind: r.kind, party: r.name, amount: Number(r.amount), note: 'Recurring — auto-added',
-        source: 'recurring',
-      }));
-      return {
-        ...a,
-        ledger: [...(a.ledger || []), ...newEntries],
-        recurring: (a.recurring || []).map((r) =>
-          pendingRecurring.find((p) => p.id === r.id) ? { ...r, lastMaterialized: currentMonthKey } : r
-        ),
-      };
-    });
-    window.veToast && window.veToast(`${pendingRecurring.length} recurring item${pendingRecurring.length !== 1 ? 's' : ''} added to ledger ✓`, 'success');
-  };
-
-  const sortedLedger = [...(accounts.ledger || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-
-  // ── Frozen months — same concept as V1: any ledger row dated in a
-  // PAST month (before the current calendar month) is locked/read-only
-  // by default, so closed books can't be silently edited later. Unlike
-  // V1 (which re-checks the login password to unlock), V2 uses a plain
-  // confirm() — V1 itself is single-login (admin/admin123) so that
-  // re-check was already more of a deliberate "are you sure" pause than
-  // a real access-control barrier; a confirm dialog achieves the same
-  // friction without wiring a fresh auth round-trip.
-  const monthKeyOf = (dateStr) => {
-    if (!dateStr) return '';
-    const [y, m] = String(dateStr).split('-');
-    return y && m ? `${y}-${m}` : '';
-  };
-  const nowKey = new Date().toISOString().slice(0, 7);
-  const isPastMonth = (mk) => !!mk && mk < nowKey;
+  // ── Freeze/unlock helpers — past months lock unless explicitly unlocked
+  const monthKeyOf = (dateStr) => { if (!dateStr) return ''; const [y, m] = String(dateStr).split('-'); return y && m ? `${y}-${m}` : ''; };
+  const isPastMonth = (mk) => { if (!mk) return false; const [y, m] = mk.split('-').map(Number); if (!y || !m) return false; return (y < now.getFullYear()) || (y === now.getFullYear() && m < (now.getMonth() + 1)); };
   const isRowLocked = (row) => {
-    const mk = monthKeyOf(row.date);
+    const mk = monthKeyOf(row.date); if (!mk) return false;
     if (!isPastMonth(mk)) return false;
     const st = (accounts.frozenMonths || {})[mk];
     return !st || !st.unlocked;
   };
-  const unlockMonth = (mk) => {
-    if (!window.confirm(`Unlock ${mk}? Past-month ledger entries become editable again until you re-lock it.`)) return;
-    persist((a) => ({
-      ...a,
-      frozenMonths: { ...(a.frozenMonths || {}), [mk]: { unlocked: true, unlockedAt: new Date().toISOString() } },
-    }));
-    window.veToast && window.veToast(`${mk} unlocked ✓`, 'success');
-  };
-  const relockMonth = (mk) => {
-    persist((a) => {
-      const f = { ...(a.frozenMonths || {}) };
-      delete f[mk];
-      return { ...a, frozenMonths: f };
-    });
-    window.veToast && window.veToast(`${mk} re-locked`, 'success');
-  };
-  const lockedPastMonths = Array.from(new Set(
-    (accounts.ledger || []).map((l) => monthKeyOf(l.date)).filter(isPastMonth)
-  )).sort().reverse();
-
-  // ── Commitments — a plain running list of financial to-dos/promises
-  // ("pay the Bali DMC balance", "return security deposit to X") so
-  // nothing gets forgotten between now and when it's actually settled.
-  // V1 pairs this with a conversational AI salary-advisor that reads
-  // this list before suggesting a founder salary split — that chat
-  // flow is a fair bit more machinery for a fairly personal decision;
-  // the tracking list itself (the part with clear, safe, everyday
-  // value) is what's built here.
-  const [showCommitForm, setShowCommitForm] = useState(false);
-  const [commitForm, setCommitForm] = useState({ note: '', amount: '', date: new Date().toISOString().slice(0, 10) });
-  const addCommitment = () => {
-    if (!commitForm.note.trim()) { window.veToast && window.veToast('Enter what this commitment is', 'warning'); return; }
-    persist((a) => ({
-      ...a,
-      commitments: [...(a.commitments || []), { id: 'cm_' + Date.now(), ...commitForm, amount: Number(commitForm.amount) || 0, status: 'open' }],
-    }));
-    setCommitForm({ note: '', amount: '', date: new Date().toISOString().slice(0, 10) });
-    setShowCommitForm(false);
-    window.veToast && window.veToast('Commitment added ✓', 'success');
-  };
-  const resolveCommitment = (id) => persist((a) => ({
-    ...a,
-    commitments: (a.commitments || []).map((c) => c.id === id ? { ...c, status: 'done', resolvedAt: new Date().toISOString() } : c),
-  }));
-  const removeCommitment = (id) => persist((a) => ({ ...a, commitments: (a.commitments || []).filter((c) => c.id !== id) }));
-  const openCommitments = (accounts.commitments || []).filter((c) => c.status === 'open');
-
-  // ── AI Salary/Close Advisor — same exact system prompt and context
-  // shape as V1's ADV_SYS, rebuilt against V2's data (bookedDeals via
-  // isBookedStage, balanceINR for receivables, cost-per-vendor-minus-
-  // paid for payables). Ported verbatim rather than paraphrased: the
-  // rules about ONLY paying salary from cash+bank (never unarrived
-  // client money), always checking urgent vendor payments and open
-  // commitments first, are the actual financial-safety logic — not
-  // something to risk rewording.
-  const ADV_SYS = `You are the financial advisor for Voyage-Ed Travels, a two-founder travel agency. You help Vishal decide monthly salary safely.
-
-You are given a JSON context with: cashInHand (total cash across locations), bankBalance, receivablesTotal (money coming from booked clients), payablesTotal (money going to vendors on booked deals), payablesByDeal (each upcoming vendor payment with dealNumber, client, vendor, amount), thisMonthCommitted (already spent this month), openCommitments (previous urgent items you asked about, with their status), today.
-
-RULES:
-- Salary ONLY comes from cash-in-hand and bank — NEVER from money that hasn't arrived yet from clients.
-- Before suggesting salary amounts, ALWAYS ask if there are any urgent vendor payments due in the next 3 days. List candidate vendors from payablesByDeal so the user can confirm.
-- When user answers, note which of those are urgent + how they'll be arranged (client payment coming, use cash, delay, etc.) and echo back: "Yaad rakhunga: [list]".
-- If openCommitments is non-empty and any status is 'open', ASK FIRST about those before anything else: "Pichli baar aapne bola tha X — wo sort hua? kese?".
-- Only after urgent-vendor and open-commitments check, propose salary split: Vishal ₹___, Sahitya ₹___, Balance in Company ₹___. Base on cash+bank minus urgent-vendor need. Be conservative.
-- Speak Hinglish, short and clear. Ask ONE thing at a time.
-
-Reply ONLY in these two shapes:
-{"type":"ask","reply":"Hinglish question","newCommitments":[{"kind":"urgent-vendor|other","note":"","dealNumber":"","amount":0,"status":"open"}]}
-{"type":"suggest","summary":"one line","vishalSalary":number,"sahityaSalary":number,"balance":number,"reasoning":"1-2 line why","newCommitments":[...]}
-
-If it's the first turn, ALWAYS start with type "ask" — never suggest salary until you've confirmed there are no urgent vendor payments and no open commitments.`;
-
-  const advSend = async (msg) => {
-    const text = (msg || advInput || '').trim();
-    if (!text) return;
-    const history = [...advChat, { role: 'user', content: text }];
-    setAdvChat(history);
-    setAdvInput('');
-    setAdvBusy(true);
+  const doUnlock = async () => {
+    if (!unlockAsk) return;
+    setUnlockBusy(true);
     try {
-      const bookedDeals = leads.filter(isBookedStage);
-      const cashInHand = (accounts.cashLocations || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
-      const bankBalance = Number(accounts.bankBalance) || 0;
-      const receivablesTotal = bookedDeals.reduce((s, d) => s + Math.max(0, balanceINR(d)), 0);
-      const payablesByDeal = [];
-      bookedDeals.forEach((d) => {
-        const vs = [
-          ...(d.hotelVendors || []).map((v) => ({ ...v, _k: 'Hotel', _n: v.hotelName || v.name })),
-          ...(d.flightVendors || []).map((v) => ({ ...v, _k: 'Flight', _n: v.name })),
-          ...(d.trainVendors || []).map((v) => ({ ...v, _k: 'Train', _n: v.name })),
-          ...(d.landVendors || []).map((v) => ({ ...v, _k: 'Land', _n: v.name })),
-          ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
-          ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.cruiseLine || v.name })),
-          ...(d.insuranceVendors || []).map((v) => ({ ...v, _k: 'Insurance', _n: v.name })),
-        ];
-        vs.forEach((v) => {
-          const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
-          const paid = sumBy(v.payments, 'amount');
-          const bal = cost - paid;
-          if (bal > 0.5) payablesByDeal.push({ dealNumber: d.dealNumber, client: clientName(d), vendor: v._n, kind: v._k, amount: Math.round(bal), travelDate: d.travelDates || '' });
-        });
-      });
-      const payablesTotal = payablesByDeal.reduce((s, p) => s + p.amount, 0);
-      const now3 = new Date();
-      const mkNow = `${now3.getFullYear()}-${String(now3.getMonth() + 1).padStart(2, '0')}`;
-      const thisMonthCommitted = (accounts.ledger || []).filter((r) => String(r.date).startsWith(mkNow) && ['expense', 'salary', 'gst'].includes(r.kind)).reduce((s, r) => s + (Number(r.amount) || 0), 0);
-      const ctx = { today: now3.toISOString().slice(0, 10), cashInHand, bankBalance, receivablesTotal, payablesTotal, payablesByDeal, thisMonthCommitted, openCommitments };
-
-      const msgs = [{ role: 'user', content: 'CONTEXT:\n' + JSON.stringify(ctx) }, ...history.map((m) => ({ role: m.role, content: m.content }))];
-      const res = await fetch(`${apiBase()}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: ADV_SYS, messages: msgs }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
-      const raw = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
-      let j;
-      try { j = JSON.parse(raw); } catch { throw new Error("AI ka jawab samajh nahi aaya"); }
-
-      if (Array.isArray(j.newCommitments) && j.newCommitments.length) {
-        persist((a) => ({
-          ...a,
-          commitments: [...(a.commitments || []), ...j.newCommitments.map((nc) => ({ id: 'cm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6), date: new Date().toISOString().slice(0, 10), status: 'open', ...nc }))],
-        }));
-      }
-
-      if (j.type === 'suggest') {
-        setAdvChat((h) => [...h, {
-          role: 'assistant',
-          content: `💡 ${j.summary || 'Suggestion'}\n\nVishal salary: ₹${(j.vishalSalary || 0).toLocaleString('en-IN')}\nSahitya salary: ₹${(j.sahityaSalary || 0).toLocaleString('en-IN')}\nBalance in company: ₹${(j.balance || 0).toLocaleString('en-IN')}\n\n${j.reasoning || ''}`,
-          suggestData: { vishalSalary: j.vishalSalary || 0, sahityaSalary: j.sahityaSalary || 0 },
-        }]);
-      } else {
-        setAdvChat((h) => [...h, { role: 'assistant', content: j.reply || '...' }]);
-      }
-    } catch (e) {
-      setAdvChat((h) => [...h, { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'gadbad') }]);
-    }
-    setAdvBusy(false);
+      // V2 uses a single admin login (backend authMiddleware validates the JWT);
+      // for parity with V1's re-auth flow, we accept the current password and
+      // verify via the /api/auth/login endpoint. If backend rejects, unlock fails.
+      const email = (JSON.parse(localStorage.getItem('ve_user') || '{}').email) || 'admin';
+      const res = await fetch(`${apiBase()}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: unlockPw }) });
+      if (!res.ok) throw new Error('Password galat');
+      const stamp = { unlocked: true, unlockedBy: email, unlockedAt: new Date().toISOString() };
+      persist((a) => ({ ...a, frozenMonths: { ...(a.frozenMonths || {}), [unlockAsk.monthKey]: stamp } }));
+      setUnlockAsk(null); setUnlockPw('');
+      window.veToast && window.veToast(`✓ ${unlockAsk.monthKey} unlocked`, 'success');
+    } catch (e) { window.veToast && window.veToast('⚠️ ' + (e.message || 'Unlock fail'), 'warning'); }
+    setUnlockBusy(false);
   };
+  const relock = (mk) => persist((a) => { const f = { ...(a.frozenMonths || {}) }; delete f[mk]; return { ...a, frozenMonths: f }; });
 
-  const advPostToLedger = (suggestData) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const entries = [];
-    if (suggestData.vishalSalary > 0) entries.push({ id: 'lg_' + Date.now() + '_1', date: today, kind: 'salary', party: 'Vishal Sharma', amount: suggestData.vishalSalary, note: 'AI Advisor — monthly salary', source: 'advisor' });
-    if (suggestData.sahityaSalary > 0) entries.push({ id: 'lg_' + Date.now() + '_2', date: today, kind: 'salary', party: 'Sahitya Singh', amount: suggestData.sahityaSalary, note: 'AI Advisor — monthly salary', source: 'advisor' });
-    if (!entries.length) return;
-    persist((a) => ({ ...a, ledger: [...(a.ledger || []), ...entries] }));
-    window.veToast && window.veToast('Posted to ledger ✓', 'success');
-  };
+  // ── Cash location handlers
+  const addCashLoc = () => persist((a) => ({ ...a, cashLocations: [...(a.cashLocations || []), { id: uid2(), name: 'New location', amount: '', note: '' }] }));
+  const updCashLoc = (id, key, val) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).map((c) => c.id === id ? { ...c, [key]: val } : c) }));
+  const rmCashLoc = (id) => persist((a) => ({ ...a, cashLocations: (a.cashLocations || []).filter((c) => c.id !== id) }));
 
-  // ── AI Ledger Input — same system prompt as V1's ACCT_SYS, verbatim.
-  // Person types a plain Hinglish note ("Sahitya ne aaj 200 kharche Bazar
-  // MCC, maine wapas de diye"), AI turns it into one or more structured
-  // ledger rows + cash/bank deltas, shown as a proposal to confirm before
-  // anything is actually written. ──
-  const ACCT_SYS = `You are a bookkeeping helper for an Indian travel agency's ledger. The user types a plain Hinglish note about what happened. You convert it into one or more ledger rows.
+  // ── Recurring monthly handlers
+  const addRecurring = () => persist((a) => ({ ...a, recurring: [...(a.recurring || []), { id: uid2(), name: '', amount: '', day: 1, kind: 'expense', active: true, note: '' }] }));
+  const updRecurring = (id, key, val) => persist((a) => ({ ...a, recurring: (a.recurring || []).map((r) => r.id === id ? { ...r, [key]: val } : r) }));
+  const rmRecurring = (id) => persist((a) => ({ ...a, recurring: (a.recurring || []).filter((r) => r.id !== id) }));
 
-Rules:
-- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|gst|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number,"queryTag":"deal number OR client name to tag this row against"}], "summary":"one-line Hinglish"}
-- kind rules: 'expense' for money spent (office kharcha, food, Bazar MCC); 'salary' for salaries paid; 'gst' for GST payment to government; 'income' for money received that isn't a client deal payment; 'transfer' for moving cash between locations.
-- Dates: 'aaj/today' = today; 'kal' = yesterday; specific date otherwise. Default today.
-- If user says "Sahitya ne kharche" and then "wapas de diye" — that's two rows: an expense, then a transfer.
-- Only use cashFrom / cashTo when cash actually moved between tracked cash locations. bankDelta positive = bank up, negative = down.
-- Amounts are numbers only. Never invent numbers not in the text.
-- queryTag: if the user names a client or deal, match against the bookedDeals list in context and put the exact dealNumber in queryTag. If no client mentioned or you can't match, leave queryTag empty.
+  // ── Ledger row handlers (respect freeze)
+  const addLedgerRow = () => persist((a) => ({ ...a, ledger: [...(a.ledger || []), { id: uid2(), date: new Date().toISOString().slice(0, 10), kind: 'expense', party: '', amount: '', note: '', queryTag: '', source: 'manual' }] }));
+  const updLedgerRow = (id, key, val) => persist((a) => {
+    const row = (a.ledger || []).find((r) => r.id === id);
+    if (row && isRowLocked(row)) { window.veToast && window.veToast('🔒 Frozen — pehle unlock karo', 'warning'); return a; }
+    return { ...a, ledger: (a.ledger || []).map((r) => r.id === id ? { ...r, [key]: val } : r) };
+  });
+  const rmLedgerRow = (id) => persist((a) => {
+    const row = (a.ledger || []).find((r) => r.id === id);
+    if (row && isRowLocked(row)) { window.veToast && window.veToast('🔒 Frozen — pehle unlock karo', 'warning'); return a; }
+    return { ...a, ledger: (a.ledger || []).filter((r) => r.id !== id) };
+  });
 
-Cash locations and booked deals list are passed in the user turn.`;
+  // ── AI Ledger Entry (natural-language → structured rows)
+  const dealNumToName = useMemo(() => {
+    const m = {};
+    (leads || []).forEach((d) => { if (d.dealNumber) m[d.dealNumber] = clientName(d); });
+    return m;
+  }, [leads]);
 
   const acctAiSend = async () => {
-    const text = (acctAiInput || '').trim();
-    if (!text) return;
+    const q = acctAiInput.trim(); if (!q) return;
     setAcctAiBusy(true); setAcctAiProposal(null);
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const bookedDealsCtx = bookedDeals.map((d) => ({ dealNumber: d.dealNumber, client: clientName(d), destination: destination(d) }));
-      const ctx = { today, cashLocations: (accounts.cashLocations || []).map((c) => c.name), bookedDeals: bookedDealsCtx };
+      const bookedList = bookedD.map((d) => ({ dealNumber: d.dealNumber, client: clientName(d), destination: destination(d) }));
+      const ACCT_SYS = `You are a bookkeeping helper for an Indian travel agency's ledger. The user types a plain Hinglish note about what happened. You convert it into one or more ledger rows.
+- Output ONLY JSON, no prose: {"rows":[{"date":"YYYY-MM-DD","kind":"expense|salary|gst|income|transfer|receivable|payable|other","party":"who","amount":number,"note":"short","cashFrom":"cash location name if paid from cash","cashTo":"cash location name if added to cash","bankDelta":number,"queryTag":"deal number OR client name to tag this row against"}], "summary":"one-line Hinglish"}
+- If date not specified, use today (${today}).
+- Only use cashFrom / cashTo when cash actually moved between tracked cash locations. bankDelta positive = bank up, negative = down.
+- queryTag: try to match a client name to their deal number from the list below.
+Context: today=${today}, cashLocations=${JSON.stringify((accounts.cashLocations || []).map((c) => c.name))}, bookedDeals=${JSON.stringify(bookedList.slice(0, 40))}.`;
       const res = await fetch(`${apiBase()}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: ACCT_SYS, messages: [{ role: 'user', content: 'CONTEXT:\n' + JSON.stringify(ctx) + '\n\nUser: ' + text }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, system: ACCT_SYS, messages: [{ role: 'user', content: q }] }),
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
       const raw = ((data.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
-      let j; try { j = JSON.parse(raw); } catch { throw new Error('AI ka jawab samajh nahi aaya'); }
-      setAcctAiProposal(j);
-    } catch (e) {
-      window.veToast && window.veToast('⚠️ ' + ((e && e.message) || 'gadbad'), 'warning');
-    }
+      const parsed = JSON.parse(raw);
+      setAcctAiProposal(parsed);
+    } catch (e) { window.veToast && window.veToast('⚠️ AI parse fail: ' + e.message, 'warning'); }
     setAcctAiBusy(false);
   };
-
   const acctAiApply = () => {
-    if (!acctAiProposal || !Array.isArray(acctAiProposal.rows)) return;
-    const rows = acctAiProposal.rows.map((r) => ({
-      id: 'lg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-      date: r.date || new Date().toISOString().slice(0, 10),
-      kind: r.kind || 'expense',
-      party: r.party || '',
-      amount: Number(r.amount) || 0,
-      note: r.note || '',
-      queryTag: r.queryTag || '',
-      source: 'ai',
-    }));
+    if (!acctAiProposal) return;
     persist((a) => {
-      let na = { ...a, ledger: [...(a.ledger || []), ...rows] };
-      acctAiProposal.rows.forEach((r) => {
-        const amt = Number(r.amount) || 0;
+      const nextLedger = [...(a.ledger || [])];
+      let nextCash = [...(a.cashLocations || [])];
+      let nextBank = Number(a.bankBalance) || 0;
+      (acctAiProposal.rows || []).forEach((r) => {
+        nextLedger.push({ id: uid2(), date: r.date || new Date().toISOString().slice(0, 10), kind: r.kind || 'other', party: r.party || '', amount: Number(r.amount) || 0, note: r.note || '', queryTag: r.queryTag || '', source: 'ai' });
         if (r.cashFrom) {
-          na.cashLocations = (na.cashLocations || []).map((c) =>
-            c.name.toLowerCase().includes(String(r.cashFrom).toLowerCase()) ? { ...c, amount: String(Math.max(0, (Number(c.amount) || 0) - amt)) } : c);
+          nextCash = nextCash.map((c) => c.name && String(c.name).toLowerCase().includes(String(r.cashFrom).toLowerCase()) ? { ...c, amount: (Number(c.amount) || 0) - (Number(r.amount) || 0) } : c);
         }
         if (r.cashTo) {
-          na.cashLocations = (na.cashLocations || []).map((c) =>
-            c.name.toLowerCase().includes(String(r.cashTo).toLowerCase()) ? { ...c, amount: String((Number(c.amount) || 0) + amt) } : c);
+          nextCash = nextCash.map((c) => c.name && String(c.name).toLowerCase().includes(String(r.cashTo).toLowerCase()) ? { ...c, amount: (Number(c.amount) || 0) + (Number(r.amount) || 0) } : c);
         }
-        if (r.bankDelta) { na.bankBalance = String((Number(na.bankBalance) || 0) + (Number(r.bankDelta) || 0)); }
+        if (r.bankDelta) nextBank += Number(r.bankDelta) || 0;
       });
-      return na;
+      return { ...a, ledger: nextLedger, cashLocations: nextCash, bankBalance: nextBank };
     });
-    setAcctAiInput(''); setAcctAiProposal(null);
+    setAcctAiInput('');
+    setAcctAiProposal(null);
     window.veToast && window.veToast('✅ Ledger update ho gaya', 'success');
   };
 
@@ -9787,420 +9581,290 @@ Cash locations and booked deals list are passed in the user turn.`;
     <main className="v2-page">
       <div className="v2-page-header">
         <div>
-          <h1 className="v2-page-title">Accounts</h1>
-          <p className="v2-page-sub">Cash on hand, bank balance, and ledger — synced with V1 on this device</p>
-        </div>
-        <div className="v2-header-actions">
-          <button className="v2-cta" onClick={() => setShowAdvisor(true)}>🤖 AI Salary Advisor</button>
+          <div style={{ fontSize: 10, letterSpacing: 3, color: '#c9942a', fontWeight: 800 }}>VOYAGE-ED CRM · ACCOUNTS</div>
+          <h1 className="v2-page-title">💰 Accounts &amp; Ledger</h1>
+          <p className="v2-page-sub">Cash locations, bank balance, receivables, payables aur ledger — sab ek jagah</p>
         </div>
       </div>
 
-      <div className="v2-panel" style={{ marginBottom: 24 }}>
-        <div className="v2-panel-header">
-          <h3 className="v2-panel-title">💼 Snapshot</h3>
-        </div>
+      {/* 1) SNAPSHOT */}
+      <div className="v2-panel" style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12 }}>💼 Snapshot</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}>
-            <span>Booked GPM (before GST, after forfeit)</span>
-            <b style={{ fontFamily: 'monospace', color: '#0f2350' }}>{fmtINR(bookedGpm - forfeitTotal)}</b>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}><span>Booked GPM (before GST)</span><b style={{ fontFamily: 'monospace', color: '#0f2350' }}>{inr(bookedGpm)}</b></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}><span>− Is month ke expenses + salaries</span><b style={{ fontFamily: 'monospace', color: '#dc2626' }}>− {inr(thisMonthExpense)}</b></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, paddingTop: 5, fontWeight: 800 }}><span>Net after expenses (before GST)</span><b style={{ fontFamily: 'monospace', color: netAfterExpenses >= 0 ? '#15803d' : '#dc2626' }}>{inr(netAfterExpenses)}</b></div>
+        </div>
+      </div>
+
+      {/* 2) BANK + CASH */}
+      <div className="v2-panel" style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12 }}>🏦 Bank &amp; Cash — Mere pass kitna hai aur kaha kaha</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: '#6b7a99', letterSpacing: .6, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>Bank balance</div>
+            <input type="number" value={accounts.bankBalance || ''} onChange={(e) => persist((a) => ({ ...a, bankBalance: e.target.value }))} placeholder="Bank me kitna hai" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 8, padding: '11px', fontSize: 14, fontFamily: 'monospace', outline: 'none' }} />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, paddingBottom: 8, borderBottom: '1px dashed #e3eaf7' }}>
-            <span>− Is month ke expenses + salaries</span>
-            <b style={{ fontFamily: 'monospace', color: '#dc2626' }}>− {fmtINR(thisMonthExpense)}</b>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, paddingTop: 5, fontWeight: 800 }}>
-            <span>Net after expenses (before GST)</span>
-            <b style={{ fontFamily: 'monospace', color: netAfterExpenses >= 0 ? '#15803d' : '#dc2626' }}>{fmtINR(netAfterExpenses)}</b>
-          </div>
-          {forfeitTotal > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#94a3b8', paddingTop: 4 }}>
-              <span>Forfeit written off (all bookings)</span>
-              <b style={{ fontFamily: 'monospace' }}>{fmtINR(forfeitTotal)}</b>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: '#6b7a99', letterSpacing: .6, textTransform: 'uppercase', fontWeight: 800 }}>Cash locations</div>
+              <button onClick={addCashLoc} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>+ Add Location</button>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="v2-leads-kpis" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-        <div className="v2-lead-kpi converted">
-          <div className="v2-lead-kpi-label">Total Cash</div>
-          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalCash)}</div>
-          <div className="v2-lead-kpi-sub">Across all locations</div>
-        </div>
-        <div className="v2-lead-kpi rate">
-          <div className="v2-lead-kpi-label">Bank Balance</div>
-          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(bankBalance)}</div>
-          <div className="v2-lead-kpi-sub">Manually entered</div>
-        </div>
-        <div className="v2-lead-kpi hot" style={{ borderLeftColor: '#059669' }}>
-          <div className="v2-lead-kpi-label">Total Received</div>
-          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalReceived)}</div>
-          <div className="v2-lead-kpi-sub">From booked deals</div>
-        </div>
-        <div className="v2-lead-kpi warm">
-          <div className="v2-lead-kpi-label">Owed to Vendors</div>
-          <div className="v2-lead-kpi-value" style={{ fontSize: 22 }}>{fmtINR(totalOwedToVendors)}</div>
-          <div className="v2-lead-kpi-sub">Still to pay</div>
-        </div>
-      </div>
-
-      <div className="v2-two-col">
-        <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">Cash Locations</h3>
-            <button className="v2-view-all" onClick={addCashLoc}>+ Add</button>
-          </div>
-          {(accounts.cashLocations || []).length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7a99' }}>No cash locations yet.</div>
-          ) : (
-            accounts.cashLocations.map((c) => (
-              <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 32px', gap: 10, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
-                <input value={c.name} onChange={(e) => updCashLoc(c.id, 'name', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }} />
-                <input type="number" value={c.amount} onChange={(e) => updCashLoc(c.id, 'amount', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '8px 10px', textAlign: 'right' }} />
-                <button onClick={() => rmCashLoc(c.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
-              </div>
-            ))
-          )}
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e8ecf5' }}>
-            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Bank Balance</div>
-            <input
-              type="number"
-              value={accounts.bankBalance}
-              onChange={(e) => persist((a) => ({ ...a, bankBalance: e.target.value }))}
-              placeholder="0"
-              style={inputStyle}
-            />
-          </div>
-        </div>
-
-        <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">Ledger</h3>
-            <button className="v2-view-all" onClick={() => setShowLedgerForm(true)}>+ Add Entry</button>
-          </div>
-          {sortedLedger.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7a99' }}>No ledger entries yet.</div>
-          ) : (
-            sortedLedger.slice(0, 15).map((l) => {
-              const locked = isRowLocked(l);
-              return (
-                <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc', opacity: locked ? 0.65 : 1 }}>
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>
-                      {locked && <span title="Past month — locked" style={{ marginRight: 5 }}>🔒</span>}
-                      {l.party || l.kind}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#6b7a99' }}>{l.date} · {l.kind}{l.note ? ` · ${l.note}` : ''}</div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: l.kind === 'income' ? '#059669' : '#dc2626' }}>
-                      {l.kind === 'income' ? '+' : '−'} {fmtINR(l.amount)}
-                    </div>
-                    {!locked && (
-                      <button onClick={() => rmLedgerEntry(l.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
-                    )}
-                  </div>
+            {(accounts.cashLocations || []).length === 0 && <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 2px' }}>Koi cash location add nahi — upar "+ Add Location" dabao</div>}
+            {(accounts.cashLocations || []).map((c) => (
+              <div key={c.id} style={{ border: '1px solid #eef2f8', borderRadius: 9, padding: '10px 12px', marginBottom: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                  <input value={c.name} onChange={(e) => updCashLoc(c.id, 'name', e.target.value)} placeholder="Location name (Sahitya, Office safe, Vishal wallet…)" style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12.5, outline: 'none' }} />
+                  <input type="number" value={c.amount} onChange={(e) => updCashLoc(c.id, 'amount', e.target.value)} placeholder="₹" style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12.5, fontFamily: 'monospace', outline: 'none' }} />
+                  <button onClick={() => rmCashLoc(c.id)} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '7px 10px', fontSize: 12, cursor: 'pointer' }}>✕</button>
                 </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      <div className="v2-two-col" style={{ marginTop: 24 }}>
-        <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">📥 Clients se lena hai</h3>
-            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#f59e0b' }}>{fmtINR(totalReceivable)}</b>
-          </div>
-          {receivables.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div>
-          ) : (
-            receivables.map(({ d, amount }) => (
-              <div key={d._id} onClick={() => onDealClick && onDealClick(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px dashed #e3eaf7', cursor: onDealClick ? 'pointer' : 'default', gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
-                    {clientName(d) || '(no name)'}
-                    {d.dealNumber && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', fontFamily: 'monospace', marginLeft: 6 }}>{d.dealNumber}</span>}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{destination(d) || '—'}</div>
-                </div>
-                <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#f59e0b' }}>{fmtINR(amount)}</b>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">📤 Vendors ko dena hai</h3>
-            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#dc2626' }}>{fmtINR(totalPayable)}</b>
-          </div>
-          {payables.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div>
-          ) : (
-            payables.map((p, i) => (
-              <div key={i} style={{ padding: '9px 0', borderBottom: '1px dashed #e3eaf7' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, cursor: p.breakdown.length === 1 && onDealClick ? 'pointer' : 'default' }}
-                  onClick={() => { if (p.breakdown.length === 1 && onDealClick) onDealClick(p.breakdown[0].d); }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
-                      {p.name} <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#eef3fc', color: '#334e82', marginLeft: 4 }}>{p.kind}</span>
-                      {p.breakdown.length > 1 && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', marginLeft: 5 }}>{p.breakdown.length} deals</span>}
-                    </div>
-                    {p.breakdown.length === 1 && <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{clientName(p.breakdown[0].d) || '(client)'} · {p.breakdown[0].d.dealNumber || ''}</div>}
-                  </div>
-                  <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#dc2626' }}>{fmtINR(p.amount)}</b>
-                </div>
-                {p.breakdown.length > 1 && (
-                  <div style={{ marginTop: 6, marginLeft: 12, paddingLeft: 10, borderLeft: '2px solid #f1f5f9' }}>
-                    {p.breakdown.map((b, j) => (
-                      <div key={j} onClick={() => onDealClick && onDealClick(b.d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', cursor: onDealClick ? 'pointer' : 'default', fontSize: 11 }}>
-                        <span style={{ color: '#334e82' }}>
-                          {clientName(b.d) || '(client)'}
-                          {b.d.dealNumber && <span style={{ background: '#faf1dc', color: '#8a6d1f', padding: '1px 5px', borderRadius: 4, marginLeft: 5, fontFamily: 'monospace', fontWeight: 700, fontSize: 9.5 }}>{b.d.dealNumber}</span>}
-                        </span>
-                        <b style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>{fmtINR(b.amount)}</b>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="v2-panel" style={{ marginTop: 24, background: 'linear-gradient(180deg,#faf8ff,#fff)', border: '1px solid #c4b5fd' }}>
-        <div className="v2-panel-header">
-          <h3 className="v2-panel-title" style={{ color: '#5b21b6' }}>🤖 AI Ledger Entry</h3>
-        </div>
-        <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 12 }}>
-          Seedha likho — <i>"Sahitya ne aaj 200 kharche Bazar MCC, maine wapas de diye"</i>, <i>"Nikhil ne 16000 diye cash mein"</i>, <i>"Bank se 5000 nikale Sahitya ke pass"</i>. AI parse karke ledger mein daal dega, cash locations bhi update ho jayengi.
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <input
-            value={acctAiInput}
-            onChange={(e) => setAcctAiInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !acctAiBusy) acctAiSend(); }}
-            placeholder="Plain Hinglish me likho…"
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <button disabled={acctAiBusy || !acctAiInput.trim()} onClick={acctAiSend} className="v2-cta" style={{ background: acctAiBusy ? '#c4b5fd' : 'linear-gradient(135deg,#6d28d9,#8b5cf6)' }}>
-            {acctAiBusy ? '...' : 'Send'}
-          </button>
-        </div>
-        {acctAiProposal && (
-          <div style={{ background: '#fff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#5b21b6', marginBottom: 8 }}>{acctAiProposal.summary || 'Proposed ledger rows'}</div>
-            {(acctAiProposal.rows || []).map((r, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '5px 0', borderBottom: '1px dashed #eef2f8' }}>
-                <span>{r.date} · {r.kind} · {r.party}{r.note ? ` — ${r.note}` : ''}</span>
-                <b style={{ fontFamily: 'monospace' }}>{fmtINR(r.amount)}</b>
+                <input value={c.note || ''} onChange={(e) => updCashLoc(c.id, 'note', e.target.value)} placeholder="Note (breakdown / kis-kis ka)" style={{ marginTop: 6, width: '100%', border: '1px dashed #e3eaf7', borderRadius: 6, padding: '7px 9px', fontSize: 11.5, color: '#64748b', outline: 'none' }} />
               </div>
             ))}
-            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-              <button className="v2-cta" onClick={acctAiApply} style={{ background: '#15803d' }}>✓ Apply to Ledger</button>
-              <button className="v2-cta" onClick={() => setAcctAiProposal(null)} style={{ background: '#6b7a99' }}>Cancel</button>
-            </div>
           </div>
-        )}
-      </div>
-
-      <div className="v2-panel" style={{ marginTop: 24 }}>
-        <div className="v2-panel-header">
-          <h3 className="v2-panel-title">Recurring Expenses / Income</h3>
-          <div style={{ display: 'flex', gap: 10 }}>
-            {pendingRecurring.length > 0 && (
-              <button className="v2-cta" style={{ padding: '8px 16px', fontSize: 12 }} onClick={runRecurringThisMonth}>
-                ▶ Run {pendingRecurring.length} for this month
-              </button>
-            )}
-            <button className="v2-view-all" onClick={addRecurring}>+ Add Template</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, paddingTop: 9, marginTop: 5, borderTop: '1px solid #e3eaf7', fontWeight: 800 }}>
+            <span>Total (Bank + Cash)</span>
+            <b style={{ fontFamily: 'monospace', color: '#15803d' }}>{inr(bank + totalCash)}</b>
           </div>
         </div>
-        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
-          Rent, salaries, subscriptions — set them up once, then click "Run" each month to add them to the ledger. Nothing fires automatically (this is a browser app, not a server) — you stay in control of when it posts.
-        </p>
-        {(accounts.recurring || []).length === 0 ? (
-          <div style={{ fontSize: 13, color: '#6b7a99' }}>No recurring items set up yet.</div>
-        ) : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {(accounts.recurring || []).map((r) => {
-              const done = r.lastMaterialized === currentMonthKey;
-              return (
-                <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 110px 90px 32px', gap: 10, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f7fc' }}>
-                  <input value={r.name} onChange={(e) => updRecurring(r.id, 'name', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }} />
-                  <input type="number" value={r.amount} onChange={(e) => updRecurring(r.id, 'amount', e.target.value)} placeholder="0" style={{ ...inputStyle, padding: '8px 10px', textAlign: 'right' }} />
-                  <select value={r.kind} onChange={(e) => updRecurring(r.id, 'kind', e.target.value)} style={{ ...inputStyle, padding: '8px 10px' }}>
-                    {['expense', 'income', 'salary', 'gst', 'other'].map((k) => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                  <span style={{ fontSize: 11, textAlign: 'center', color: done ? '#059669' : '#c9942a', fontWeight: 600 }}>
-                    {done ? '✓ Posted' : 'Pending'}
-                  </span>
-                  <button onClick={() => rmRecurring(r.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14 }}>✕</button>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
-      <div className="v2-two-col">
+      {/* 3) RECEIVABLES + PAYABLES — side-by-side (lena / dena) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 18, marginBottom: 18 }}>
         <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">🔒 Locked Past Months</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase' }}>📥 Clients se LENA hai</div>
+            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#f59e0b' }}>{inr(totalReceivable)}</b>
           </div>
-          <p style={{ fontSize: 11.5, color: '#6b7a99', marginTop: -10, marginBottom: 12 }}>
-            Any ledger entry dated in a past month is read-only by default, so closed books can't be edited by accident. Unlock a month only if you genuinely need to fix something in it.
-          </p>
-          {lockedPastMonths.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7a99' }}>No past-month entries yet.</div>
-          ) : (
-            lockedPastMonths.map((mk) => {
-              const unlocked = !!((accounts.frozenMonths || {})[mk] || {}).unlocked;
-              return (
-                <div key={mk} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f7fc' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0d1b3e' }}>
-                    {unlocked ? '🔓' : '🔒'} {mk}
-                  </div>
-                  {unlocked ? (
-                    <button className="v2-acc-btn-sm" onClick={() => relockMonth(mk)}>Re-lock</button>
-                  ) : (
-                    <button className="v2-acc-btn-sm" onClick={() => unlockMonth(mk)}>Unlock</button>
-                  )}
+          {receivables.length === 0 ? <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div> :
+            receivables.map(({ d, amount }) => (
+              <div key={d._id} onClick={() => onDealClick && onDealClick(d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px dashed #e3eaf7', cursor: 'pointer', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>{clientName(d)} {d.dealNumber && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', fontFamily: 'monospace', marginLeft: 6 }}>{d.dealNumber}</span>}</div>
+                  <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{destination(d) || '—'}</div>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="v2-panel">
-          <div className="v2-panel-header">
-            <h3 className="v2-panel-title">📌 Open Commitments</h3>
-            <button className="v2-view-all" onClick={() => setShowCommitForm(true)}>+ Add</button>
-          </div>
-          <p style={{ fontSize: 11.5, color: '#6b7a99', marginTop: -10, marginBottom: 12 }}>
-            Financial to-dos that don't belong in the ledger yet — "pay the Bali DMC balance", "return X's deposit" — so nothing slips through.
-          </p>
-          {openCommitments.length === 0 ? (
-            <div style={{ fontSize: 13, color: '#6b7a99' }}>Nothing open — you're caught up.</div>
-          ) : (
-            openCommitments.map((c) => (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f4f7fc' }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0d1b3e' }}>{c.note}</div>
-                  <div style={{ fontSize: 11, color: '#6b7a99' }}>{c.date}{c.amount ? ` · ${fmtINR(c.amount)}` : ''}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="v2-acc-btn-sm" onClick={() => resolveCommitment(c.id)}>✓ Done</button>
-                  <button onClick={() => removeCommitment(c.id)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
-                </div>
+                <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#f59e0b' }}>{inr(amount)}</b>
               </div>
             ))
-          )}
+          }
+        </div>
+
+        <div className="v2-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase' }}>📤 Vendors ko DENA hai</div>
+            <b style={{ fontFamily: 'monospace', fontSize: 15, color: '#dc2626' }}>{inr(totalPayable)}</b>
+          </div>
+          {payables.length === 0 ? <div style={{ fontSize: 12, color: '#94a3b8', padding: '8px 0' }}>Sab clear ✓</div> :
+            payables.map((p, i) => (
+              <div key={i} style={{ padding: '9px 0', borderBottom: '1px dashed #e3eaf7' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, cursor: p.breakdown.length === 1 ? 'pointer' : 'default' }}
+                  onClick={() => { if (p.breakdown.length === 1) onDealClick && onDealClick(p.breakdown[0].d); }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>{p.name} <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#eef3fc', color: '#334e82', marginLeft: 4 }}>{p.kind}</span>{p.breakdown.length > 1 && <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 5, background: '#faf1dc', color: '#8a6d1f', marginLeft: 5 }}>{p.breakdown.length} deals</span>}</div>
+                    {p.breakdown.length === 1 && <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{clientName(p.breakdown[0].d)} · {p.breakdown[0].d.dealNumber || ''}</div>}
+                  </div>
+                  <b style={{ fontFamily: 'monospace', fontSize: 13, color: '#dc2626' }}>{inr(p.amount)}</b>
+                </div>
+                {p.breakdown.length > 1 && <div style={{ marginTop: 6, marginLeft: 12, paddingLeft: 10, borderLeft: '2px solid #f1f5f9' }}>
+                  {p.breakdown.map((b, j) => (
+                    <div key={j} onClick={() => onDealClick && onDealClick(b.d)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '3px 0', cursor: 'pointer', fontSize: 11 }}>
+                      <span style={{ color: '#334e82' }}>{clientName(b.d)} {b.d.dealNumber && <span style={{ background: '#faf1dc', color: '#8a6d1f', padding: '1px 5px', borderRadius: 4, marginLeft: 5, fontFamily: 'monospace', fontWeight: 700, fontSize: 9.5 }}>{b.d.dealNumber}</span>}</span>
+                      <b style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>{inr(b.amount)}</b>
+                    </div>
+                  ))}
+                </div>}
+              </div>
+            ))
+          }
         </div>
       </div>
 
-      {showCommitForm && (
-        <ModalShell title="+ Add Commitment" onClose={() => setShowCommitForm(false)} onSubmit={addCommitment} saving={false} err="">
-          <div>
-            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>What's the commitment? *</div>
-            <input value={commitForm.note} onChange={(e) => setCommitForm((f) => ({ ...f, note: e.target.value }))} placeholder="e.g. Pay Bali DMC balance" style={inputStyle} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div>
-              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount (₹, optional)</div>
-              <input type="number" value={commitForm.amount} onChange={(e) => setCommitForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} />
-            </div>
-            <div>
-              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
-              <input type="date" value={commitForm.date} onChange={(e) => setCommitForm((f) => ({ ...f, date: e.target.value }))} style={inputStyle} />
-            </div>
-          </div>
-        </ModalShell>
-      )}
-
-      {showAdvisor && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowAdvisor(false); }}
-        >
-          <div style={{ background: '#fff', borderRadius: 18, width: 520, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🤖 AI Salary Advisor</h3>
-                <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Checks urgent vendor payments &amp; open commitments before suggesting a split</div>
+      {/* 4) RECURRING */}
+      <div className="v2-panel" style={{ marginBottom: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase' }}>🔁 Monthly Recurring</div>
+          <button onClick={addRecurring} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>+ Add Recurring</button>
+        </div>
+        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>Har mahine specified day pe ledger me auto entry banti hai. Variable salary khaali chhod do — us mahine amount daal dena.</div>
+        {(accounts.recurring || []).map((r) => (
+          <div key={r.id} style={{ border: '1px solid #eef2f8', borderRadius: 9, padding: '10px 12px', marginBottom: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 60px 1fr auto', gap: 8, alignItems: 'center' }}>
+              <input value={r.name} onChange={(e) => updRecurring(r.id, 'name', e.target.value)} placeholder="Name" style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12, outline: 'none' }} />
+              <input type="number" value={r.amount} onChange={(e) => updRecurring(r.id, 'amount', e.target.value)} placeholder="₹" style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12, fontFamily: 'monospace', outline: 'none' }} />
+              <input type="number" min="1" max="31" value={r.day} onChange={(e) => updRecurring(r.id, 'day', Number(e.target.value) || 1)} title="Day of month" style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12, fontFamily: 'monospace', textAlign: 'center', outline: 'none' }} />
+              <select value={r.kind} onChange={(e) => updRecurring(r.id, 'kind', e.target.value)} style={{ border: '1px solid #d4e0f5', borderRadius: 7, padding: '9px', fontSize: 12, outline: 'none' }}>
+                <option value="expense">Expense</option>
+                <option value="salary">Salary</option>
+                <option value="gst">GST</option>
+                <option value="income">Income</option>
+              </select>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: '#64748b', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!r.active} onChange={(e) => updRecurring(r.id, 'active', e.target.checked)} /> on
+                </label>
+                <button onClick={() => rmRecurring(r.id)} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>✕</button>
               </div>
-              <button onClick={() => setShowAdvisor(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {advChat.length === 0 && (
-                <div style={{ fontSize: 12.5, color: '#6b7a99', textAlign: 'center', padding: '20px 10px' }}>
-                  Type anything to start — e.g. "Is mahine kitni salary nikal sakte hain?"
+          </div>
+        ))}
+      </div>
+
+      {/* 5) AI LEDGER ENTRY */}
+      <div className="v2-panel" style={{ marginBottom: 18, background: 'linear-gradient(180deg,#faf8ff,#fff)', borderColor: '#c4b5fd' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#5b21b6', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>🤖 AI Ledger Entry</div>
+        <div style={{ fontSize: 11.5, color: '#6b7a99', marginBottom: 12 }}>Seedha likho — <i>"Sahitya ne aaj 200 kharche Bazar MCC, maine wapas de diye"</i>, <i>"Nikhil ne 16000 diye cash mein"</i>, <i>"Bank se 5000 nikale Sahitya ke pass"</i>. AI parse karke ledger me daal dega.</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <input value={acctAiInput} onChange={(e) => setAcctAiInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !acctAiBusy) acctAiSend(); }}
+            placeholder="Seedha bolo…" style={{ flex: 1, border: '1px solid #d4c9f5', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, outline: 'none' }} />
+          <button disabled={acctAiBusy || !acctAiInput.trim()} onClick={acctAiSend}
+            style={{ background: acctAiBusy ? '#c4b5fd' : 'linear-gradient(135deg,#6d28d9,#8b5cf6)', color: '#fff', border: 'none', borderRadius: 9, padding: '0 18px', fontSize: 13, fontWeight: 800, cursor: acctAiBusy ? 'wait' : 'pointer' }}>{acctAiBusy ? '...' : 'Send'}</button>
+        </div>
+        {acctAiProposal && (
+          <div style={{ border: '1px solid #ddd6fe', borderRadius: 10, padding: '12px 14px', background: '#fff' }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#5b21b6', marginBottom: 8 }}>AI ne ye samjha:</div>
+            <div style={{ fontSize: 12, color: '#334e82', marginBottom: 10, fontStyle: 'italic' }}>{acctAiProposal.summary}</div>
+            {(acctAiProposal.rows || []).map((r, i) => (
+              <div key={i} style={{ padding: '7px 0', borderBottom: '1px dashed #f1f5f9', fontSize: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span><b style={{ color: kindColor(r.kind) }}>{kindLabel(r.kind)}</b> · {r.party || '—'} · <span style={{ color: '#94a3b8' }}>{r.date}</span></span>
+                  <b style={{ fontFamily: 'monospace', color: '#0f2350' }}>{inr(r.amount)}</b>
                 </div>
-              )}
-              {advChat.map((m, i) => (
-                <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-                  <div style={{
-                    background: m.role === 'user' ? '#0d1b3e' : '#f4f6fb',
-                    color: m.role === 'user' ? '#fff' : '#1a2c52',
-                    borderRadius: 12, padding: '10px 14px', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-line',
-                  }}>
-                    {m.content}
-                  </div>
-                  {m.suggestData && (
-                    <button className="v2-acc-btn-primary" style={{ marginTop: 8 }} onClick={() => advPostToLedger(m.suggestData)}>
-                      ✓ Post to Ledger
-                    </button>
-                  )}
+                <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {r.queryTag
+                    ? <span style={{ fontSize: 10, fontWeight: 800, padding: '1px 7px', borderRadius: 5, background: '#ede9fe', color: '#5b21b6' }}>🔗 {r.queryTag}{dealNumToName[r.queryTag] ? ' · ' + dealNumToName[r.queryTag] : ''}</span>
+                    : <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>⚠️ Kisi query se tag nahi hua</span>}
                 </div>
-              ))}
-              {advBusy && <div style={{ fontSize: 12.5, color: '#9aa7c4' }}>⏳ Thinking…</div>}
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button onClick={acctAiApply} style={{ flex: 1, background: '#15803d', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>✓ Apply</button>
+              <button onClick={() => setAcctAiProposal(null)} style={{ background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 8, padding: '10px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
             </div>
-            <div style={{ padding: '14px 24px', borderTop: '1px solid #e8ecf5', display: 'flex', gap: 10 }}>
-              <input
-                value={advInput}
-                onChange={(e) => setAdvInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !advBusy) advSend(); }}
-                placeholder="Type your reply…"
-                style={{ ...inputStyle, flex: 1 }}
-                disabled={advBusy}
-              />
-              <button className="v2-acc-btn-primary" onClick={() => advSend()} disabled={advBusy || !advInput.trim()}>Send</button>
+          </div>
+        )}
+      </div>
+
+      {/* 6) LEDGER — month picker landing, then selected month */}
+      {(() => {
+        const monthName = (mk) => { if (mk === '—') return 'Undated'; const [y, m] = mk.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); };
+        const now2 = new Date();
+        const monthKeys = new Set(ledger.map((r) => monthKeyOf(r.date) || '—').filter((mk) => mk !== '—'));
+        for (let i = 0; i < 4; i++) { const dt = new Date(now2.getFullYear(), now2.getMonth() - i, 1); monthKeys.add(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`); }
+        const availableMonths = [...monthKeys].sort((a, b) => b.localeCompare(a));
+
+        if (!acctOpenMonth) {
+          return <div className="v2-panel">
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 14 }}>📖 Ledger — Month Choose Karo</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10 }}>
+              {availableMonths.map((mk) => {
+                const rowsHere = ledger.filter((r) => monthKeyOf(r.date) === mk);
+                const isCurrent = mk === thisMonthKey;
+                const isLocked = isPastMonth(mk) && !((accounts.frozenMonths || {})[mk] && (accounts.frozenMonths || {})[mk].unlocked);
+                return <button key={mk} onClick={() => setAcctOpenMonth(mk)}
+                  style={{ background: isCurrent ? 'linear-gradient(135deg,#0f2350,#1a3060)' : '#fff', color: isCurrent ? '#f0c842' : '#0f2350', border: '1px solid ' + (isCurrent ? '#0f2350' : '#d4e0f5'), borderRadius: 10, padding: '14px 12px', cursor: 'pointer', textAlign: 'left' }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: .5 }}>{monthName(mk)}</div>
+                  <div style={{ fontSize: 10.5, marginTop: 4, opacity: .8 }}>{rowsHere.length} manual entries {isLocked ? ' · 🔒' : ''} {isCurrent ? ' · current' : ''}</div>
+                </button>;
+              })}
+            </div>
+          </div>;
+        }
+
+        const mk = acctOpenMonth;
+        const isLocked = isPastMonth(mk) && !((accounts.frozenMonths || {})[mk] && (accounts.frozenMonths || {})[mk].unlocked);
+        const monthRows = ledger.filter((r) => monthKeyOf(r.date) === mk);
+        const owe = monthRows.filter((r) => ['expense', 'salary', 'gst', 'payable'].includes(r.kind));
+        const receive = monthRows.filter((r) => ['income', 'receivable'].includes(r.kind));
+        const other = monthRows.filter((r) => !['expense', 'salary', 'gst', 'payable', 'income', 'receivable'].includes(r.kind));
+        const oweTot = owe.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const receiveTot = receive.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const balance = receiveTot - oweTot;
+
+        const rowEditor = (r) => (
+          <div key={r.id} style={{ background: isRowLocked(r) ? '#f8fafc' : '#fff', border: '1px solid ' + (isRowLocked(r) ? '#e3eaf7' : '#eef2f8'), borderRadius: 8, padding: '8px 10px', marginBottom: 6, opacity: isRowLocked(r) ? 0.7 : 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px 1.4fr 1fr auto', gap: 6, alignItems: 'center' }}>
+              <input type="date" value={r.date} onChange={(e) => updLedgerRow(r.id, 'date', e.target.value)} disabled={isRowLocked(r)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 11, outline: 'none' }} />
+              <input value={r.party} onChange={(e) => updLedgerRow(r.id, 'party', e.target.value)} placeholder="Party" disabled={isRowLocked(r)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 11, outline: 'none' }} />
+              <input type="number" value={r.amount} onChange={(e) => updLedgerRow(r.id, 'amount', e.target.value)} placeholder="₹" disabled={isRowLocked(r)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 11, fontFamily: 'monospace', textAlign: 'right', outline: 'none' }} />
+              <button onClick={() => rmLedgerRow(r.id)} disabled={isRowLocked(r)} style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr', gap: 6, marginTop: 5 }}>
+              <select value={r.kind} onChange={(e) => updLedgerRow(r.id, 'kind', e.target.value)} disabled={isRowLocked(r)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '6px', fontSize: 10.5, outline: 'none', color: kindColor(r.kind), fontWeight: 700 }}>
+                {['expense', 'salary', 'gst', 'income', 'transfer', 'receivable', 'payable', 'other'].map((k) => <option key={k} value={k}>{kindLabel(k)}</option>)}
+              </select>
+              <input value={r.note || ''} onChange={(e) => updLedgerRow(r.id, 'note', e.target.value)} placeholder="Note" disabled={isRowLocked(r)} style={{ border: '1px dashed #e3eaf7', borderRadius: 6, padding: '6px', fontSize: 10.5, color: '#64748b', outline: 'none' }} />
+              <input value={r.queryTag || ''} onChange={(e) => updLedgerRow(r.id, 'queryTag', e.target.value)} placeholder="Deal # / Tag" disabled={isRowLocked(r)} style={{ border: '1px dashed #e3eaf7', borderRadius: 6, padding: '6px', fontSize: 10.5, color: '#64748b', outline: 'none' }} />
+            </div>
+          </div>
+        );
+
+        return <div className="v2-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <button onClick={() => setAcctOpenMonth(null)} style={{ background: 'none', border: 'none', color: '#334e82', fontSize: 11, fontWeight: 700, cursor: 'pointer', marginRight: 8 }}>← Back</button>
+              <span style={{ fontSize: 15, fontWeight: 800, color: '#0f2350' }}>📖 {monthName(mk)}</span>
+              {isLocked && <span style={{ marginLeft: 8, fontSize: 10, background: '#faf1dc', color: '#8a6d1f', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>🔒 Frozen</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {isLocked && <button onClick={() => setUnlockAsk({ monthKey: mk })} style={{ background: 'linear-gradient(135deg,#8a6d1f,#c9942a)', color: '#fff', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>🔓 Unlock</button>}
+              {!isLocked && <button onClick={addLedgerRow} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>+ Add Row</button>}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div style={{ borderRight: '2px solid #eef2f8', paddingRight: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: '#dc2626', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8, textAlign: 'center', background: '#fef2f2', padding: '5px', borderRadius: 6 }}>← We Owe (Vendors + Expenses)</div>
+              {owe.length === 0 ? <div style={{ fontSize: 11, color: '#cbd5e1', textAlign: 'center', padding: '10px 0' }}>—</div> : owe.map(rowEditor)}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #fde5e5', display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 800, color: '#dc2626' }}><span>Total</span><b style={{ fontFamily: 'monospace' }}>{inr(oweTot)}</b></div>
+            </div>
+            <div style={{ paddingLeft: 2 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8, textAlign: 'center', background: '#f0faf4', padding: '5px', borderRadius: 6 }}>We Will Get (Clients) →</div>
+              {receive.length === 0 ? <div style={{ fontSize: 11, color: '#cbd5e1', textAlign: 'center', padding: '10px 0' }}>—</div> : receive.map(rowEditor)}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #d9f5e3', display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 800, color: '#15803d' }}><span>Total</span><b style={{ fontFamily: 'monospace' }}>{inr(receiveTot)}</b></div>
+            </div>
+          </div>
+          {other.length > 0 && <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed #e3eaf7' }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#64748b', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>Transfers &amp; Other</div>
+            {other.map(rowEditor)}
+          </div>}
+          <div style={{ marginTop: 14, padding: '12px 15px', background: balance >= 0 ? '#f0faf4' : '#fef2f2', border: '1px solid ' + (balance >= 0 ? '#d9f5e3' : '#fde5e5'), borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#0f2350' }}>Month Balance</span>
+            <b style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 800, color: balance >= 0 ? '#15803d' : '#dc2626' }}>{balance >= 0 ? '+ ' : '− '}{inr(Math.abs(balance))}</b>
+          </div>
+        </div>;
+      })()}
+
+      {/* Frozen months summary */}
+      {Object.keys(accounts.frozenMonths || {}).length > 0 && <div className="v2-panel" style={{ marginTop: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8 }}>🔓 Unlocked Months</div>
+        {Object.entries(accounts.frozenMonths || {}).map(([mk, st]) => (
+          st.unlocked ? <div key={mk} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px dashed #eef2f8', fontSize: 12 }}>
+            <span>{mk} — Unlocked by <b>{st.unlockedBy}</b> · {new Date(st.unlockedAt).toLocaleString('en-IN')}</span>
+            <button onClick={() => relock(mk)} style={{ border: '1px solid #d4e0f5', background: '#f8fafd', color: '#64748b', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Re-lock</button>
+          </div> : null
+        ))}
+      </div>}
+
+      {/* UNLOCK MODAL — password re-entry */}
+      {unlockAsk && <div onClick={() => { if (!unlockBusy) { setUnlockAsk(null); setUnlockPw(''); } }} style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6vh 16px' }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(440px,100%)', boxShadow: '0 20px 60px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg,#8a6d1f,#c9942a)', color: '#fff' }}>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: '#faf1dc', fontWeight: 800 }}>ADMIN CONFIRMATION</div>
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 2 }}>🔒 Unlock {unlockAsk.monthKey}</div>
+          </div>
+          <div style={{ padding: '18px 20px' }}>
+            <div style={{ fontSize: 12, color: '#6b7a99', marginBottom: 12, lineHeight: 1.5 }}>Pichle mahine ki entries edit karne ke liye password daaliye.</div>
+            <input type="password" autoFocus value={unlockPw} onChange={(e) => setUnlockPw(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !unlockBusy && unlockPw) doUnlock(); }}
+              placeholder="Password" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 8, padding: '11px 13px', fontSize: 13, outline: 'none', marginBottom: 14 }} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button disabled={unlockBusy || !unlockPw} onClick={doUnlock} style={{ flex: 1, background: unlockBusy ? '#c9942a' : 'linear-gradient(135deg,#8a6d1f,#c9942a)', color: '#fff', border: 'none', borderRadius: 8, padding: '11px', fontSize: 13, fontWeight: 800, cursor: unlockBusy ? 'wait' : 'pointer' }}>{unlockBusy ? 'Verifying…' : '🔓 Unlock'}</button>
+              <button onClick={() => { setUnlockAsk(null); setUnlockPw(''); }} style={{ background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 8, padding: '11px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
         </div>
-      )}
-
-      {showLedgerForm && (
-        <ModalShell title="+ Add Ledger Entry" onClose={() => setShowLedgerForm(false)} onSubmit={addLedgerEntry} saving={false} err="">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div>
-              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Date</div>
-              <input type="date" value={ledgerForm.date} onChange={(e) => setLedgerForm((f) => ({ ...f, date: e.target.value }))} style={inputStyle} />
-            </div>
-            <div>
-              <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Type</div>
-              <select value={ledgerForm.kind} onChange={(e) => setLedgerForm((f) => ({ ...f, kind: e.target.value }))} style={inputStyle}>
-                {['expense', 'income', 'salary', 'gst', 'other'].map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Party / Description</div>
-            <input value={ledgerForm.party} onChange={(e) => setLedgerForm((f) => ({ ...f, party: e.target.value }))} placeholder="e.g. Office Rent" style={inputStyle} />
-          </div>
-          <div>
-            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount (₹)</div>
-            <input type="number" value={ledgerForm.amount} onChange={(e) => setLedgerForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} />
-          </div>
-          <div>
-            <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Note</div>
-            <input value={ledgerForm.note} onChange={(e) => setLedgerForm((f) => ({ ...f, note: e.target.value }))} style={inputStyle} />
-          </div>
-        </ModalShell>
-      )}
+      </div>}
     </main>
   );
 }
