@@ -516,9 +516,79 @@ function BackupRestoreModal({ leads, onClose }) {
   );
 }
 
+// ── Vendor Dues Board ────────────────────────────────────────────────────
+// Aggregated view of every deal where vendor payments are still pending —
+// most-owed at top. One-click "💬 WA" opens a per-vendor WhatsApp draft
+// (client-facing reminder for the traveller so they can push their own
+// deadline). Click a row to jump to the deal. Ports V1's Dues Board.
+function VendorDuesModal({ leads, onClose, onDealClick }) {
+  const rows = useMemo(() => {
+    const out = [];
+    (leads || []).filter(isBookedStage).forEach((d) => {
+      const vs = dealVendors(d);
+      const cost = vs.reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+      const paid = vs.reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      const due = Math.max(0, cost - paid);
+      if (due > 0) out.push({ deal: d, due, cost, paid, vendorCount: vs.length });
+    });
+    return out.sort((a, b) => b.due - a.due);
+  }, [leads]);
+
+  const total = rows.reduce((s, r) => s + r.due, 0);
+
+  const openWA = (r) => {
+    const phone = (r.deal.contactNo || '').replace(/[^\d]/g, '');
+    if (!phone) { window.veToast && window.veToast('Is deal me phone nahi hai', 'warning'); return; }
+    const num = phone.length === 10 ? '91' + phone : phone;
+    const msg = encodeURIComponent(`Hi ${clientName(r.deal)},\n\nAapke ${destination(r.deal) || 'trip'} booking ke liye ₹${r.due.toLocaleString('en-IN')} ka vendor payment aur clear karna hai. Kripya jaldi settle karne me help karein taaki hum vendor ko timely release kar sakein.\n\nThanks,\nVoyage-Ed Travels`);
+    window.open(`https://wa.me/${num}?text=${msg}`, '_blank');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.45)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 700, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
+        <div style={{ padding: '18px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>💸 Vendor Dues Board</h3>
+            <div style={{ fontSize: 12, color: '#6b7a99', marginTop: 2 }}>Kul {fmtINR(total)} vendor payments pending — {rows.length} deal{rows.length !== 1 ? 's' : ''} me</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
+          {rows.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: '#6b7a99', fontSize: 13 }}>🎉 Sab clear! Koi vendor payment pending nahi hai.</div>
+          ) : (
+            <table className="info" style={{ width: '100%' }}>
+              <thead><tr><th>Client / Deal</th><th style={{ textAlign: 'right' }}>Vendor Cost</th><th style={{ textAlign: 'right' }}>Paid</th><th style={{ textAlign: 'right' }}>Due</th><th style={{ width: 80 }}></th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.deal._id} style={{ cursor: 'pointer' }} onClick={() => onDealClick(r.deal)}>
+                    <td>
+                      <div style={{ fontWeight: 700, color: '#0d1b3e', fontSize: 12.5 }}>{clientName(r.deal)}</div>
+                      <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{destination(r.deal) || 'No destination'}{r.deal.dealNumber ? ' · ' + r.deal.dealNumber : ''}</div>
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 11.5 }}>{fmtINR(r.cost)}</td>
+                    <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#10b981', fontSize: 11.5 }}>{fmtINR(r.paid)}</td>
+                    <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#dc2626', fontWeight: 700 }}>{fmtINR(r.due)}</td>
+                    <td>
+                      <button onClick={(e) => { e.stopPropagation(); openWA(r); }} title="WhatsApp reminder bhejo balance ke liye" style={{ background: '#22a04e', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 9px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' }}>💬 WA</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardV2({ leads, onDealClick }) {
   const [drilldown, setDrilldown] = useState(null); // null | {title, deals, columns}
   const [showBackup, setShowBackup] = useState(false);
+  const [showDues, setShowDues] = useState(false);
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
 
@@ -626,6 +696,7 @@ function DashboardV2({ leads, onDealClick }) {
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
+          <button className="v2-cta" onClick={() => setShowDues(true)} style={{ fontSize: 12, background: '#b91c1c' }} title="Vendor dues jinke liye paisa dena baaki hai">💸 Dues</button>
           <button className="v2-cta" onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('reports')} style={{ fontSize: 12, background: '#334e82' }}>📊 Reports</button>
           <button className="v2-cta" onClick={() => setShowBackup(true)} style={{ fontSize: 12, background: '#6b7a99' }}>💾 Backup</button>
           <button className="v2-icon-btn" title="Quick add">⊕</button>
@@ -633,6 +704,7 @@ function DashboardV2({ leads, onDealClick }) {
       </div>
 
       {showBackup && <BackupRestoreModal leads={leads} onClose={() => setShowBackup(false)} />}
+      {showDues && <VendorDuesModal leads={leads} onClose={() => setShowDues(false)} onDealClick={(d) => { setShowDues(false); onDealClick(d); }} />}
 
       {/* Daily Brief modal */}
       {drilldown && drilldown.title === 'daily-brief' && (
@@ -1982,6 +2054,54 @@ const GST_RATE_PACKAGE = 0.05;
 const lookupCountry = (city) => CITY_COUNTRY[(city || '').toLowerCase().trim()] || '';
 const lookupAirline = (code) => AIRLINE_MAP[(code || '').toUpperCase().trim()] || '';
 const lookupAirport = (code) => AIRPORT_MAP[(code || '').toUpperCase().trim()] || '';
+
+// Reverse lookup: given a city/airport name like "Delhi" or "Bali", return
+// the IATA code — used when the user types a city name into the From/To
+// field of a flight sector instead of a code. First checks AIRPORT_MAP
+// values (exact city match), then CITY_COORDS keys (common tourist cities)
+// mapped back to a plausible airport. Ports V1's getAirportByCity.
+const CITY_TO_IATA = {
+  delhi: 'DEL', 'new delhi': 'DEL', mumbai: 'BOM', bombay: 'BOM', bengaluru: 'BLR', bangalore: 'BLR',
+  chennai: 'MAA', madras: 'MAA', kolkata: 'CCU', calcutta: 'CCU', hyderabad: 'HYD',
+  ahmedabad: 'AMD', kochi: 'COK', cochin: 'COK', goa: 'GOI', jaipur: 'JAI', lucknow: 'LKO',
+  amritsar: 'ATQ', varanasi: 'VNS', chandigarh: 'IXC', pune: 'PNQ', srinagar: 'SXR',
+  leh: 'IXL', trivandrum: 'TRV', bhubaneswar: 'BBI', bagdogra: 'IXB',
+  // Middle East
+  dubai: 'DXB', 'abu dhabi': 'AUH', sharjah: 'SHJ', doha: 'DOH', muscat: 'MCT',
+  bahrain: 'BAH', kuwait: 'KWI', riyadh: 'RUH', jeddah: 'JED',
+  // SE Asia
+  singapore: 'SIN', bangkok: 'BKK', phuket: 'HKT', 'chiang mai': 'CNX', 'koh samui': 'USM',
+  'kuala lumpur': 'KUL', bali: 'DPS', denpasar: 'DPS', jakarta: 'CGK',
+  'ho chi minh': 'SGN', saigon: 'SGN', hanoi: 'HAN', 'da nang': 'DAD', danang: 'DAD',
+  'phu quoc': 'PQC', 'siem reap': 'REP', 'phnom penh': 'PNH', yangon: 'RGN', male: 'MLE', maldives: 'MLE',
+  colombo: 'CMB', kathmandu: 'KTM', dhaka: 'DAC', paro: 'PBH', thimphu: 'PBH',
+  penang: 'PEN', langkawi: 'LGK', 'kota kinabalu': 'BKI',
+  // East Asia
+  'hong kong': 'HKG', taipei: 'TPE', shanghai: 'PVG', beijing: 'PEK', seoul: 'ICN',
+  tokyo: 'NRT',
+  // Europe
+  london: 'LHR', paris: 'CDG', frankfurt: 'FRA', amsterdam: 'AMS', zurich: 'ZUR',
+  vienna: 'VIE', rome: 'FCO', barcelona: 'BCN', madrid: 'MAD', milan: 'MXP', venice: 'VCE',
+  athens: 'ATH', istanbul: 'IST', munich: 'MUC', prague: 'PRG', lisbon: 'LIS',
+  dublin: 'DUB', geneva: 'GVA', berlin: 'BER', budapest: 'BUD', copenhagen: 'CPH',
+  stockholm: 'ARN', oslo: 'OSL', helsinki: 'HEL', warsaw: 'WAW', naples: 'NAP',
+  palma: 'PMI', santorini: 'JTR', mykonos: 'JMK', nice: 'NCE', dubrovnik: 'DBV',
+  salzburg: 'SZG', innsbruck: 'INN', florence: 'FLR', pisa: 'PSA',
+  // Africa / Others
+  cairo: 'CAI', johannesburg: 'JNB', nairobi: 'NBO',
+  // Americas / Oceania
+  sydney: 'SYD', melbourne: 'MEL', perth: 'PER', brisbane: 'BNE', auckland: 'AKL',
+  'los angeles': 'LAX', 'new york': 'JFK', chicago: 'ORD', toronto: 'YYZ', vancouver: 'YVR',
+  // Caucasus / CIS
+  tbilisi: 'TBS', batumi: 'BUS', baku: 'GYD', yerevan: 'EVN',
+  almaty: 'ALA', astana: 'NQZ', tashkent: 'TAS',
+};
+const cityToIATA = (input) => {
+  if (!input) return '';
+  const key = String(input).toLowerCase().trim();
+  if (/^[A-Za-z]{3}$/.test(input.trim())) return input.toUpperCase(); // already 3-letter
+  return CITY_TO_IATA[key] || '';
+};
 
 // Fetch live FX rates once per session (foreign → INR incl. markup) so a
 // vendor CP entered in USD/EUR/JPY auto-fills the exchange rate the moment
@@ -4650,8 +4770,18 @@ function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, labe
         {showRemove && <button onClick={onRemove} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</button>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-        <input value={sector.from} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ from: v, fromName: lookupAirport(v) || sector.fromName }); }} placeholder="From (DEL)" style={inputStyle} />
-        <input value={sector.to} onChange={(e) => { const v = e.target.value.toUpperCase(); onChange({ to: v, toName: lookupAirport(v) || sector.toName }); }} placeholder="To (SGN)" style={inputStyle} />
+        <input value={sector.from} onChange={(e) => {
+          const raw = e.target.value;
+          // Allow city name entry: "Delhi" auto-converts to "DEL" on 4+ char
+          // input so user can type either. IATA codes stay 3 chars.
+          const resolved = raw.length >= 4 ? (cityToIATA(raw) || raw.toUpperCase()) : raw.toUpperCase();
+          onChange({ from: resolved, fromName: lookupAirport(resolved) || sector.fromName });
+        }} placeholder="From (DEL or Delhi)" style={inputStyle} />
+        <input value={sector.to} onChange={(e) => {
+          const raw = e.target.value;
+          const resolved = raw.length >= 4 ? (cityToIATA(raw) || raw.toUpperCase()) : raw.toUpperCase();
+          onChange({ to: resolved, toName: lookupAirport(resolved) || sector.toName });
+        }} placeholder="To (SGN or Saigon)" style={inputStyle} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
         <input value={sector.fromName} onChange={(e) => onChange({ fromName: e.target.value })} placeholder="From city" style={inputStyle} />
@@ -7111,6 +7241,82 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
     setBusy(false);
   };
 
+  // ── Delete THIS deal (and any sibling destinations sharing the enquiryId,
+  // if the user opts in). Ports V1's deleteDealEverywhere. Two-step confirm:
+  // first "Delete this destination?", then if siblings exist "…and all X
+  // other destinations for the same client?". Server call is best-effort —
+  // even if it fails we still navigate away rather than lock the UI. ──
+  const deleteDeal = async () => {
+    const label = destination(deal) || clientName(deal) || 'this deal';
+    const siblings = (deal.enquiryId ? (allLeads || []).filter((l) => l.enquiryId === deal.enquiryId && l._id !== deal._id) : []);
+    const askSiblings = siblings.length > 0;
+    if (!window.confirm(`Delete "${label}"?\n\nIs deal ka saara data (hotels, flights, pricing, payments) permanently delete ho jayega. Sirf isi deal ko delete karega, baaki destinations safe rahengi.`)) return;
+    let alsoDeleteSiblings = false;
+    if (askSiblings) {
+      alsoDeleteSiblings = window.confirm(`Yeh client ke ${siblings.length} aur destination${siblings.length !== 1 ? 's' : ''} bhi linked hain (${siblings.map((s) => destination(s) || 'Untitled').join(', ')}). Un sab ko bhi delete karna hai?\n\nOK = sab kuch delete, Cancel = sirf ye ek`);
+    }
+    setBusy(true);
+    try {
+      const toDelete = alsoDeleteSiblings ? [deal, ...siblings] : [deal];
+      for (const d of toDelete) {
+        try {
+          await fetch(`${apiBase()}/api/leads/${d._id}`, { method: 'DELETE', headers: authHeaders() });
+        } catch (err) { console.warn('delete failed for', d._id, err); }
+      }
+      window.veToast && window.veToast(`${toDelete.length} deal${toDelete.length !== 1 ? 's' : ''} deleted`, 'success');
+      onBack && onBack();
+    } catch (e) {
+      window.veToast && window.veToast('Delete failed: ' + e.message, 'warning');
+    }
+    setBusy(false);
+  };
+
+  // ── AI Call Prep — ports V1's generateCallScript. Opens a modal with a
+  // Hinglish, action-oriented phone script tailored to the deal's stage,
+  // priority, price, and remarks so the owner walks into the call ready. ──
+  const [callScriptText, setCallScriptText] = useState('');
+  const [callScriptBusy, setCallScriptBusy] = useState(false);
+  const [callScriptOpen, setCallScriptOpen] = useState(false);
+  const generateCallScript = async () => {
+    setCallScriptBusy(true);
+    setCallScriptOpen(true);
+    setCallScriptText('');
+    try {
+      const sell = sellINR(deal);
+      const recv = paidINR(deal);
+      const ctx = {
+        client: clientName(deal),
+        destination: destination(deal) || 'their trip',
+        stage: deal.stage || 'New Lead',
+        priority: deal.priority || 'Normal',
+        leadSource: deal.leadSource || 'unknown',
+        travelDates: deal.travelDates || '',
+        adults: deal.adults, children: deal.children,
+        quotedPrice: sell > 0 ? sell : null,
+        amountReceived: recv > 0 ? recv : null,
+        balance: sell - recv > 0 ? sell - recv : null,
+        remarks: deal.remarks || '',
+      };
+      const system = `You are a top travel-sales coach for Voyage-Ed Travels (India). Prepare the owner for a phone call with this client. Output a tight, practical CALL SCRIPT in friendly Hinglish with these sections (use emoji headers):
+🎯 Goal of this call (1 line, based on the pipeline stage)
+👋 Opening line (warm, personalised)
+💬 Key talking points (3-4 bullets using the actual trip + price details)
+🛡️ Likely objections & how to answer (2-3, e.g. price, thinking about it, comparing)
+✅ Closing / next step (clear ask)
+Keep it under 200 words. Be specific with names, destination and amounts. Don't invent facts not given.`;
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 800, system, messages: [{ role: 'user', content: 'Client data:\n' + JSON.stringify(ctx, null, 1) }] }),
+      });
+      const data = await res.json();
+      const text = (data.content && data.content[0] && data.content[0].text) || data.error || 'No response';
+      setCallScriptText(text);
+    } catch (e) {
+      setCallScriptText('⚠️ Unavailable — check server ANTHROPIC_API_KEY. (' + e.message + ')');
+    }
+    setCallScriptBusy(false);
+  };
+
   const waPhone = (deal.contactNo || '').replace(/[^\d]/g, '');
   const waNum = waPhone.length === 10 ? '91' + waPhone : waPhone;
   const waLink = () => {
@@ -7259,6 +7465,8 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
             )}
             <button className="v2-hero-btn" onClick={addDestination} disabled={busy} title="Same client ke liye naya destination banao — details automatic copy ho jayengi">➕ Add Destination</button>
             <button className="v2-hero-btn" onClick={duplicateDeal} disabled={busy} title="Full duplicate — vendors/itinerary/pricing copy, payments/refunds fresh">⧉ Duplicate</button>
+            <button className="v2-hero-btn" onClick={generateCallScript} disabled={busy || callScriptBusy} title="AI phone call ke liye Hinglish script generate kare — client ka context use karke">🎯 Call Prep</button>
+            <button className="v2-hero-btn" onClick={deleteDeal} disabled={busy} title="Ye deal delete karo (aur linked destinations bhi option pe)" style={{ color: '#dc2626' }}>🗑 Delete</button>
             <button className="v2-hero-btn gold" onClick={() => setModal('proposalBuilder')}>📄 Proposal PDF</button>
             <button className="v2-hero-btn" onClick={() => {
               const w = window.open('', '_blank');
@@ -8281,6 +8489,33 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
+          {callScriptOpen && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.5)', zIndex: 250, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+              onClick={(e) => { if (e.target === e.currentTarget) setCallScriptOpen(false); }}>
+              <div style={{ background: '#fff', borderRadius: 18, width: 620, maxWidth: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.3)' }}>
+                <div style={{ padding: '18px 22px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>🎯 AI Call Prep — {clientName(deal)}</h3>
+                    <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Ready-to-use phone script based on this deal's context</div>
+                  </div>
+                  <button onClick={() => setCallScriptOpen(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+                  {callScriptBusy && !callScriptText ? (
+                    <div style={{ color: '#6b7a99', fontSize: 13, padding: 20, textAlign: 'center' }}>⏳ Script generate ho raha hai…</div>
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.7, color: '#0d1b3e', fontFamily: 'system-ui, sans-serif' }}>{callScriptText}</div>
+                  )}
+                </div>
+                {callScriptText && (
+                  <div style={{ padding: '12px 20px', borderTop: '1px solid #e8ecf5', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                    <button onClick={() => generateCallScript()} disabled={callScriptBusy} style={{ background: '#f4f7fc', border: '1px solid #d4e0f5', color: '#334e82', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>↻ Regenerate</button>
+                    <button onClick={() => { navigator.clipboard.writeText(callScriptText); window.veToast && window.veToast('Script copied ✓', 'success'); }} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>📋 Copy</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {modal === 'landVoucherAI' && <LandVoucherAIModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'invoice' && <InvoiceModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'vouchers' && <VouchersModal deal={deal} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
@@ -10550,6 +10785,129 @@ function UsersV2() {
 
 const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'users'];
 
+// ── Floating AI Assistant ────────────────────────────────────────────────
+// Ports V1's bottom-right chat widget: natural-language commands that either
+// answer a question or execute an action ("create a deal for X", "show hot
+// leads", "how much to collect", "draft follow-up"). Data snapshot is sent
+// to Claude with each turn so answers stay grounded in the actual CRM data.
+// Actions are routed through window.__voyagePages* handlers exposed by the
+// main app shell so this widget doesn't need to know about routing internals.
+function FloatingAIAssistant({ leads, currentDeal }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [chat, setChat] = useState([{ role: 'assistant', text: "Hi! I'm your Voyage-Ed AI. Try: \"show hot leads\", \"how much do I need to collect?\", \"create a deal for Rahul to Dubai\", or \"draft a follow-up for the current client\"." }]);
+  const [thinking, setThinking] = useState(false);
+
+  const snapshot = useCallback(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const booked = (leads || []).filter(isBookedStage);
+    return {
+      totalDeals: (leads || []).length,
+      bookedCount: booked.length,
+      hotLeads: (leads || []).filter((d) => (d.priority === 'Hot 🔥' || d.priority === 'High') && !['Booked', 'Cancelled', 'Lost'].includes(d.stage || '')).slice(0, 20).map((d) => ({ client: clientName(d), dest: destination(d), stage: d.stage })),
+      followUpsDue: (leads || []).filter((d) => d.followUpDate && d.followUpDate <= today && !['Booked', 'Cancelled', 'Lost', 'Travelled'].includes(d.stage || '')).slice(0, 20).map((d) => ({ client: clientName(d), date: d.followUpDate, priority: d.priority })),
+      toCollect: booked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0),
+      toPayVendors: booked.reduce((s, d) => {
+        const vs = dealVendors(d);
+        const cost = vs.reduce((a, v) => a + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+        const paid = vs.reduce((a, v) => a + sumBy(v.payments, 'amount'), 0);
+        return s + Math.max(0, cost - paid);
+      }, 0),
+      currentDeal: currentDeal ? { client: clientName(currentDeal), dest: destination(currentDeal), stage: currentDeal.stage, dealNumber: currentDeal.dealNumber } : null,
+    };
+  }, [leads, currentDeal]);
+
+  const runAction = (action) => {
+    const { type, payload = {} } = action || {};
+    try {
+      if (type === 'goto') {
+        const key = payload.screen;
+        if (window.__voyagePagesNav) window.__voyagePagesNav(key);
+      } else if (type === 'open_dues') {
+        // Best-effort: navigate to dashboard where Dues button lives
+        if (window.__voyagePagesNav) window.__voyagePagesNav('dashboard');
+      } else if (type === 'open_reports') {
+        if (window.__voyagePagesNav) window.__voyagePagesNav('reports');
+      } else if (type === 'search_deals') {
+        // Navigate to leads and let user find (V2 has no in-app URL search wiring yet)
+        if (window.__voyagePagesNav) window.__voyagePagesNav('leads');
+      }
+      // For other actions (create_deal, draft_whatsapp, etc.) the widget
+      // acknowledges via the assistant reply but doesn't perform destructive
+      // actions without confirmation — kept read-only for safety in V2.
+    } catch (e) { console.warn('AI action failed:', e && e.message); }
+  };
+
+  const runAI = async () => {
+    const q = input.trim();
+    if (!q) return;
+    setChat((c) => [...c, { role: 'user', text: q }]);
+    setInput('');
+    setThinking(true);
+    try {
+      const system = `You are the AI assistant inside Voyage-Ed Travels CRM. You help the owner run their travel business.
+You can either ANSWER a question about their data, or return an ACTION for the app to perform.
+Respond with ONLY a JSON object, no markdown, in this shape:
+{"reply":"short friendly reply in Hinglish or English","action":{"type":"...","payload":{...}}}
+Valid action types (use null if just answering):
+- "goto": payload {screen} where screen is "dashboard"|"leads"|"deals"|"clients"|"reports"|"accounts"|"vendors"|"tasks"|"users"
+- "open_dues": open the vendor dues board on dashboard
+- "open_reports": jump to Reports page
+- "search_deals": payload {query} — user wants to find a specific deal
+Current CRM snapshot: ${JSON.stringify(snapshot())}
+Be concise. Answer in the same language the user asked (Hindi/English/Hinglish). Include specific numbers and client names from the snapshot when relevant. If asked to do something you have no action for, explain politely with action null.`;
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600, system, messages: [{ role: 'user', content: q }] }),
+      });
+      const data = await res.json();
+      const text = (data.content && data.content[0] && data.content[0].text) || data.error || '';
+      let parsed;
+      try { parsed = JSON.parse(text.replace(/```json|```/g, '').trim()); }
+      catch { parsed = { reply: text || "Sorry, couldn't process that.", action: null }; }
+      setChat((c) => [...c, { role: 'assistant', text: parsed.reply || 'Done.' }]);
+      if (parsed.action) runAction(parsed.action);
+    } catch (e) {
+      setChat((c) => [...c, { role: 'assistant', text: '⚠️ AI unavailable. Check server ANTHROPIC_API_KEY. (' + e.message + ')' }]);
+    }
+    setThinking(false);
+  };
+
+  return (
+    <>
+      <button onClick={() => setOpen((o) => !o)} aria-label="AI Assistant"
+        style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9998, width: 56, height: 56, borderRadius: '50%', border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,#4169E1,#5b7fff)', boxShadow: '0 10px 30px -6px rgba(65,105,225,.6)', fontSize: 24, color: '#fff' }}>
+        {open ? '✕' : '🤖'}
+      </button>
+      {open && (
+        <div style={{ position: 'fixed', bottom: 88, right: 16, left: 16, maxWidth: 400, marginLeft: 'auto', zIndex: 9998, background: '#f4f7fc', border: '1px solid #4169E1', borderRadius: 16, boxShadow: '0 24px 60px -12px rgba(0,0,0,.5)', display: 'flex', flexDirection: 'column', maxHeight: 'min(560px,75vh)', overflow: 'hidden' }}>
+          <div style={{ background: 'linear-gradient(135deg,#e8efff,#dfe8ff)', padding: '13px 18px', borderBottom: '1px solid #4169E1' }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#1a2c52' }}>🤖 Voyage-Ed AI Assistant</div>
+            <div style={{ fontSize: 11, color: '#4169E1' }}>Tell me what to do — I'll handle it</div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {chat.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', background: m.role === 'user' ? '#4169E1' : '#eef3fc', color: m.role === 'user' ? '#fff' : '#1a2c52', padding: '10px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{m.text}</div>
+            ))}
+            {thinking && <div style={{ alignSelf: 'flex-start', color: '#4169E1', fontSize: 12, padding: '6px 10px', fontStyle: 'italic' }}>thinking…</div>}
+          </div>
+          <div style={{ padding: 12, borderTop: '1px solid #d4e0f5', display: 'flex', gap: 8 }}>
+            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !thinking) runAI(); }}
+              placeholder="e.g. how much to collect from Radha?"
+              style={{ flex: 1, background: '#eef3fc', border: '1px solid #4169E1', borderRadius: 9, color: '#1a2c52', padding: '10px 13px', fontSize: 13, outline: 'none' }} />
+            <button onClick={runAI} disabled={thinking} style={{ background: 'linear-gradient(135deg,#4169E1,#5b7fff)', border: 'none', borderRadius: 9, color: '#fff', padding: '0 15px', fontWeight: 800, cursor: thinking ? 'wait' : 'pointer', fontSize: 14 }}>➤</button>
+          </div>
+          <div style={{ padding: '0 12px 12px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {['Hot leads dikhao', 'Kitna collect karna hai?', 'Aaj ke follow-ups', 'Vendor dues kaha hai'].map((s) => (
+              <span key={s} onClick={() => setInput(s)} style={{ fontSize: 11, background: '#eef3fc', border: '1px solid #4169E1', color: '#4169E1', padding: '4px 9px', borderRadius: 20, cursor: 'pointer' }}>{s}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function V2Pages() {
   const [route, setRoute] = useState('dashboard');
   const [selectedDeal, setSelectedDeal] = useState(null);
@@ -10635,9 +10993,18 @@ export default function V2Pages() {
     </div>
   ) : null;
 
-  // Wrap every route in a fragment so the stale banner can sit above the
-  // page content without changing existing layouts.
-  const wrap = (child) => <>{staleBanner}{child}</>;
+  // Wrap every route in a fragment so the stale banner + AI Assistant can
+  // sit above the page content without changing existing layouts. The AI
+  // widget is included in every wrap so it's available on every screen —
+  // dashboard, deals, reports, and even inside an open deal (in which case
+  // it also knows about the deal's context via selectedDeal).
+  const wrap = (child) => (
+    <>
+      {staleBanner}
+      {child}
+      <FloatingAIAssistant leads={items} currentDeal={selectedDeal} />
+    </>
+  );
 
   if (route === 'deal' && selectedDeal) {
     return wrap(
