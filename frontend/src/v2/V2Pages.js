@@ -3621,6 +3621,7 @@ function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
 function LandVoucherAIModal({ deal, onClose }) {
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState(null); // {itinerary, meetingPoints, vendorTC, emergencyContact, pickupTimes}
+  const [addingMore, setAddingMore] = useState(false); // true while showing PasteZone again for a follow-up page, without discarding what's already been extracted
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -3637,7 +3638,23 @@ function LandVoucherAIModal({ deal, onClose }) {
       if (!res.ok) throw new Error(data.error || 'AI error');
       const raw = (data.content || []).map((c) => c.text || '').join('').replace(/```json|```/g, '').trim();
       const j = JSON.parse(raw);
-      setExtracted(j);
+      // Merge with any prior scan instead of replacing it. Vendor vouchers
+      // are often multi-page (Day 1-3 in one screenshot, Day 4-7 in the
+      // next, T&C on a separate page) — a plain overwrite on every scan
+      // was silently discarding everything captured before it.
+      setExtracted((prev) => {
+        if (!prev) return j;
+        const cat = (a, b) => { const as = String(a || '').trim(); const bs = String(b || '').trim(); if (!as) return bs; if (!bs) return as; return as + '\n\n' + bs; };
+        return {
+          vendorName: prev.vendorName || j.vendorName,
+          confirmationNo: prev.confirmationNo || j.confirmationNo,
+          itinerary: cat(prev.itinerary, j.itinerary),
+          meetingPoints: cat(prev.meetingPoints, j.meetingPoints),
+          vendorTC: cat(prev.vendorTC, j.vendorTC),
+          emergencyContact: cat(prev.emergencyContact, j.emergencyContact),
+        };
+      });
+      setAddingMore(false);
       window.veToast && window.veToast('Vendor voucher extracted ✓', 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read — try a clearer image');
@@ -3712,9 +3729,9 @@ function LandVoucherAIModal({ deal, onClose }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
-          {!extracted && (
+          {(!extracted || addingMore) && (
             <PasteZone
-              hint="Click here, then paste (Ctrl+V) the vendor voucher — screenshot, PDF, or plain text"
+              hint={extracted ? "Paste the NEXT page (Ctrl+V) — it'll be added to what you already have" : "Click here, then paste (Ctrl+V) the vendor voucher — screenshot, PDF, or plain text"}
               accept="image/*,.pdf"
               multiple
               onFiles={processFiles}
@@ -3751,9 +3768,8 @@ function LandVoucherAIModal({ deal, onClose }) {
               )}
               <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
                 <button className="v2-cta" onClick={saveToLand} disabled={saving}>{saving ? 'Saving…' : '✓ Save & Generate Vouchers'}</button>
-                <label style={{ cursor: 'pointer' }}>
-                  <button className="v2-cta" onClick={() => setExtracted(null)} style={{ background: '#6b7a99' }}>🔄 Scan Another</button>
-                </label>
+                <button className="v2-cta" onClick={() => setAddingMore(true)} style={{ background: '#334e82' }}>➕ Add Another Page</button>
+                <button className="v2-cta" onClick={() => { setExtracted(null); setAddingMore(false); }} style={{ background: '#6b7a99' }}>🔄 Start Over</button>
               </div>
             </div>
           )}
@@ -5120,31 +5136,78 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
         airlineCode: (x.airlineCode || '').toUpperCase(), airlineName: x.airlineName || '',
       });
-      const secs = (j.sectors || []).map(mapSec);
-      const retSecs = (j.returnSectors || []).map(mapSec);
-      if (!secs.length) throw new Error('No flight details found in this file');
+      const newSecs = (j.sectors || []).map(mapSec);
+      const newRet = (j.returnSectors || []).map(mapSec);
+      if (!newSecs.length) throw new Error('No flight details found in this file');
 
-      let type = String(j.flightType || '').toLowerCase();
-      if (!['one-way', 'return', 'multi-city'].includes(type)) {
-        type = retSecs.length ? 'return' : (secs.length > 1 ? 'multi-city' : 'one-way');
+      // MERGE, don't overwrite, when this is a follow-up paste. Common
+      // real-world flow: paste the outbound ticket screenshot, THEN
+      // separately paste the return ticket screenshot (two different
+      // images/PDFs, pasted one after another). Each single-ticket
+      // screenshot only ever shows ONE direction, so if we blindly
+      // overwrote `sectors`/`returnSectors` on every paste, the second
+      // paste would wipe out the first — leaving what looks like two
+      // separate one-way trips instead of a single Return trip. This is
+      // exactly the bug reported: "return ki jagah one-way one-way dikha
+      // deta hai".
+      const hadExistingOutbound = sectors.some((s) => s.from || s.to);
+      const hadExistingReturn = returnSectors.some((s) => s.from || s.to);
+
+      if (newRet.length > 0) {
+        // This single extraction already found BOTH directions (e.g. a
+        // combined itinerary PDF) — it's self-contained, so it's safe to
+        // set both lists directly from this one result.
+        setFlightType('return');
+        setSectors(newSecs);
+        setReturnSectors(newRet);
+      } else if (!hadExistingOutbound && !hadExistingReturn) {
+        // First paste ever for this modal — plain initialize.
+        let type = String(j.flightType || '').toLowerCase();
+        if (!['one-way', 'return', 'multi-city'].includes(type)) type = newSecs.length > 1 ? 'multi-city' : 'one-way';
+        setFlightType(type);
+        setSectors(newSecs);
+      } else if (flightType === 'return' && hadExistingOutbound && !hadExistingReturn) {
+        // Return trip already selected, outbound already filled from a
+        // prior paste, return side still blank → this new single-direction
+        // extraction fills the return leg.
+        setReturnSectors(newSecs);
+      } else if (flightType === 'return' && !hadExistingOutbound && hadExistingReturn) {
+        setSectors(newSecs);
+      } else if (flightType === 'return' && hadExistingOutbound && hadExistingReturn) {
+        // Both sides already have something — treat this as an additional
+        // connecting leg on whichever side is shorter (simple heuristic).
+        if (sectors.length <= returnSectors.length) setSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
+        else setReturnSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
+      } else if (flightType === 'one-way' && hadExistingOutbound) {
+        // A one-way trip already has an outbound leg, and now a SECOND
+        // single-direction screenshot just came in. The overwhelmingly
+        // common reason someone pastes a second flight screenshot after
+        // the first is: it's the return leg. Auto-upgrade to Return.
+        setFlightType('return');
+        setReturnSectors(newSecs);
+      } else {
+        // Multi-city or any other state with existing outbound data —
+        // append as an additional sector rather than replacing.
+        setSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
+        if (sectors.filter((s) => s.from || s.to).length + newSecs.length > 1) setFlightType('multi-city');
       }
-      setFlightType(type);
-      setSectors(secs);
-      setReturnSectors(retSecs.length ? retSecs : [emptySector()]);
+
       // Vendor name and airline are independent. If the AI returned a
       // vendorName (payment recipient — DMC/consolidator), use it as-is;
       // otherwise start with a blank so user can pick between direct
       // airline booking vs a DMC. Airline fields always come from the ticket.
       if (!name.trim() && j.vendorName) setName(j.vendorName);
-      if (!airlineCode && secs[0].airlineCode) setAirlineCode(secs[0].airlineCode);
-      if (!airlineName && secs[0].airlineName) setAirlineName(secs[0].airlineName);
+      if (!airlineCode && newSecs[0].airlineCode) setAirlineCode(newSecs[0].airlineCode);
+      if (!airlineName && newSecs[0].airlineName) setAirlineName(newSecs[0].airlineName);
       if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
 
-      const totalLegs = secs.length + retSecs.length;
+      const totalLegs = newSecs.length + newRet.length;
       setAiSummary(
-        totalLegs > 1
-          ? `✓ Extracted ${secs.length} outbound + ${retSecs.length} return sector${retSecs.length !== 1 ? 's' : ''} — review below.`
-          : '✓ Extracted — review the fields below before saving.'
+        newRet.length > 0
+          ? `✓ Extracted ${newSecs.length} outbound + ${newRet.length} return sector${newRet.length !== 1 ? 's' : ''} — review below.`
+          : hadExistingOutbound || hadExistingReturn
+            ? `✓ Added ${totalLegs} more sector${totalLegs !== 1 ? 's' : ''} — merged with what you already pasted.`
+            : '✓ Extracted — review the fields below before saving.'
       );
       window.veToast && window.veToast('Flight details extracted ✓', 'success');
     } catch (ex) {
@@ -5378,22 +5441,47 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
         classOfTravel: x.classOfTravel || '3A', coach: x.coach || '', pnr: x.pnr || '',
       });
-      const segs = (j.segments || []).map(mapSeg);
-      const retSegs = (j.returnSegments || []).map(mapSeg);
-      if (!segs.length) throw new Error('No train details found in this file');
+      const newSegs = (j.segments || []).map(mapSeg);
+      const newRet = (j.returnSegments || []).map(mapSeg);
+      if (!newSegs.length) throw new Error('No train details found in this file');
 
-      let type = retSegs.length ? 'return' : (segs.length > 1 ? 'multi-city' : 'one-way');
-      setTripType(type);
-      setSegments(segs);
-      setReturnSegments(retSegs.length ? retSegs : [emptySeg()]);
-      if (!name.trim()) setName(j.vendorName || segs[0].trainName || '');
+      // Same merge-not-overwrite logic as flights: a second paste is almost
+      // always the return ticket, not a replacement for the first paste.
+      const hadOutbound = segments.some((s) => s.from || s.to || s.trainName);
+      const hadReturn = returnSegments.some((s) => s.from || s.to || s.trainName);
+
+      if (newRet.length > 0) {
+        setTripType('return');
+        setSegments(newSegs);
+        setReturnSegments(newRet);
+      } else if (!hadOutbound && !hadReturn) {
+        setTripType(newSegs.length > 1 ? 'multi-city' : 'one-way');
+        setSegments(newSegs);
+      } else if (tripType === 'return' && hadOutbound && !hadReturn) {
+        setReturnSegments(newSegs);
+      } else if (tripType === 'return' && !hadOutbound && hadReturn) {
+        setSegments(newSegs);
+      } else if (tripType === 'return' && hadOutbound && hadReturn) {
+        if (segments.length <= returnSegments.length) setSegments((arr) => [...arr.filter((s) => s.from || s.to || s.trainName), ...newSegs]);
+        else setReturnSegments((arr) => [...arr.filter((s) => s.from || s.to || s.trainName), ...newSegs]);
+      } else if (tripType === 'one-way' && hadOutbound) {
+        setTripType('return');
+        setReturnSegments(newSegs);
+      } else {
+        setSegments((arr) => [...arr.filter((s) => s.from || s.to || s.trainName), ...newSegs]);
+        if (segments.filter((s) => s.from || s.to || s.trainName).length + newSegs.length > 1) setTripType('multi-city');
+      }
+
+      if (!name.trim()) setName(j.vendorName || newSegs[0].trainName || '');
       if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
 
-      const totalLegs = segs.length + retSegs.length;
+      const totalLegs = newSegs.length + newRet.length;
       setAiSummary(
-        totalLegs > 1
-          ? `✓ Extracted ${segs.length} outbound + ${retSegs.length} return segment${retSegs.length !== 1 ? 's' : ''} — all editable below.`
-          : '✓ Extracted — review the fields below before saving.'
+        newRet.length > 0
+          ? `✓ Extracted ${newSegs.length} outbound + ${newRet.length} return segment${newRet.length !== 1 ? 's' : ''} — all editable below.`
+          : hadOutbound || hadReturn
+            ? `✓ Added ${totalLegs} more segment${totalLegs !== 1 ? 's' : ''} — merged with what you already pasted.`
+            : '✓ Extracted — review the fields below before saving.'
       );
       window.veToast && window.veToast('Train details extracted ✓', 'success');
     } catch (ex) {
@@ -5755,13 +5843,21 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
     try {
       const j = await runAIExtract('land', files);
       if (!j.itinerary) throw new Error('No itinerary details found in this file');
-      setForm((f) => ({
-        ...f,
-        name: j.vendorName || f.name,
-        costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
-        itinerary: j.itinerary,
-      }));
-      setAiSummary('✓ Itinerary extracted — review the day-wise plan below before saving.');
+      setForm((f) => {
+        // APPEND, don't overwrite. A common real workflow is pasting a
+        // multi-page itinerary one screenshot at a time (Day 1-3 in one
+        // paste, Day 4-7 in the next) — overwriting on each paste was
+        // silently discarding everything captured before it.
+        const existing = String(f.itinerary || '').trim();
+        const merged = existing ? `${existing}\n\n${j.itinerary}` : j.itinerary;
+        return {
+          ...f,
+          name: j.vendorName || f.name,
+          costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
+          itinerary: merged,
+        };
+      });
+      setAiSummary('✓ Itinerary extracted — added to what you already had. Review below before saving.');
       window.veToast && window.veToast('Itinerary extracted ✓', 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read this file — try a clearer scan');
@@ -6045,7 +6141,15 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
         checkIn: j.checkIn || f.checkIn,
         checkOut: j.checkOut || f.checkOut,
         costPrice: j.costPrice != null ? String(j.costPrice) : f.costPrice,
-        itinerary: j.itinerary || f.itinerary,
+        // Append itinerary text rather than replacing — cruise itineraries
+        // are often multi-page (day-by-day port schedule spans several
+        // screenshots), same fix as the Land voucher itinerary field.
+        itinerary: (() => {
+          const existing = String(f.itinerary || '').trim();
+          const incoming = String(j.itinerary || '').trim();
+          if (!incoming) return f.itinerary;
+          return existing ? `${existing}\n\n${incoming}` : incoming;
+        })(),
       }));
       setAiSummary('✓ Cruise details extracted — review before saving.');
       window.veToast && window.veToast('Cruise booking extracted ✓', 'success');
