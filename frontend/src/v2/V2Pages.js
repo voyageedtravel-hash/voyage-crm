@@ -585,10 +585,11 @@ function VendorDuesModal({ leads, onClose, onDealClick }) {
   );
 }
 
-function DashboardV2({ leads, onDealClick }) {
+function DashboardV2({ leads, onDealClick, onLeadCreated }) {
   const [drilldown, setDrilldown] = useState(null); // null | {title, deals, columns}
   const [showBackup, setShowBackup] = useState(false);
   const [showDues, setShowDues] = useState(false);
+  const [showNewLead, setShowNewLead] = useState(false);
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
 
@@ -706,16 +707,31 @@ function DashboardV2({ leads, onDealClick }) {
         </div>
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
+          <button className="v2-cta" onClick={() => setShowNewLead(true)} style={{ fontSize: 12, background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', fontWeight: 800 }} title="Naye client ki enquiry banao — turant deal detail me jump kar jaoge">✨ New Deal</button>
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
           <button className="v2-cta" onClick={() => setShowDues(true)} style={{ fontSize: 12, background: '#b91c1c' }} title="Vendor dues jinke liye paisa dena baaki hai">💸 Dues</button>
           <button className="v2-cta" onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('reports')} style={{ fontSize: 12, background: '#334e82' }}>📊 Reports</button>
           <button className="v2-cta" onClick={() => setShowBackup(true)} style={{ fontSize: 12, background: '#6b7a99' }}>💾 Backup</button>
-          <button className="v2-icon-btn" title="Quick add">⊕</button>
         </div>
       </div>
 
       {showBackup && <BackupRestoreModal leads={leads} onClose={() => setShowBackup(false)} />}
       {showDues && <VendorDuesModal leads={leads} onClose={() => setShowDues(false)} onDealClick={(d) => { setShowDues(false); onDealClick(d); }} />}
+      {showNewLead && (
+        <NewLeadModal
+          onClose={() => setShowNewLead(false)}
+          onCreated={(created) => {
+            setShowNewLead(false);
+            // Refresh the leads list so the new deal shows up on the dashboard
+            // (KPIs, cycle bucketing etc.) — then jump straight into it so
+            // the user can start adding vendors / itinerary without an extra
+            // navigation step. Same pattern as LeadsV2's + New Lead flow.
+            onLeadCreated && onLeadCreated();
+            if (window.__voyagePagesOpenDeal) window.__voyagePagesOpenDeal(created);
+            else onDealClick && onDealClick(created);
+          }}
+        />
+      )}
 
       {/* Daily Brief modal */}
       {drilldown && drilldown.title === 'daily-brief' && (
@@ -10987,5 +11003,5 @@ export default function V2Pages() {
   if (route === 'accounts') return wrap(<AccountsV2 leads={items} onDealClick={openDeal} />);
   if (route === 'reports') return wrap(<ReportsV2 leads={items} />);
   if (route === 'users') return wrap(<UsersV2 />);
-  return wrap(<DashboardV2 leads={items} onDealClick={openDeal} />);
+  return wrap(<DashboardV2 leads={items} onDealClick={openDeal} onLeadCreated={refetch} />);
 }
