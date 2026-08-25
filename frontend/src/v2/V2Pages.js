@@ -5166,8 +5166,21 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       <PasteZone hint="Click here, then paste (Ctrl+V) a flight screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
 
       <div>
-        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name *</div>
-        <input value={name} onChange={(e) => { const v = e.target.value; const looked = lookupAirline(v.trim()); setName(looked || v); }} placeholder="e.g. VN or Vietnam Airlines" style={inputStyle} />
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name * <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 10 }}>(supplier/DMC ya airline — jisko payment karni hai)</span></div>
+        <input value={name} onChange={(e) => {
+          // Only auto-expand IF the user typed a bare 2-letter IATA code
+          // (e.g. "VN" → "Vietnam Airlines"). For anything else — DMC names,
+          // consolidator names, longer text — leave it alone so the user can
+          // freely enter vendor names like "The Vietnam DMC" or "GoAir Cargo
+          // Consolidator" without them getting silently overwritten.
+          const raw = e.target.value;
+          const trimmed = raw.trim();
+          if (/^[A-Za-z]{2}$/.test(trimmed)) {
+            const looked = lookupAirline(trimmed);
+            if (looked) { setName(looked); return; }
+          }
+          setName(raw);
+        }} placeholder="e.g. The Vietnam DMC, IndiGo, VN → Vietnam Airlines" style={inputStyle} />
       </div>
 
       <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 4 }}>TRIP TYPE</div>
@@ -9003,8 +9016,17 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           </div>
 
           <div className="v2-side-card">
-            <div className="v2-side-panel-head">
+            <div className="v2-side-panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="v2-side-panel-title">Activity</span>
+              <button onClick={async () => {
+                const text = window.prompt('Note likho (jo activity log me dikhega):');
+                if (!text || !text.trim()) return;
+                const noteEntry = { title: `📝 ${text.trim()}`, at: new Date().toISOString(), by: 'You', kind: 'note' };
+                const updated = await patchDeal(deal._id, { auditLog: [...(deal.auditLog || []), noteEntry] });
+                setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                window.veToast && window.veToast('Note added ✓', 'success');
+              }} title="Add a note to the activity log"
+                style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '3px 9px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' }}>+ Note</button>
             </div>
             {(deal.auditLog || []).length === 0 ? (
               deal.createdAt ? (
@@ -9019,15 +9041,35 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                 <div style={{ fontSize: 12, color: '#6b7a99', padding: '8px 0' }}>No activity recorded yet.</div>
               )
             ) : (
-              [...deal.auditLog].slice(-12).reverse().map((a, i) => (
-                <div className="v2-activity-item" key={i}>
-                  <div className={`v2-activity-dot ${i === 0 ? 'navy' : ''}`}></div>
-                  <div className="v2-activity-body">
-                    <div className="v2-activity-title">{a.title}</div>
-                    <div className="v2-activity-meta">{timeAgo(a.at)}{a.by ? ` · ${a.by}` : ''}</div>
+              [...deal.auditLog].slice(-12).reverse().map((a, i) => {
+                // Notes are user-added and deletable — system entries are the
+                // permanent audit trail and stay read-only. Notes are marked
+                // either by kind:'note' or the 📝 prefix (for older entries
+                // added before the kind field existed).
+                const isNote = a.kind === 'note' || /^📝\s/.test(a.title || '');
+                const deleteNote = async () => {
+                  if (!window.confirm('Ye note delete karna hai?')) return;
+                  const idx = (deal.auditLog || []).indexOf(a);
+                  if (idx < 0) return;
+                  const next = (deal.auditLog || []).filter((_, j) => j !== idx);
+                  const updated = await patchDeal(deal._id, { auditLog: next });
+                  setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                };
+                return (
+                  <div className="v2-activity-item" key={i} style={isNote ? { background: '#fef9e7', borderRadius: 8, padding: '6px 8px', marginBottom: 4 } : undefined}>
+                    <div className={`v2-activity-dot ${i === 0 ? 'navy' : ''}`}></div>
+                    <div className="v2-activity-body" style={{ flex: 1 }}>
+                      <div className="v2-activity-title" style={isNote ? { whiteSpace: 'pre-wrap' } : undefined}>{a.title}</div>
+                      <div className="v2-activity-meta">{timeAgo(a.at)}{a.by ? ` · ${a.by}` : ''}</div>
+                    </div>
+                    {isNote && (
+                      <button onClick={deleteNote} title="Delete this note" style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 12, padding: 0, alignSelf: 'flex-start' }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+                        onMouseLeave={(e) => e.currentTarget.style.color = '#cbd5e1'}>✕</button>
+                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
