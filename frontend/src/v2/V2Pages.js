@@ -3216,7 +3216,7 @@ const HOTEL_VOUCHER_TC = [
 function buildVouchersHTMLV2(deal, opts) {
   const o = { hotel: true, land: true, flight: true, ...(opts || {}) };
   const hotels = o.hotel ? (deal.hotelVendors || []).filter((h) => h.hotelName) : [];
-  const flights = o.flight ? (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name }))) : [];
+  const flights = o.flight ? (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: s.airlineName || f.airlineName || f.name }))) : [];
   // eslint-disable-next-line no-unused-vars
   const trains = (deal.trainVendors || []).flatMap((t) => [...(t.segments || []), ...(t.returnSegments || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, trainName: t.name })));
   const ref = deal.dealNumber || 'VE-VOUCHER';
@@ -3494,7 +3494,7 @@ function buildQuotationHTMLV2(deal, aiItinerary) {
   const perPax = pax > 0 ? Math.round(sell / pax) : sell;
   const ref = deal.dealNumber || 'VE-QUOTE';
   const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
-  const flights = (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: f.name })));
+  const flights = (deal.flightVendors || []).flatMap((f) => [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to).map((s) => ({ ...s, airline: s.airlineName || f.airlineName || f.name })));
   const cruises = (deal.cruiseVendors || []).filter((c) => c.shipName || c.cruiseLine);
   const _tiers = (deal.useTiers ? (deal.tiers || []) : []).filter((t) => Number(t.totalPrice) > 0);
 
@@ -5078,6 +5078,14 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   const emptySector = () => ({ from: '', fromName: '', to: '', toName: '', date: '', depTime: '', arrTime: '', airlineCode: '', airlineName: '' });
 
   const [name, setName] = useState(editing ? (editing.name || '') : '');
+  // Airline is a SEPARATE concept from vendor. Vendor = who invoices us
+  // (DMC, consolidator, or the airline itself when booking direct). Airline
+  // = the actual carrier flying the customer, shown on tickets/vouchers and
+  // used for airline-logo detection. Stored top-level on the flight vendor
+  // and propagated to any per-sector airlineCode/airlineName that's blank
+  // on submit — sectors can still override for multi-carrier itineraries.
+  const [airlineCode, setAirlineCode] = useState(editing ? (editing.airlineCode || '') : '');
+  const [airlineName, setAirlineName] = useState(editing ? (editing.airlineName || '') : '');
   const [currency, setCurrency] = useState(editing ? (editing.currency || 'INR') : 'INR');
   const [costPrice, setCostPrice] = useState(editing && editing.costPrice != null ? String(editing.costPrice) : '');
   const [sellingPrice, setSellingPrice] = useState(editing && editing.sellingPrice != null ? String(editing.sellingPrice) : '');
@@ -5123,7 +5131,13 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       setFlightType(type);
       setSectors(secs);
       setReturnSectors(retSecs.length ? retSecs : [emptySector()]);
-      if (!name.trim()) setName(j.vendorName || secs[0].airlineName || '');
+      // Vendor name and airline are independent. If the AI returned a
+      // vendorName (payment recipient — DMC/consolidator), use it as-is;
+      // otherwise start with a blank so user can pick between direct
+      // airline booking vs a DMC. Airline fields always come from the ticket.
+      if (!name.trim() && j.vendorName) setName(j.vendorName);
+      if (!airlineCode && secs[0].airlineCode) setAirlineCode(secs[0].airlineCode);
+      if (!airlineName && secs[0].airlineName) setAirlineName(secs[0].airlineName);
       if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
 
       const totalLegs = secs.length + retSecs.length;
@@ -5141,19 +5155,29 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   };
 
   const submit = async () => {
-    if (!name.trim()) { setErr('Airline name is required'); return; }
+    if (!name.trim()) { setErr('Vendor name is required'); return; }
     setSaving(true);
     setErr('');
     try {
+      // Propagate top-level airline to any sector that doesn't have its own.
+      // Preserves per-sector overrides for multi-carrier itineraries
+      // (e.g. IndiGo DEL→BOM then Vietnam Airlines BOM→SGN).
+      const fillAirline = (list) => list.map((s) => ({
+        ...s,
+        airlineCode: s.airlineCode || airlineCode || '',
+        airlineName: s.airlineName || airlineName || '',
+      }));
       const vendorFields = {
         name,
+        airlineCode: airlineCode || '',
+        airlineName: airlineName || '',
         currency,
         costPrice: Number(costPrice) || 0,
         sellingPrice: Number(sellingPrice) || 0,
         exchangeRate: currency === 'INR' ? 1 : (Number(exchangeRate) || 0),
         flightType,
-        sectors: sectors.filter((s) => s.from || s.to),
-        returnSectors: flightType === 'return' ? returnSectors.filter((s) => s.from || s.to) : [],
+        sectors: fillAirline(sectors.filter((s) => s.from || s.to)),
+        returnSectors: flightType === 'return' ? fillAirline(returnSectors.filter((s) => s.from || s.to)) : [],
         paxPricing, paxRates: paxPricing ? paxRates : {},
       };
       if (!vendorFields.sectors.length) { setErr('Add at least one sector'); setSaving(false); return; }
@@ -5182,21 +5206,30 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       <PasteZone hint="Click here, then paste (Ctrl+V) a flight screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
 
       <div>
-        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name * <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 10 }}>(supplier/DMC ya airline — jisko payment karni hai)</span></div>
-        <input value={name} onChange={(e) => {
-          // Only auto-expand IF the user typed a bare 2-letter IATA code
-          // (e.g. "VN" → "Vietnam Airlines"). For anything else — DMC names,
-          // consolidator names, longer text — leave it alone so the user can
-          // freely enter vendor names like "The Vietnam DMC" or "GoAir Cargo
-          // Consolidator" without them getting silently overwritten.
-          const raw = e.target.value;
-          const trimmed = raw.trim();
-          if (/^[A-Za-z]{2}$/.test(trimmed)) {
-            const looked = lookupAirline(trimmed);
-            if (looked) { setName(looked); return; }
-          }
-          setName(raw);
-        }} placeholder="e.g. The Vietnam DMC, IndiGo, VN → Vietnam Airlines" style={inputStyle} />
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name * <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 10 }}>(supplier/DMC — jisko payment karni hai)</span></div>
+        <input value={name} onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. The Vietnam DMC, GoAir Consolidator, IndiGo direct"
+          style={inputStyle} />
+        <div style={{ fontSize: 10.5, color: '#94a3b8', marginTop: 4 }}>Payments, dues board aur accounts is naam ke against track honge.</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 10 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Code</div>
+          <input value={airlineCode} onChange={(e) => {
+            // Auto-fill airline name when user types a valid IATA code (VN, 6E, AI, etc.).
+            const raw = e.target.value.toUpperCase().slice(0, 2);
+            setAirlineCode(raw);
+            const looked = lookupAirline(raw);
+            if (looked && !airlineName) setAirlineName(looked);
+          }} placeholder="VN" style={{ ...inputStyle, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700 }} maxLength={2} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Airline Name <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 10 }}>(actual carrier — tickets/vouchers pe dikhega)</span></div>
+          <input value={airlineName} onChange={(e) => setAirlineName(e.target.value)}
+            placeholder="e.g. Vietnam Airlines, IndiGo, Emirates"
+            style={inputStyle} />
+        </div>
       </div>
 
       <div style={{ fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 4 }}>TRIP TYPE</div>
@@ -8140,11 +8173,12 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                   return (
                     <div key={f.id || i} className="v2-flight-card">
                       <div className="v2-flight-head">
-                        <div className="v2-airline-code">{(f.name || allSectors[0]?.airlineCode || 'XX').slice(0, 2).toUpperCase()}</div>
+                        <div className="v2-airline-code">{(f.airlineCode || allSectors[0]?.airlineCode || 'XX').slice(0, 2).toUpperCase()}</div>
                         <div className="v2-flight-info">
-                          <div className="v2-flight-airline">{f.name || allSectors[0]?.airlineName || 'Airline'}</div>
-                          <div className="v2-flight-meta">
-                            {f.flightType === 'return' ? 'Round trip' : 'One way'} · {allSectors.length} sector{allSectors.length !== 1 ? 's' : ''}
+                          <div className="v2-flight-airline">{f.airlineName || allSectors[0]?.airlineName || 'Airline'}</div>
+                          <div className="v2-flight-meta" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ background: '#eef3fc', color: '#334e82', padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>via {f.name || '(vendor?)'}</span>
+                            <span>· {f.flightType === 'return' ? 'Round trip' : 'One way'} · {allSectors.length} sector{allSectors.length !== 1 ? 's' : ''}</span>
                           </div>
                         </div>
                         <div className="v2-flight-price">
