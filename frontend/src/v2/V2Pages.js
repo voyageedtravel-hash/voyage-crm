@@ -3280,6 +3280,42 @@ function buildVouchersHTMLV2(deal, opts) {
       </div>
     </div>`;
 
+  // Cancellation policy block — printed only if the user opted in (o.cancellation)
+  // AND actually has rules or notes recorded on the deal. Two rule types are
+  // supported side-by-side: date-range windows ("cancel between X and Y →
+  // charges Z") and days-prior windows ("cancel M-N days before travel →
+  // charges Z"). Renders as a compact table so a full multi-slab policy
+  // fits in the voucher without pushing hotel cards to a new page.
+  const rules = Array.isArray(deal.cancellationRules) ? deal.cancellationRules : [];
+  const notes = String(deal.cancellationNotes || '').trim();
+  const dateFmt = (d) => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return d; } };
+  const ruleLine = (r) => {
+    if (r.type === 'daysPrior') {
+      const a = Number(r.fromDays), b = Number(r.toDays);
+      const window = (!isNaN(a) && !isNaN(b))
+        ? `${Math.max(a, b)}-${Math.min(a, b)} days prior to travel`
+        : (!isNaN(a) ? `${a}+ days prior to travel` : 'Cancellation window');
+      return { when: window, charges: r.charges || '—' };
+    }
+    // default 'date'
+    const from = r.fromDate ? dateFmt(r.fromDate) : '—';
+    const to = r.toDate ? dateFmt(r.toDate) : '—';
+    return { when: `Between ${from} and ${to}`, charges: r.charges || '—' };
+  };
+  const cancelHTML = (o.cancellation && (rules.length || notes)) ? `
+    <div style="page-break-inside:avoid;margin-top:14px;border:1px solid #f4d9d9;border-radius:12px;overflow:hidden;background:#fff">
+      <div style="padding:11px 16px;background:#fef2f2;border-bottom:1px solid #f4d9d9">
+        <div style="font-size:9px;letter-spacing:2px;color:#b91c1c;font-weight:800">CANCELLATION POLICY</div>
+      </div>
+      <div style="padding:14px 18px">
+        ${rules.length ? `<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:${notes ? '10px' : '0'}">
+          <thead><tr style="background:#f8fafd"><th style="padding:8px 10px;text-align:left;color:#6b7a99;font-weight:700;border-bottom:1px solid #eef2f8">If cancelled</th><th style="padding:8px 10px;text-align:right;color:#6b7a99;font-weight:700;border-bottom:1px solid #eef2f8">Charges</th></tr></thead>
+          <tbody>${rules.map((r) => { const line = ruleLine(r); return `<tr><td style="padding:9px 10px;border-bottom:1px dashed #f0f2f7;color:#0d1b3e">${escHtml(line.when)}</td><td style="padding:9px 10px;text-align:right;border-bottom:1px dashed #f0f2f7;color:#b91c1c;font-weight:700">${escHtml(line.charges)}</td></tr>`; }).join('')}</tbody>
+        </table>` : ''}
+        ${notes ? `<div style="font-size:11px;color:#5a6b8c;line-height:1.6;${rules.length ? 'padding-top:8px;border-top:1px solid #eef2f8' : ''}">${escHtml(notes).replace(/\n/g, '<br>')}</div>` : ''}
+      </div>
+    </div>` : '';
+
   return `<!doctype html><html><head><meta charset="utf-8"><title>Voyage-Ed Vouchers — ${escHtml(ref)}</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#1a2c52}@media print{body{background:#fff}.noprint{display:none}}</style></head><body>
 <div style="max-width:780px;margin:0 auto;padding:30px 20px">
@@ -3292,6 +3328,7 @@ function buildVouchersHTMLV2(deal, opts) {
   ${hotelCards}
   ${landCards}
   ${flightRows}
+  ${cancelHTML}
   ${tcHTML}
   <div style="margin-top:28px;text-align:center;border-top:1px solid #e3eaf7;padding-top:16px;font-size:11px;color:#6b7a99">
     Voyage-Ed Travels · Suite 315, Regus, GMADA Aerocity, Mohali, Punjab 140306<br>
@@ -4401,11 +4438,19 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
   const hotels = (deal.hotelVendors || []).filter((h) => h.hotelName);
   const land = (deal.landVendors || []).filter((l) => l.itinerary || l.name);
   const flights = (deal.flightVendors || []).some((f) => [...(f.sectors || []), ...(f.returnSectors || [])].some((s) => s.from || s.to));
+  const hasCancelData = (Array.isArray(deal.cancellationRules) && deal.cancellationRules.length > 0) || String(deal.cancellationNotes || '').trim();
 
-  const [inc, setInc] = useState({ hotel: hotels.length > 0, land: land.length > 0, flight: flights });
+  const [inc, setInc] = useState({ hotel: hotels.length > 0, land: land.length > 0, flight: flights, cancellation: !!hasCancelData });
   const toggle = (k) => setInc((s) => ({ ...s, [k]: !s[k] }));
   const [editingHotel, setEditingHotel] = useState(null); // hotel id currently being edited
   const [savingHotel, setSavingHotel] = useState(false);
+  const [showCancelEditor, setShowCancelEditor] = useState(false);
+  const [savingCancel, setSavingCancel] = useState(false);
+  // Local buffers for the cancellation editor so typing doesn't fire a
+  // server round-trip on every keystroke — same pattern as pricing rows in
+  // the proposal builder. Saved once on "Save cancellation policy".
+  const [localRules, setLocalRules] = useState(() => Array.isArray(deal.cancellationRules) ? deal.cancellationRules : []);
+  const [localNotes, setLocalNotes] = useState(String(deal.cancellationNotes || ''));
 
   const warnings = [];
   if (inc.hotel) hotels.forEach((h) => { if (!h.confirmationNo) warnings.push(`Hotel "${h.hotelName}" — confirmation no. missing, will show "To be advised"`); });
@@ -4427,6 +4472,32 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
       window.veToast && window.veToast('Could not save: ' + (e.message || ''), 'warning');
     }
     setSavingHotel(false);
+  };
+
+  const newRuleId = () => 'cr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const addRule = (type) => setLocalRules((rs) => [...rs, type === 'daysPrior'
+    ? { id: newRuleId(), type: 'daysPrior', fromDays: '', toDays: '', charges: '' }
+    : { id: newRuleId(), type: 'date', fromDate: '', toDate: '', charges: '' },
+  ]);
+  const updRule = (id, patch) => setLocalRules((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r));
+  const rmRule = (id) => setLocalRules((rs) => rs.filter((r) => r.id !== id));
+
+  const saveCancellation = async () => {
+    setSavingCancel(true);
+    try {
+      // Strip transient ids only if the schema is strict — MongoDB with
+      // strict:false stores them fine, so we keep them for stable React keys.
+      const updated = await patchDeal(deal._id, { cancellationRules: localRules, cancellationNotes: localNotes });
+      setDeal(updated);
+      onDealUpdated && onDealUpdated(updated);
+      window.veToast && window.veToast('Cancellation policy saved ✓', 'success');
+      setShowCancelEditor(false);
+      // Auto-tick the inclusion checkbox once there's something to include
+      if (localRules.length || localNotes.trim()) setInc((s) => ({ ...s, cancellation: true }));
+    } catch (e) {
+      window.veToast && window.veToast('Save fail: ' + (e.message || ''), 'warning');
+    }
+    setSavingCancel(false);
   };
 
   const generate = () => { openVouchersV2(deal, inc); onClose(); };
@@ -4454,7 +4525,80 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
               <input type="checkbox" checked={inc.flight} onChange={() => toggle('flight')} style={{ width: 15, height: 15, accentColor: '#4169E1' }} />
               ✈️ Flight Details {flights ? '' : '(none on this deal)'}
             </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', background: inc.cancellation ? '#fef2f2' : '#fff', border: '1px solid ' + (inc.cancellation ? '#b91c1c' : '#e3eaf7'), borderRadius: 8, padding: '9px 11px', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, color: '#0f2350' }}>
+              <input type="checkbox" checked={inc.cancellation} onChange={() => toggle('cancellation')} style={{ width: 15, height: 15, accentColor: '#b91c1c' }} />
+              📋 Cancellation Policy {(deal.cancellationRules || []).length ? `(${(deal.cancellationRules || []).length} rule${(deal.cancellationRules || []).length !== 1 ? 's' : ''})` : (deal.cancellationNotes ? '(notes only)' : '(nothing added yet)')}
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCancelEditor((v) => !v); }} style={{ marginLeft: 'auto', background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' }}>{showCancelEditor ? '↑ Close' : '✎ Edit'}</button>
+            </label>
           </div>
+
+          {showCancelEditor && (
+            <div style={{ marginBottom: 16, background: '#fef7f7', border: '1px solid #f4d9d9', borderRadius: 10, padding: '14px 16px' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#b91c1c', letterSpacing: 1, marginBottom: 4 }}>CANCELLATION POLICY EDITOR</div>
+              <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 10 }}>
+                Slabs add karo — kab cancel hone pe kitne charges lagenge. <b>Date range</b> se ya <b>days prior to travel</b> se, dono formats supported. Rules aur notes voucher PDF me table ke form me print honge.
+              </div>
+              {localRules.length === 0 && (
+                <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', padding: '10px 0', fontStyle: 'italic' }}>Koi rule nahi — niche buttons se add karo</div>
+              )}
+              {localRules.map((r, i) => (
+                <div key={r.id} style={{ background: '#fff', border: '1px solid #f4d9d9', borderRadius: 8, padding: '10px 12px', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: '#94a3b8', minWidth: 24 }}>#{i + 1}</span>
+                    <select value={r.type} onChange={(e) => updRule(r.id, { type: e.target.value })} style={{ flex: '0 0 175px', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 11.5, outline: 'none' }}>
+                      <option value="date">📅 Date range (from → to)</option>
+                      <option value="daysPrior">⏳ Days prior to travel</option>
+                    </select>
+                    <button onClick={() => rmRule(r.id)} title="Remove this rule" style={{ marginLeft: 'auto', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 6, padding: '5px 9px', fontSize: 11, cursor: 'pointer', fontWeight: 700 }}>✕</button>
+                  </div>
+                  {r.type === 'daysPrior' ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8, alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>FROM (days)</div>
+                        <input type="number" value={r.fromDays} onChange={(e) => updRule(r.id, { fromDays: e.target.value })} placeholder="e.g. 30" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>TO (days)</div>
+                        <input type="number" value={r.toDays} onChange={(e) => updRule(r.id, { toDays: e.target.value })} placeholder="e.g. 15" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>CHARGES</div>
+                        <input value={r.charges} onChange={(e) => updRule(r.id, { charges: e.target.value })} placeholder="e.g. 50% of package cost / ₹25,000 / Non-refundable" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr', gap: 8, alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>FROM DATE</div>
+                        <input type="date" value={r.fromDate} onChange={(e) => updRule(r.id, { fromDate: e.target.value })} style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>TO DATE</div>
+                        <input type="date" value={r.toDate} onChange={(e) => updRule(r.id, { toDate: e.target.value })} style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: '#94a3b8', marginBottom: 3, fontWeight: 700 }}>CHARGES</div>
+                        <input value={r.charges} onChange={(e) => updRule(r.id, { charges: e.target.value })} placeholder="e.g. 25% of package cost / ₹10,000 / Non-refundable" style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 6, padding: '7px', fontSize: 12, outline: 'none' }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <button onClick={() => addRule('date')} style={{ flex: 1, background: '#eef3fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: '8px', fontSize: 11.5, fontWeight: 700, color: '#334e82', cursor: 'pointer' }}>+ Add date-range rule</button>
+                <button onClick={() => addRule('daysPrior')} style={{ flex: 1, background: '#eef3fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: '8px', fontSize: 11.5, fontWeight: 700, color: '#334e82', cursor: 'pointer' }}>+ Add days-prior rule</button>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 4, fontWeight: 700, letterSpacing: .6 }}>ADDITIONAL NOTES (optional)</div>
+                <textarea value={localNotes} onChange={(e) => setLocalNotes(e.target.value)} rows={3} placeholder="e.g. In case of No Show, 100% cancellation charges apply. Visa fees non-refundable. Charges as per airline / hotel policy where applicable."
+                  style={{ width: '100%', border: '1px solid #d4e0f5', borderRadius: 8, padding: '9px 11px', fontSize: 12, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button onClick={saveCancellation} disabled={savingCancel} style={{ flex: 1, background: savingCancel ? '#94a3b8' : '#15803d', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 12, fontWeight: 800, cursor: savingCancel ? 'wait' : 'pointer' }}>{savingCancel ? 'Saving…' : '💾 Save cancellation policy'}</button>
+                <button onClick={() => { setLocalRules(Array.isArray(deal.cancellationRules) ? deal.cancellationRules : []); setLocalNotes(String(deal.cancellationNotes || '')); setShowCancelEditor(false); }} style={{ background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
 
           {inc.hotel && hotels.length > 0 && (
             <>
