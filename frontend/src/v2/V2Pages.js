@@ -5708,8 +5708,20 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
   );
 }
 
-function AddPaymentModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({ amount: '', mode: 'Bank Transfer', date: '', note: '' });
+function AddPaymentModal({ deal, editing, onClose, onSaved }) {
+  // When editing, pre-fill from the existing payment so the user only has
+  // to change what's wrong. Common case: date typo like "0202-08-20" that
+  // needs to become "2026-08-20". Standard "Bank Transfer" mode is only
+  // used as the DEFAULT for new entries, not when editing.
+  const [form, setForm] = useState(() => editing
+    ? {
+        amount: String(editing.amount || ''),
+        mode: editing.mode || 'Bank Transfer',
+        date: editing.date ? String(editing.date).slice(0, 10) : '',
+        note: editing.note || '',
+      }
+    : { amount: '', mode: 'Bank Transfer', date: '', note: '' }
+  );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -5726,14 +5738,25 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const newPayment = {
+      const pmt = {
         amount: Number(form.amount),
         mode: form.mode,
         date: dateStr,
         note: form.note,
       };
-      const updated = await patchDeal(deal._id, { clientPayments: [...(deal.clientPayments || []), newPayment] });
-      window.veToast && window.veToast('Payment recorded ✓', 'success');
+      let updated;
+      if (editing) {
+        // Payments are bare objects (no id) so match by reference. That's
+        // safe here because `editing` came from the same deal.clientPayments
+        // array we're about to patch.
+        const idx = (deal.clientPayments || []).indexOf(editing);
+        const next = (deal.clientPayments || []).map((p, i) => i === idx ? pmt : p);
+        updated = await patchDeal(deal._id, { clientPayments: next });
+        window.veToast && window.veToast('Payment updated ✓', 'success');
+      } else {
+        updated = await patchDeal(deal._id, { clientPayments: [...(deal.clientPayments || []), pmt] });
+        window.veToast && window.veToast('Payment recorded ✓', 'success');
+      }
       onSaved(updated);
     } catch (e) {
       setErr('Could not save — check connection and try again.');
@@ -5742,7 +5765,7 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="+ Record Client Payment" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+    <ModalShell title={editing ? '✎ Edit Client Payment' : '+ Record Client Payment'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '+ Add'}>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Received (₹) *</div>
         <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
@@ -6809,6 +6832,7 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
   const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
+  const [editingPayment, setEditingPayment] = useState(null); // client-payment object being edited
   const [payingVendor, setPayingVendor] = useState(null); // { arrayKey, vendorId, label } for the Pay Vendor modal
   const [editingClient, setEditingClient] = useState(false);
   const [clientForm, setClientForm] = useState(null);
@@ -8540,7 +8564,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               onSaved={handleSaved}
             />
           )}
-          {modal === 'payment' && <AddPaymentModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'payment' && <AddPaymentModal deal={deal} editing={editingPayment} onClose={() => { setModal(null); setEditingPayment(null); }} onSaved={(updated) => { handleSaved(updated); setEditingPayment(null); }} />}
           {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'payVendor' && payingVendor && (
             <AddVendorPaymentModal
@@ -8686,25 +8710,6 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                 {payments.map((p, i) => {
                   const dateStr = p.date ? String(p.date).slice(0, 10) : '';
                   const dateBad = dateStr && !(dateStr >= '2020-01-01' && dateStr <= '2099-12-31');
-                  const fixDate = async () => {
-                    // Quick-fix: swap in today's date. The user can then edit
-                    // further if the correct date is something else — but at
-                    // least the deal stops being lost in a bogus cycle.
-                    const suggested = new Date().toISOString().slice(0, 10);
-                    const entered = window.prompt(`Payment date "${dateStr}" invalid hai — sahi date daalein (YYYY-MM-DD):`, suggested);
-                    if (!entered) return;
-                    const clean = String(entered).slice(0, 10);
-                    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean) || !(clean >= '2020-01-01' && clean <= '2099-12-31')) {
-                      window.veToast && window.veToast('Format galat (YYYY-MM-DD chahiye)', 'warning');
-                      return;
-                    }
-                    const idx = (deal.clientPayments || []).indexOf(p);
-                    if (idx < 0) return;
-                    const next = (deal.clientPayments || []).map((x, j) => j === idx ? { ...x, date: clean } : x);
-                    const updated = await patchDeal(deal._id, { clientPayments: next });
-                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                    window.veToast && window.veToast('Date fix ho gayi ✓', 'success');
-                  };
                   return (
                   <div key={'p' + i} className="v2-schedule-row">
                     <div>
@@ -8712,7 +8717,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                       <div className="v2-schedule-date" style={dateBad ? { color: '#dc2626', fontWeight: 700 } : undefined}>
                         {dateStr || ''}
                         {dateBad && (
-                          <button onClick={fixDate} title="Ye date invalid hai — click karke fix karo" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 5, padding: '1px 7px', fontSize: 10, fontWeight: 700, marginLeft: 6, cursor: 'pointer' }}>⚠️ fix</button>
+                          <button onClick={() => { setEditingPayment(p); setModal('payment'); }} title="Ye date invalid hai — click karke fix karo" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 5, padding: '1px 7px', fontSize: 10, fontWeight: 700, marginLeft: 6, cursor: 'pointer' }}>⚠️ fix</button>
                         )}
                       </div>
                     </div>
@@ -8721,6 +8726,11 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                         <div className="v2-schedule-amount-val">{fmtINR(p.amount || 0)}</div>
                         <div className="v2-schedule-status paid">Paid</div>
                       </div>
+                      <button
+                        onClick={() => { setEditingPayment(p); setModal('payment'); }}
+                        title="Edit this payment (amount / mode / date / note)"
+                        style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 13 }}
+                      >✏️</button>
                       <button
                         onClick={() => printReceipt(p)}
                         title="Print / Save receipt PDF for this payment"
