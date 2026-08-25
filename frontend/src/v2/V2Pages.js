@@ -1109,11 +1109,20 @@ const csvEscape = (v) => {
 // in the cycle in which its money actually arrived (first client payment) —
 // NOT when the enquiry was created. So an enquiry raised 14 July that only
 // converted and got paid on 18 July belongs to the 16-Jul→15-Aug cycle.
+// Sanity-gated: dates outside a reasonable window (year 2020–2099) are
+// treated as data-entry typos and ignored. Common failure: user types "0202"
+// instead of "2026" on a payment date, then that bogus year makes the deal
+// silently fall into an ancient cycle and disappear from the dashboard. We
+// return the first VALID date instead so real cycle scoping still works,
+// and the payment schedule below shows a warning next to any bad date so
+// the user can spot and fix it.
+const isSaneDate = (yyyy_mm_dd) => yyyy_mm_dd >= '2020-01-01' && yyyy_mm_dd <= '2099-12-31';
 const firstPaymentDateOf = (d) => {
   const dates = (d.clientPayments || [])
     .map((p) => p.date)
     .filter(Boolean)
     .map((x) => String(x).slice(0, 10))
+    .filter(isSaneDate)
     .sort();
   return dates.length ? dates[0] : null;
 };
@@ -5707,13 +5716,20 @@ function AddPaymentModal({ deal, onClose, onSaved }) {
 
   const submit = async () => {
     if (!form.amount || Number(form.amount) <= 0) { setErr('Enter a valid amount'); return; }
+    // Sanity-gate the date so typos like "0202-08-20" instead of "2026-08-20"
+    // can't silently make the deal disappear from the dashboard cycle.
+    const dateStr = String(form.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || dateStr < '2020-01-01' || dateStr > '2099-12-31') {
+      setErr('Date galat lag rahi hai — YYYY-MM-DD format aur year 2020–2099 ke beech hona chahiye');
+      return;
+    }
     setSaving(true);
     setErr('');
     try {
       const newPayment = {
         amount: Number(form.amount),
         mode: form.mode,
-        date: form.date || new Date().toISOString().slice(0, 10),
+        date: dateStr,
         note: form.note,
       };
       const updated = await patchDeal(deal._id, { clientPayments: [...(deal.clientPayments || []), newPayment] });
@@ -8667,11 +8683,38 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               </div>
             ) : (
               <>
-                {payments.map((p, i) => (
+                {payments.map((p, i) => {
+                  const dateStr = p.date ? String(p.date).slice(0, 10) : '';
+                  const dateBad = dateStr && !(dateStr >= '2020-01-01' && dateStr <= '2099-12-31');
+                  const fixDate = async () => {
+                    // Quick-fix: swap in today's date. The user can then edit
+                    // further if the correct date is something else — but at
+                    // least the deal stops being lost in a bogus cycle.
+                    const suggested = new Date().toISOString().slice(0, 10);
+                    const entered = window.prompt(`Payment date "${dateStr}" invalid hai — sahi date daalein (YYYY-MM-DD):`, suggested);
+                    if (!entered) return;
+                    const clean = String(entered).slice(0, 10);
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean) || !(clean >= '2020-01-01' && clean <= '2099-12-31')) {
+                      window.veToast && window.veToast('Format galat (YYYY-MM-DD chahiye)', 'warning');
+                      return;
+                    }
+                    const idx = (deal.clientPayments || []).indexOf(p);
+                    if (idx < 0) return;
+                    const next = (deal.clientPayments || []).map((x, j) => j === idx ? { ...x, date: clean } : x);
+                    const updated = await patchDeal(deal._id, { clientPayments: next });
+                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                    window.veToast && window.veToast('Date fix ho gayi ✓', 'success');
+                  };
+                  return (
                   <div key={'p' + i} className="v2-schedule-row">
                     <div>
                       <div className="v2-schedule-milestone">{p.note || p.mode || 'Payment'}</div>
-                      <div className="v2-schedule-date">{p.date || ''}</div>
+                      <div className="v2-schedule-date" style={dateBad ? { color: '#dc2626', fontWeight: 700 } : undefined}>
+                        {dateStr || ''}
+                        {dateBad && (
+                          <button onClick={fixDate} title="Ye date invalid hai — click karke fix karo" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: 5, padding: '1px 7px', fontSize: 10, fontWeight: 700, marginLeft: 6, cursor: 'pointer' }}>⚠️ fix</button>
+                        )}
+                      </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div className="v2-schedule-amount">
@@ -8691,7 +8734,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                       >✕</button>
                     </div>
                   </div>
-                ))}
+                );})}
                 {refunds.map((r, i) => (
                   <div key={'r' + i} className="v2-schedule-row">
                     <div>
