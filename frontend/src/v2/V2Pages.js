@@ -1906,9 +1906,14 @@ function buildMapboxRouteURL(resolved, W, H) {
   return url.length < 8000 ? url : '';
 }
 
-// Main entry: returns the map block HTML for the proposal. Prefers a real
-// Mapbox basemap; falls back to the simplified SVG outline when no token is
-// configured, so proposals never break.
+// Main entry: returns the map block HTML for the proposal. Renders ONLY when
+// a Mapbox token is configured (real basemap with proper coastlines, roads
+// and labels). The SVG-outline fallback used to render here has been disabled
+// pending a proper backend-generated map system — the hand-simplified polygons
+// don't meet the quality bar for client-facing PDFs (frame stretching plus
+// out-of-region markers latching off-frame with dashed lines looked amateur).
+// When Mapbox isn't set, the proposal simply omits the map — the numbered
+// route text below still gives clients the itinerary sequence.
 function buildRouteMapBlockV2(deal) {
   const stops = extractRouteStopsV2(deal);
   if (stops.length < 2) return '';
@@ -1918,25 +1923,21 @@ function buildRouteMapBlockV2(deal) {
   }).filter(Boolean);
   if (resolved.length < 2) return '';
 
+  const mbUrl = buildMapboxRouteURL(resolved, 640, 460);
+  if (!mbUrl) return ''; // no Mapbox token → no map block at all
+
   const legend = `<div style="display:flex;gap:14px;font-size:10px;color:#7d8bab;margin-top:8px;flex-wrap:wrap">
       <span style="color:#2563eb">━ Flight</span><span style="color:#dc2626">━ Road</span><span style="color:#7c3aed">━ Train</span><span style="color:#0891b2">━ Cruise</span>
     </div>`;
   const routeList = resolved.map((s, i) => `<b>${i + 1}.</b> ${escHtml(s.name)}`).join(' &nbsp;→&nbsp; ');
 
-  const mbUrl = buildMapboxRouteURL(resolved, 640, 460);
-  if (mbUrl) {
-    return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
-      <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE</div>
-      <img src="${mbUrl}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
-      <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
-      ${legend}
-      <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">© Mapbox © OpenStreetMap</div>
-    </div>`;
-  }
-
-  // Fallback: simplified SVG outline (only India/Vietnam have outlines bundled)
-  const region = detectMapRegionV2(stops);
-  return region ? buildRouteMapSVG(stops, region) : '';
+  return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE</div>
+    <img src="${mbUrl}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
+    <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
+    ${legend}
+    <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">© Mapbox © OpenStreetMap</div>
+  </div>`;
 }
 
 function detectMapRegionV2(stops) {
