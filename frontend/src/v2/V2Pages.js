@@ -232,6 +232,18 @@ const stageOf = (d) => {
 const isBookedStage = (d) => { const s = stageOf(d); return s === 'Booked' || s === 'Completed'; };
 const isCancelledStage = (d) => stageOf(d) === 'Cancelled' || stageOf(d) === 'Lost';
 
+// Normalizes a Custom Pricing Row to the same {costPrice, sellingPrice,
+// currency, exchangeRate} shape every other vendor type uses. Rows created
+// before CP/SP existed only have a single `amount` field (used as both the
+// invoice figure and, implicitly, the cost) — fall back to costPrice =
+// sellingPrice = amount for those so nothing already saved breaks.
+const normalizePricingRow = (pr) => ({
+  ...pr,
+  costPrice: pr.costPrice !== undefined && pr.costPrice !== '' ? pr.costPrice : pr.amount,
+  sellingPrice: pr.sellingPrice !== undefined && pr.sellingPrice !== '' ? pr.sellingPrice : pr.amount,
+  currency: pr.currency || 'INR',
+});
+
 const dealVendors = (d) => [
   ...(d.hotelVendors || []),
   ...(d.flightVendors || []),
@@ -240,6 +252,12 @@ const dealVendors = (d) => [
   ...(d.visaVendors || []),
   ...(d.cruiseVendors || []),
   ...(d.insuranceVendors || []),
+  // Custom Pricing Rows (extra line items with their own vendor + CP/SP) —
+  // counted toward total sell/cost/profit exactly like every other vendor
+  // type, so e.g. paying a vendor ₹6,000 out of pocket for something not
+  // billed to the client (sellingPrice 0) reduces overall deal profit by
+  // ₹6,000, same as it would if that ₹6,000 sat in landVendors instead.
+  ...(d.pricingRows || []).map(normalizePricingRow),
 ];
 
 const bookedTierOf = (d) => {
@@ -3874,9 +3892,10 @@ function buildInvoiceItemsV2(deal) {
     items.push({ seq, desc: `${ins.name || 'Insurance'} — Travel Insurance`, sub: ins.policyType || '', paxCount: pax || '', amount: toINR(ins.sellingPrice, ins.currency, ins.exchangeRate) });
   });
   (deal.pricingRows || []).forEach((pr) => {
-    if (!pr.label && !pr.amount) return;
+    if (!pr.label && !pr.amount && !pr.sellingPrice) return;
     seq++;
-    items.push({ seq, desc: pr.label || 'Additional Service', sub: '', paxCount: '', amount: Number(pr.amount) || 0 });
+    const npr = normalizePricingRow(pr);
+    items.push({ seq, desc: pr.label || 'Additional Service', sub: '', paxCount: '', amount: toINR(npr.sellingPrice, npr.currency, npr.exchangeRate) });
   });
   return items;
 }
@@ -9147,16 +9166,17 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               <button
                 style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
                 onClick={async () => {
-                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', amount: '', vendorName: '', kind: 'add', payments: [] }];
+                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', vendorName: '', currency: 'INR', costPrice: '', sellingPrice: '', kind: 'add', payments: [] }];
                   const updated = await patchDeal(deal._id, { pricingRows: rows });
                   setDeal(updated); onDealUpdated && onDealUpdated(updated);
                 }}
               >+ Add Row</button>
             </div>
-            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance ₹5,000") — with vendor + payment tracking, same as other components</div>
+            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance") — Cost Price counts toward this package's total cost/profit and Selling Price toward the invoice, exactly like Hotel/Flight/Visa/Land, with the same vendor + payment tracking</div>
             {(deal.pricingRows || []).map((pr) => {
+              const npr = normalizePricingRow(pr);
               const prPaid = sumBy(pr.payments, 'amount');
-              const prAmount = Number(pr.amount) || 0;
+              const prCost = toINR(npr.costPrice, npr.currency, npr.exchangeRate);
               return (
                 <div key={pr.id} style={{ padding: '8px 0', borderBottom: '1px solid #f4f7fc' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
@@ -9170,16 +9190,6 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                       }}
                       style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 12 }}
                     />
-                    <input
-                      type="number" defaultValue={pr.amount || ''} placeholder="₹"
-                      onBlur={async (e) => {
-                        if (e.target.value === String(pr.amount || '')) return;
-                        const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, amount: e.target.value } : r);
-                        const updated = await patchDeal(deal._id, { pricingRows: rows });
-                        setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                      }}
-                      style={{ ...inputStyle, width: 80, padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
-                    />
                     <button
                       onClick={async () => {
                         if (!window.confirm('Ye row delete karni hai?')) return;
@@ -9190,6 +9200,34 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                       style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
                     >✕</button>
                   </div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', marginBottom: 2 }}>COST PRICE</div>
+                      <input
+                        type="number" defaultValue={pr.costPrice ?? pr.amount ?? ''} placeholder="₹ we pay"
+                        onBlur={async (e) => {
+                          if (e.target.value === String(pr.costPrice ?? pr.amount ?? '')) return;
+                          const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, costPrice: e.target.value } : r);
+                          const updated = await patchDeal(deal._id, { pricingRows: rows });
+                          setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                        }}
+                        style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', marginBottom: 2 }}>SELLING PRICE</div>
+                      <input
+                        type="number" defaultValue={pr.sellingPrice ?? pr.amount ?? ''} placeholder="₹ client pays"
+                        onBlur={async (e) => {
+                          if (e.target.value === String(pr.sellingPrice ?? pr.amount ?? '')) return;
+                          const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, sellingPrice: e.target.value } : r);
+                          const updated = await patchDeal(deal._id, { pricingRows: rows });
+                          setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                        }}
+                        style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
+                      />
+                    </div>
+                  </div>
                   <input
                     defaultValue={pr.vendorName || ''} placeholder="Vendor name (kisko pay karna hai)"
                     onBlur={async (e) => {
@@ -9198,17 +9236,17 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                       const updated = await patchDeal(deal._id, { pricingRows: rows });
                       setDeal(updated); onDealUpdated && onDealUpdated(updated);
                     }}
-                    style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 11.5, marginBottom: prAmount > 0 ? 6 : 0 }}
+                    style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 11.5, marginBottom: prCost > 0 ? 6 : 0 }}
                   />
-                  {prAmount > 0 && (
+                  {prCost > 0 && (
                     <div className="v2-pay-bar">
                       <div className="v2-pay-progress">
-                        <div className={`v2-pay-progress-fill ${prPaid >= prAmount ? '' : 'amber'}`} style={{ width: `${Math.min(100, (prPaid / prAmount) * 100)}%` }}></div>
+                        <div className={`v2-pay-progress-fill ${prPaid >= prCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (prPaid / prCost) * 100)}%` }}></div>
                       </div>
                       <div className="v2-pay-row">
-                        <span>Paid: <b>{fmtINRFull(prPaid)}</b> / {fmtINRFull(prAmount)}</span>
-                        <span className={`v2-pay-status ${prPaid >= prAmount ? 'paid' : 'due'}`}>
-                          {prPaid >= prAmount ? '✓ Fully Paid' : `${fmtINRFull(prAmount - prPaid)} due`}
+                        <span>Paid to vendor: <b>{fmtINRFull(prPaid)}</b> / {fmtINRFull(prCost)}</span>
+                        <span className={`v2-pay-status ${prPaid >= prCost ? 'paid' : 'due'}`}>
+                          {prPaid >= prCost ? '✓ Fully Paid' : `${fmtINRFull(prCost - prPaid)} due`}
                         </span>
                         <button
                           className="v2-acc-btn-sm"
@@ -9971,6 +10009,7 @@ function AccountsV2({ leads, onDealClick }) {
         ...(d.visaVendors || []).map((v) => ({ ...v, _k: 'Visa', _n: v.name })),
         ...(d.cruiseVendors || []).map((v) => ({ ...v, _k: 'Cruise', _n: v.shipName || v.name })),
         ...(d.insuranceVendors || []).map((v) => ({ ...v, _k: 'Insurance', _n: v.name })),
+        ...(d.pricingRows || []).map(normalizePricingRow).map((v) => ({ ...v, _k: 'Custom', _n: v.vendorName || v.label })),
       ];
       vs.forEach((v) => {
         const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
