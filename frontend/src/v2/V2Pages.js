@@ -4751,19 +4751,29 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
   const [propCancelCustom, setPropCancelCustom] = useState('');
   const [propDays, setPropDays] = useState(null); // null = auto, array = edited
   const [propCompareId, setPropCompareId] = useState('');
-  // Local, unsaved copy of pricing rows so typing doesn't fire an async
-  // patchDeal on every keystroke — that pattern silently overwrote user
-  // input with stale server-response values, making digits appear to
-  // vanish as they typed. Saved on blur / Save button below.
-  const [localPricingRows, setLocalPricingRows] = useState(() => deal.pricingRows || []);
+  // Local, unsaved copy of OCCUPANCY pricing rows (Twin/Single/Triple/Child
+  // sharing, per-person) so typing doesn't fire an async patchDeal on every
+  // keystroke — that pattern silently overwrote user input with stale
+  // server-response values, making digits appear to vanish as they typed.
+  // Saved on blur / Save button below.
+  //
+  // Stored under deal.occupancyPricingRows — NOT deal.pricingRows. Both used
+  // to write to the same `pricingRows` field despite being two unrelated
+  // features (this one is per-person sharing rates; deal.pricingRows is the
+  // "Custom Pricing Rows" extra-line-items list with vendor/payment tracking
+  // in the side panel). Saving one silently wiped out the other's data
+  // whenever both existed on the same deal. Renamed to fix that collision —
+  // this field was never read anywhere else in the app (no total, no PDF
+  // used r.pp/r.count), so the rename changes no other behavior.
+  const [localPricingRows, setLocalPricingRows] = useState(() => deal.occupancyPricingRows || []);
   const [pricingDirty, setPricingDirty] = useState(false);
 
   const savePricingRows = async () => {
     if (!pricingDirty) return;
-    const updated = await patchDeal(deal._id, { pricingRows: localPricingRows });
+    const updated = await patchDeal(deal._id, { occupancyPricingRows: localPricingRows });
     setDeal(updated); onDealUpdated && onDealUpdated(updated); setPricingDirty(false);
   };
-  useEffect(() => { if (!pricingDirty) setLocalPricingRows(deal.pricingRows || []); }, [deal.pricingRows, pricingDirty]);
+  useEffect(() => { if (!pricingDirty) setLocalPricingRows(deal.occupancyPricingRows || []); }, [deal.occupancyPricingRows, pricingDirty]);
   const updRow = (id, patch) => { setLocalPricingRows((rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r)); setPricingDirty(true); };
   const addRow = () => { setLocalPricingRows((rs) => [...rs, { id: 'pr_' + Date.now(), cat: 'Adult — Twin Sharing', count: '', pp: '' }]); setPricingDirty(true); };
   const rmRow = (id) => { setLocalPricingRows((rs) => rs.filter((r) => r.id !== id)); setPricingDirty(true); };
@@ -7650,8 +7660,12 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
         visaVendors: (src.visaVendors || []).map((v) => cloneVendor(v, 'vs')),
         cruiseVendors: (src.cruiseVendors || []).map((v) => cloneVendor(v, 'cr')),
         insuranceVendors: (src.insuranceVendors || []).map((v) => cloneVendor(v, 'is')),
-        // Deal-level pricing / display — copied
-        gstMode: src.gstMode, pricingRows: src.pricingRows,
+        // Deal-level pricing / display — copied. pricingRows now carries its
+        // own vendor + payments[] per row (see Custom Pricing Rows below), so
+        // it gets the same fresh-id + reset-payments treatment as the other
+        // vendor arrays above rather than a raw copy.
+        gstMode: src.gstMode, pricingRows: (src.pricingRows || []).map((v) => cloneVendor(v, 'pr')),
+        occupancyPricingRows: src.occupancyPricingRows,
         tiers: src.tiers, useTiers: src.useTiers,
         aiItineraryText: src.aiItineraryText, aiItineraryVibe: src.aiItineraryVibe,
         // Fresh stage — a duplicate always starts as an unactioned new lead
@@ -9133,43 +9147,80 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               <button
                 style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
                 onClick={async () => {
-                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', amount: '', kind: 'add' }];
+                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', amount: '', vendorName: '', kind: 'add', payments: [] }];
                   const updated = await patchDeal(deal._id, { pricingRows: rows });
                   setDeal(updated); onDealUpdated && onDealUpdated(updated);
                 }}
               >+ Add Row</button>
             </div>
-            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance ₹5,000")</div>
-            {(deal.pricingRows || []).map((pr) => (
-              <div key={pr.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f4f7fc' }}>
-                <input
-                  value={pr.label || ''} placeholder="Description"
-                  onChange={async (e) => {
-                    const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, label: e.target.value } : r);
-                    const updated = await patchDeal(deal._id, { pricingRows: rows });
-                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                  }}
-                  style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 12 }}
-                />
-                <input
-                  type="number" value={pr.amount || ''} placeholder="₹"
-                  onChange={async (e) => {
-                    const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, amount: e.target.value } : r);
-                    const updated = await patchDeal(deal._id, { pricingRows: rows });
-                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                  }}
-                  style={{ ...inputStyle, width: 80, padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
-                />
-                <button
-                  onClick={async () => {
-                    const rows = (deal.pricingRows || []).filter((r) => r.id !== pr.id);
-                    const updated = await patchDeal(deal._id, { pricingRows: rows });
-                    setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                  }}
-                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
-                >✕</button>
-              </div>
-            ))}
+            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance ₹5,000") — with vendor + payment tracking, same as other components</div>
+            {(deal.pricingRows || []).map((pr) => {
+              const prPaid = sumBy(pr.payments, 'amount');
+              const prAmount = Number(pr.amount) || 0;
+              return (
+                <div key={pr.id} style={{ padding: '8px 0', borderBottom: '1px solid #f4f7fc' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <input
+                      defaultValue={pr.label || ''} placeholder="Description"
+                      onBlur={async (e) => {
+                        if (e.target.value === (pr.label || '')) return;
+                        const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, label: e.target.value } : r);
+                        const updated = await patchDeal(deal._id, { pricingRows: rows });
+                        setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                      }}
+                      style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 12 }}
+                    />
+                    <input
+                      type="number" defaultValue={pr.amount || ''} placeholder="₹"
+                      onBlur={async (e) => {
+                        if (e.target.value === String(pr.amount || '')) return;
+                        const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, amount: e.target.value } : r);
+                        const updated = await patchDeal(deal._id, { pricingRows: rows });
+                        setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                      }}
+                      style={{ ...inputStyle, width: 80, padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm('Ye row delete karni hai?')) return;
+                        const rows = (deal.pricingRows || []).filter((r) => r.id !== pr.id);
+                        const updated = await patchDeal(deal._id, { pricingRows: rows });
+                        setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                    >✕</button>
+                  </div>
+                  <input
+                    defaultValue={pr.vendorName || ''} placeholder="Vendor name (kisko pay karna hai)"
+                    onBlur={async (e) => {
+                      if (e.target.value === (pr.vendorName || '')) return;
+                      const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, vendorName: e.target.value } : r);
+                      const updated = await patchDeal(deal._id, { pricingRows: rows });
+                      setDeal(updated); onDealUpdated && onDealUpdated(updated);
+                    }}
+                    style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 11.5, marginBottom: prAmount > 0 ? 6 : 0 }}
+                  />
+                  {prAmount > 0 && (
+                    <div className="v2-pay-bar">
+                      <div className="v2-pay-progress">
+                        <div className={`v2-pay-progress-fill ${prPaid >= prAmount ? '' : 'amber'}`} style={{ width: `${Math.min(100, (prPaid / prAmount) * 100)}%` }}></div>
+                      </div>
+                      <div className="v2-pay-row">
+                        <span>Paid: <b>{fmtINRFull(prPaid)}</b> / {fmtINRFull(prAmount)}</span>
+                        <span className={`v2-pay-status ${prPaid >= prAmount ? 'paid' : 'due'}`}>
+                          {prPaid >= prAmount ? '✓ Fully Paid' : `${fmtINRFull(prAmount - prPaid)} due`}
+                        </span>
+                        <button
+                          className="v2-acc-btn-sm"
+                          onClick={() => { setPayingVendor({ arrayKey: 'pricingRows', vendorId: pr.id, label: pr.vendorName || pr.label || 'Custom Row' }); setModal('payVendor'); }}
+                        >💸 Pay</button>
+                      </div>
+                    </div>
+                  )}
+                  <VendorPaymentHistory vendor={pr} arrayKey="pricingRows" deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
+                </div>
+              );
+            })}
           </div>
 
           <div className="v2-side-card">
