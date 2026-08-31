@@ -1924,14 +1924,14 @@ function buildMapboxRouteURL(resolved, W, H) {
   return url.length < 8000 ? url : '';
 }
 
-// Main entry: returns the map block HTML for the proposal. Renders ONLY when
-// a Mapbox token is configured (real basemap with proper coastlines, roads
-// and labels). The SVG-outline fallback used to render here has been disabled
-// pending a proper backend-generated map system — the hand-simplified polygons
-// don't meet the quality bar for client-facing PDFs (frame stretching plus
-// out-of-region markers latching off-frame with dashed lines looked amateur).
-// When Mapbox isn't set, the proposal simply omits the map — the numbered
-// route text below still gives clients the itinerary sequence.
+// Main entry: returns the map block HTML for the proposal. Prefers our own
+// backend-rendered map (/api/route-map — real Natural Earth coastlines,
+// numbered gold pins, mode-colored route lines, no external tile server or
+// API key needed) since Mapbox isn't configured. If a Mapbox token IS ever
+// set, that takes priority (richer basemap with roads/labels). The earlier
+// hand-simplified SVG-outline fallback stays retired — it never met the
+// client-facing quality bar (frame stretching, out-of-region markers
+// latching off-frame).
 function buildRouteMapBlockV2(deal) {
   const stops = extractRouteStopsV2(deal);
   if (stops.length < 2) return '';
@@ -1942,7 +1942,10 @@ function buildRouteMapBlockV2(deal) {
   if (resolved.length < 2) return '';
 
   const mbUrl = buildMapboxRouteURL(resolved, 640, 460);
-  if (!mbUrl) return ''; // no Mapbox token → no map block at all
+  const backendStops = resolved.map((s) => ({ name: s.name, lat: s.lat, lng: s.lng, mode: s.mode || 'car' }));
+  const backendUrl = `${apiBase()}/api/route-map?width=800&height=560&stops=${encodeURIComponent(JSON.stringify(backendStops))}`;
+  const mapUrl = mbUrl || backendUrl;
+  const attribution = mbUrl ? '© Mapbox © OpenStreetMap' : '© Natural Earth';
 
   const legend = `<div style="display:flex;gap:14px;font-size:10px;color:#7d8bab;margin-top:8px;flex-wrap:wrap">
       <span style="color:#2563eb">━ Flight</span><span style="color:#dc2626">━ Road</span><span style="color:#7c3aed">━ Train</span><span style="color:#0891b2">━ Cruise</span>
@@ -1951,10 +1954,10 @@ function buildRouteMapBlockV2(deal) {
 
   return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
     <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE</div>
-    <img src="${mbUrl}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
+    <img src="${mapUrl}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
     <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
     ${legend}
-    <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">© Mapbox © OpenStreetMap</div>
+    <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">${attribution}</div>
   </div>`;
 }
 

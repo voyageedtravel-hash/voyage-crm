@@ -619,6 +619,56 @@ const start = async () => {
       }
     });
 
+    // ─── Route map (proposal PDF map block) ───────────────────────────
+    // Renders a PNG map from real Natural Earth coastlines — no external
+    // tile server, no API key. GET (not POST) because this is embedded via
+    // a plain <img src="..."> tag in the proposal HTML (see
+    // buildRouteMapBlockV2) — img tags can only issue GET requests and
+    // can't carry an Authorization header, so this route is intentionally
+    // NOT behind authMiddleware; rate limiting is the abuse guard instead,
+    // same as /api/fx-rates.
+    // Query: ?stops=<URL-encoded JSON array of {name,lat,lng,mode}>&width=&height=
+    const { renderRouteMap } = require("./services/route-map");
+    const routeMapCache = new Map(); // key -> PNG buffer
+    const ROUTE_MAP_CACHE_MAX = 200;
+    const routeMapLimiter = makeRateLimiter(60); // proposal PDFs load 1 map each; generous for retries/previews
+    app.get("/api/route-map", routeMapLimiter, async (req, res) => {
+      try {
+        let stops;
+        try { stops = JSON.parse(req.query.stops || "[]"); } catch { stops = null; }
+        if (!Array.isArray(stops) || stops.length < 2) {
+          return res.status(400).json({ error: "Need at least 2 stops with {name, lat, lng}" });
+        }
+        // Basic shape validation — reject anything that isn't a plain
+        // {name, lat, lng, mode?} so a malformed query can't crash sharp/d3.
+        for (const s of stops) {
+          if (typeof s.lat !== "number" || typeof s.lng !== "number" || !isFinite(s.lat) || !isFinite(s.lng)) {
+            return res.status(400).json({ error: "Each stop needs numeric lat/lng" });
+          }
+        }
+        const width = Math.min(1200, Math.max(300, parseInt(req.query.width, 10) || 800));
+        const height = Math.min(1200, Math.max(300, parseInt(req.query.height, 10) || 560));
+        const key = JSON.stringify({ stops, width, height });
+        const hit = routeMapCache.get(key);
+        if (hit) {
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          return res.send(hit);
+        }
+        const png = await renderRouteMap(stops, { width, height });
+        if (routeMapCache.size >= ROUTE_MAP_CACHE_MAX) {
+          routeMapCache.delete(routeMapCache.keys().next().value); // drop oldest
+        }
+        routeMapCache.set(key, png);
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.send(png);
+      } catch (e) {
+        console.error("route-map error:", e.message);
+        res.status(500).json({ error: "Could not render map" });
+      }
+    });
+
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
