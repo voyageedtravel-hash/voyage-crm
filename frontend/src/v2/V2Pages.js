@@ -2546,6 +2546,19 @@ function fmtDV2(d) {
   return isNaN(x) ? escHtml(d) : x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Adds `days` to a date string and returns it formatted the same way as
+// fmtDV2, for showing the actual arrival-landing date next to a "+1" badge
+// (e.g. departure "02 Nov 2026" + 1 day → "03 Nov 2026"). Falls back to an
+// empty string if the base date isn't parseable, so callers can decide
+// whether to show anything at all.
+function addDaysToDateStrV2(dateStr, days) {
+  if (!dateStr || !days) return '';
+  const x = new Date(dateStr);
+  if (isNaN(x)) return '';
+  x.setDate(x.getDate() + days);
+  return x.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 // Same destination-vibe fallback cover logic as V1's pickFallbackCover() —
 // V2 has no Unsplash gallery-search UI, so this (verified, curated) set of
 // fallback photos is what always renders, matched to the destination text.
@@ -2814,6 +2827,29 @@ function buildProposalHTMLV2(deal, opts) {
   `;
   const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=' + encodeURIComponent(acceptWA);
 
+  // Detects a next-day (or later) arrival from the departure/arrival clock
+  // times alone — the sector data model only stores one date (the departure
+  // date) plus depTime/arrTime as bare HHMM/HH:MM strings, with no separate
+  // arrival-date field in the manual entry form. When the arrival clock time
+  // is earlier than the departure clock time (e.g. depart 20:45, arrive
+  // 00:01), the flight/train has crossed midnight — the overwhelmingly
+  // common case for red-eyes and overnight trains. Multi-day journeys (2+
+  // days later) are rare enough on commercial routes that always assuming
+  // "+1" when times wrap is far more often right than wrong.
+  const dayOffsetV2 = (depTime, arrTime) => {
+    const toMinutes = (t) => {
+      const m = String(t || '').match(/(\d{1,2}):?(\d{2})/);
+      if (!m) return null;
+      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    };
+    const dep = toMinutes(depTime), arr = toMinutes(arrTime);
+    if (dep === null || arr === null) return 0;
+    return arr < dep ? 1 : 0;
+  };
+  const dayOffsetBadgeV2 = (offset) => offset > 0
+    ? `<sup style="color:#dc2626;font-weight:800;font-size:9px;margin-left:2px">+${offset}</sup>`
+    : '';
+
   const sectorRowV2 = (s, f) => {
     // Prefer per-sector airline (multi-carrier trips) but fall back to the
     // vendor-level airline so single-carrier flights still show the logo even
@@ -2821,6 +2857,7 @@ function buildProposalHTMLV2(deal, opts) {
     const _code = String(s.airlineCode || (f && f.airlineCode) || guessAirlineCode(s.airlineName || (f && f.name))).trim().toUpperCase();
     const _name = String(s.airlineName || (f && f.name) || '').trim();
     const _logo = _code ? airlineLogoUrl(_code) : '';
+    const _offset = dayOffsetV2(s.depTime, s.arrTime);
     return `
     <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px dashed #d8e2f3">
       <div style="min-width:82px;max-width:96px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:3px">
@@ -2831,7 +2868,7 @@ function buildProposalHTMLV2(deal, opts) {
       <div style="flex:1;display:flex;align-items:center;gap:10px">
         <div><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.from)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.fromName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.depTime)}</div></div>
         <div style="flex:1;text-align:center;color:#c9961a;font-size:11px">──────✈──────<div style="font-size:9px;color:#7d8bab">${fmtDV2(s.date)}</div></div>
-        <div style="text-align:right"><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.to)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.toName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.arrTime)}</div></div>
+        <div style="text-align:right"><div style="font-size:17px;font-weight:800;color:#0d1b3e">${escHtml(s.to)}</div><div style="font-size:9px;color:#7d8bab">${escHtml(s.toName)}</div><div style="font-size:11px;font-weight:700;color:#334e82">${escHtml(s.arrTime)}${dayOffsetBadgeV2(_offset)}</div>${_offset > 0 ? `<div style="font-size:8px;color:#dc2626;font-weight:700">Lands ${escHtml(addDaysToDateStrV2(s.date, _offset))}</div>` : ''}</div>
       </div>
     </div>`;
   };
@@ -2865,7 +2902,9 @@ function buildProposalHTMLV2(deal, opts) {
   }).join('') : '';
 
   const trainBlocks = trains.map((tv) => {
-    const trainSegRow = (s) => `
+    const trainSegRow = (s) => {
+      const _offset = dayOffsetV2(s.depTime, s.arrTime);
+      return `
       <div style="padding:14px 18px;border-top:1px solid #f0f4fa">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
           <div style="font-size:13px;font-weight:800;color:#0d1b3e">${escHtml(s.trainNo || '')}${s.trainName ? ` <span style="font-weight:600;color:#5a6b8c">${escHtml(s.trainName)}</span>` : ''}</div>
@@ -2885,10 +2924,12 @@ function buildProposalHTMLV2(deal, opts) {
           <div style="flex:1;min-width:96px;text-align:right">
             <div style="font-size:22px;font-weight:800;color:#0d1b3e;line-height:1">${escHtml(s.to || '—')}</div>
             <div style="font-size:10.5px;color:#5a6b8c">${escHtml(s.toStation || '')}</div>
-            <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${escHtml(s.arrTime || '—')}</div>
+            <div style="font-size:14px;font-weight:800;color:#c9961a;margin-top:4px">${escHtml(s.arrTime || '—')}${dayOffsetBadgeV2(_offset)}</div>
+            ${_offset > 0 ? `<div style="font-size:8px;color:#dc2626;font-weight:700">Arrives ${escHtml(addDaysToDateStrV2(s.date, _offset))}</div>` : ''}
           </div>
         </div>
       </div>`;
+    };
     const outSegs = (tv.segments || []).filter((s) => s.from || s.to);
     const retSegs = (tv.returnSegments || []).filter((s) => s.from || s.to);
     const label = tv.tripType === 'return' ? 'RETURN' : tv.tripType === 'multi-city' ? 'MULTI-LEG' : 'ONE WAY';
