@@ -5980,6 +5980,105 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
   );
 }
 
+// ─── Custom Pricing Row Modal ────────────────────────────────────────────────
+// Default service types — user can also type anything custom. Same philosophy
+// as hotel room types or airline codes: a sensible preset list that doesn't
+// lock you into it.
+const CUSTOM_ROW_TYPES = [
+  'Airport Transfer', 'Airport VIP Assistance', 'Alcohol / Bar Package',
+  'Cruise Extension', 'Entrance Tickets', 'Event / Show Tickets',
+  'Gratuities / Tips', 'Guide Charges', 'Honeymoon Package',
+  'Laundry / Luggage', 'Medical / PCR Test', 'Parking / Porterage',
+  'Photography / Videography', 'Porter / Coolie', 'SIM Card / WiFi',
+  'Special Meal', 'Spa / Wellness Package', 'Sports Activity',
+  'Train Supplement', 'Travel Insurance (Extra)', 'Trekking Permit',
+  'Visa on Arrival (Extra)', 'Water Sports', 'Wedding Package',
+  'Other',
+];
+
+function AddCustomRowModal({ deal, editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() => editing ? {
+    label: editing.label || '',
+    customType: editing.customType || editing.label || '',
+    vendorName: editing.vendorName || '',
+    currency: editing.currency || 'INR',
+    costPrice: editing.costPrice != null ? String(editing.costPrice) : (editing.amount != null ? String(editing.amount) : ''),
+    sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : (editing.amount != null ? String(editing.amount) : ''),
+    exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
+    paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
+    notes: editing.notes || '',
+  } : {
+    label: '', customType: '', vendorName: '', currency: 'INR',
+    costPrice: '', sellingPrice: '', exchangeRate: '',
+    paxPricing: false, paxRates: {}, notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async () => {
+    const label = (form.customType || '').trim() || (form.label || '').trim();
+    if (!label) { setErr('Service type / description is required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const rowFields = {
+        label,
+        customType: form.customType,
+        vendorName: form.vendorName,
+        currency: form.currency,
+        costPrice: Number(form.costPrice) || 0,
+        sellingPrice: Number(form.sellingPrice) || 0,
+        exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
+        paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        notes: form.notes,
+        kind: 'add',
+      };
+      if (editing) {
+        const rows = (deal.pricingRows || []).map((r) => r.id === editing.id ? { ...r, ...rowFields } : r);
+        const updated = await patchDeal(deal._id, { pricingRows: rows });
+        window.veToast && window.veToast('Custom row updated ✓', 'success');
+        onSaved(updated); return;
+      }
+      const newRow = { id: 'pr_' + Date.now(), ...rowFields, payments: [] };
+      const updated = await patchDeal(deal._id, { pricingRows: [...(deal.pricingRows || []), newRow] });
+      window.veToast && window.veToast('Custom row added ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title={editing ? '✎ Edit Custom Service' : '+ Add Custom Service'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Service Type *</div>
+        <input
+          value={form.customType}
+          onChange={set('customType')}
+          list="custom-row-types"
+          placeholder="e.g. Airport VIP Assistance, Alcohol Package…"
+          style={inputStyle}
+        />
+        <datalist id="custom-row-types">
+          {CUSTOM_ROW_TYPES.map((t) => <option key={t} value={t} />)}
+        </datalist>
+        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>Type anything or pick from the list</div>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name</div>
+        <input value={form.vendorName} onChange={set('vendorName')} placeholder="Who supplies this service" style={inputStyle} />
+      </div>
+      <CurrencyCostRow form={form} setForm={setForm} />
+      <PaxRatesFields form={form} setForm={setForm} deal={deal} />
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Notes (optional)</div>
+        <input value={form.notes} onChange={set('notes')} placeholder="Any detail for internal reference" style={inputStyle} />
+      </div>
+    </ModalShell>
+  );
+}
+
 function AddVisaModal({ deal, editing, onClose, onSaved }) {
   const [form, setForm] = useState(() => editing ? {
     name: editing.name || '', currency: editing.currency || 'INR',
@@ -8925,6 +9024,14 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           )}
           {modal === 'payment' && <AddPaymentModal deal={deal} editing={editingPayment} onClose={() => { setModal(null); setEditingPayment(null); }} onSaved={(updated) => { handleSaved(updated); setEditingPayment(null); }} />}
           {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'customRow' && (
+            <AddCustomRowModal
+              deal={deal}
+              editing={editingVendor}
+              onClose={() => { setModal(null); setEditingVendor(null); }}
+              onSaved={(updated) => { handleSaved(updated); setEditingVendor(null); }}
+            />
+          )}
           {modal === 'payVendor' && payingVendor && (
             <AddVendorPaymentModal
               deal={deal}
@@ -9142,95 +9249,66 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
 
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
-              <span className="v2-side-panel-title">Custom Pricing Rows</span>
+              <span className="v2-side-panel-title">Custom Services</span>
               <button
                 style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
-                onClick={async () => {
-                  const rows = [...(deal.pricingRows || []), { id: 'pr_' + Date.now(), label: '', vendorName: '', currency: 'INR', costPrice: '', sellingPrice: '', kind: 'add', payments: [] }];
-                  const updated = await patchDeal(deal._id, { pricingRows: rows });
-                  setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                }}
-              >+ Add Row</button>
+                onClick={() => { setEditingVendor(null); setModal('customRow'); }}
+              >+ Add</button>
             </div>
-            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>Extra line items beyond components (e.g. "Airport VIP assistance") — Cost Price counts toward this package's total cost/profit and Selling Price toward the invoice, exactly like Hotel/Flight/Visa/Land, with the same vendor + payment tracking</div>
-            {(deal.pricingRows || []).map((pr) => {
+            <div style={{ fontSize: 11, color: '#6b7a99', marginBottom: 8 }}>
+              Extra services not covered by other components — Airport VIP, Alcohol Package, Spa, Permits, etc. Cost Price counts toward package profit exactly like Hotel/Flight/Visa/Land.
+            </div>
+            {(deal.pricingRows || []).length === 0 && (
+              <div style={{ fontSize: 11, color: '#b0bac9', padding: '8px 0' }}>No custom services added yet.</div>
+            )}
+            {(deal.pricingRows || []).map((pr, i) => {
               const npr = normalizePricingRow(pr);
               const prPaid = sumBy(pr.payments, 'amount');
               const prCost = toINR(npr.costPrice, npr.currency, npr.exchangeRate);
+              const prSell = toINR(npr.sellingPrice, npr.currency, npr.exchangeRate);
               return (
-                <div key={pr.id} style={{ padding: '8px 0', borderBottom: '1px solid #f4f7fc' }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                    <input
-                      defaultValue={pr.label || ''} placeholder="Description"
-                      onBlur={async (e) => {
-                        if (e.target.value === (pr.label || '')) return;
-                        const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, label: e.target.value } : r);
-                        const updated = await patchDeal(deal._id, { pricingRows: rows });
-                        setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                      }}
-                      style={{ ...inputStyle, flex: 1, padding: '5px 8px', fontSize: 12 }}
-                    />
+                <div key={pr.id || i} className="v2-hotel-card">
+                  <div className="v2-hotel-head">
+                    <div className="v2-hotel-code" style={{ fontSize: 10 }}>SVC</div>
+                    <div className="v2-hotel-info">
+                      <div className="v2-hotel-name">{pr.label || pr.customType || 'Custom Service'}</div>
+                      <div className="v2-hotel-meta">{pr.vendorName || '—'}</div>
+                    </div>
+                    <div className="v2-hotel-price">
+                      <div className="v2-hotel-price-val">{fmtINRFull(prSell)}</div>
+                      {prCost > 0 && prCost !== prSell && <div style={{ fontSize: 9, color: '#94a3b8' }}>CP: {fmtINRFull(prCost)}</div>}
+                    </div>
+                    <button
+                      onClick={() => { setEditingVendor(pr); setModal('customRow'); }}
+                      title="Edit" disabled={busy}
+                      style={{ background: 'none', border: 'none', color: '#6b7a99', cursor: 'pointer', fontSize: 14, marginLeft: 8, alignSelf: 'flex-start' }}
+                    >✎</button>
                     <button
                       onClick={async () => {
-                        if (!window.confirm('Ye row delete karni hai?')) return;
+                        if (!window.confirm('Delete this custom service?')) return;
                         const rows = (deal.pricingRows || []).filter((r) => r.id !== pr.id);
                         const updated = await patchDeal(deal._id, { pricingRows: rows });
                         setDeal(updated); onDealUpdated && onDealUpdated(updated);
                       }}
-                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}
+                      title="Remove" disabled={busy}
+                      style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, marginLeft: 4, alignSelf: 'flex-start' }}
                     >✕</button>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', marginBottom: 2 }}>COST PRICE</div>
-                      <input
-                        type="number" defaultValue={pr.costPrice ?? pr.amount ?? ''} placeholder="₹ we pay"
-                        onBlur={async (e) => {
-                          if (e.target.value === String(pr.costPrice ?? pr.amount ?? '')) return;
-                          const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, costPrice: e.target.value } : r);
-                          const updated = await patchDeal(deal._id, { pricingRows: rows });
-                          setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                        }}
-                        style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', marginBottom: 2 }}>SELLING PRICE</div>
-                      <input
-                        type="number" defaultValue={pr.sellingPrice ?? pr.amount ?? ''} placeholder="₹ client pays"
-                        onBlur={async (e) => {
-                          if (e.target.value === String(pr.sellingPrice ?? pr.amount ?? '')) return;
-                          const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, sellingPrice: e.target.value } : r);
-                          const updated = await patchDeal(deal._id, { pricingRows: rows });
-                          setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                        }}
-                        style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 12, textAlign: 'right' }}
-                      />
-                    </div>
-                  </div>
-                  <input
-                    defaultValue={pr.vendorName || ''} placeholder="Vendor name (kisko pay karna hai)"
-                    onBlur={async (e) => {
-                      if (e.target.value === (pr.vendorName || '')) return;
-                      const rows = (deal.pricingRows || []).map((r) => r.id === pr.id ? { ...r, vendorName: e.target.value } : r);
-                      const updated = await patchDeal(deal._id, { pricingRows: rows });
-                      setDeal(updated); onDealUpdated && onDealUpdated(updated);
-                    }}
-                    style={{ ...inputStyle, width: '100%', padding: '5px 8px', fontSize: 11.5, marginBottom: prCost > 0 ? 6 : 0 }}
-                  />
+                  {pr.notes && <div style={{ fontSize: 10.5, color: '#6b7a99', padding: '2px 0 6px', fontStyle: 'italic' }}>{pr.notes}</div>}
                   {prCost > 0 && (
                     <div className="v2-pay-bar">
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7a99', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Vendor Payment</div>
                       <div className="v2-pay-progress">
                         <div className={`v2-pay-progress-fill ${prPaid >= prCost ? '' : 'amber'}`} style={{ width: `${Math.min(100, (prPaid / prCost) * 100)}%` }}></div>
                       </div>
                       <div className="v2-pay-row">
-                        <span>Paid to vendor: <b>{fmtINRFull(prPaid)}</b> / {fmtINRFull(prCost)}</span>
+                        <span>Paid: <b>{fmtINRFull(prPaid)}</b> / {fmtINRFull(prCost)}</span>
                         <span className={`v2-pay-status ${prPaid >= prCost ? 'paid' : 'due'}`}>
                           {prPaid >= prCost ? '✓ Fully Paid' : `${fmtINRFull(prCost - prPaid)} due`}
                         </span>
                         <button
                           className="v2-acc-btn-sm"
-                          onClick={() => { setPayingVendor({ arrayKey: 'pricingRows', vendorId: pr.id, label: pr.vendorName || pr.label || 'Custom Row' }); setModal('payVendor'); }}
+                          onClick={() => { setPayingVendor({ arrayKey: 'pricingRows', vendorId: pr.id, label: pr.vendorName || pr.label || 'Custom Service' }); setModal('payVendor'); }}
                         >💸 Pay</button>
                       </div>
                     </div>
