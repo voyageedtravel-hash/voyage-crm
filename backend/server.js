@@ -619,61 +619,6 @@ const start = async () => {
       }
     });
 
-    // ─── Route map (proposal PDF map block) ───────────────────────────
-    // Renders a PNG map from real Natural Earth coastlines — no external
-    // tile server, no API key. The route-map module depends on sharp (native
-    // C++ addon) which can fail to build on constrained Render free-tier
-    // instances (512 MB RAM). Lazy-load it so the rest of the server still
-    // starts if sharp isn't available — the endpoint just returns 503
-    // instead of crashing the whole process.
-    let renderRouteMap = null;
-    try {
-      renderRouteMap = require("./services/route-map").renderRouteMap;
-      console.log("✓ route-map module loaded (sharp + d3-geo + world-atlas)");
-    } catch (e) {
-      console.warn("⚠️  route-map module failed to load:", e.message, "— /api/route-map will return 503 until deps are fixed");
-    }
-    const routeMapCache = new Map();
-    const ROUTE_MAP_CACHE_MAX = 200;
-    const routeMapLimiter = makeRateLimiter(60);
-    app.get("/api/route-map", routeMapLimiter, async (req, res) => {
-      if (!renderRouteMap) {
-        return res.status(503).json({ error: "Map renderer not available — sharp or d3-geo failed to install on this server" });
-      }
-      try {
-        let stops;
-        try { stops = JSON.parse(req.query.stops || "[]"); } catch { stops = null; }
-        if (!Array.isArray(stops) || stops.length < 2) {
-          return res.status(400).json({ error: "Need at least 2 stops with {name, lat, lng}" });
-        }
-        for (const s of stops) {
-          if (typeof s.lat !== "number" || typeof s.lng !== "number" || !isFinite(s.lat) || !isFinite(s.lng)) {
-            return res.status(400).json({ error: "Each stop needs numeric lat/lng" });
-          }
-        }
-        const width = Math.min(1200, Math.max(300, parseInt(req.query.width, 10) || 800));
-        const height = Math.min(1200, Math.max(300, parseInt(req.query.height, 10) || 560));
-        const key = JSON.stringify({ stops, width, height });
-        const hit = routeMapCache.get(key);
-        if (hit) {
-          res.setHeader("Content-Type", "image/png");
-          res.setHeader("Cache-Control", "public, max-age=86400");
-          return res.send(hit);
-        }
-        const png = await renderRouteMap(stops, { width, height });
-        if (routeMapCache.size >= ROUTE_MAP_CACHE_MAX) {
-          routeMapCache.delete(routeMapCache.keys().next().value);
-        }
-        routeMapCache.set(key, png);
-        res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.send(png);
-      } catch (e) {
-        console.error("route-map error:", e.message);
-        res.status(500).json({ error: "Could not render map" });
-      }
-    });
-
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
