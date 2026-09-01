@@ -2081,7 +2081,13 @@ const CITY_COUNTRY = {
   shanghai:"China",beijing:"China",taipei:"Taiwan",
   goa:"India",jaipur:"India",udaipur:"India",manali:"India",shimla:"India",leh:"India",srinagar:"India",
 };
-const ROOM_CATEGORIES = ["Deluxe Room","Superior Room","Standard Room","Junior Suite","Suite","Executive Suite","Presidential Suite","Pool View Room","Sea View Room","Garden View","Mountain View","Studio","Apartment","Villa","Chalet","Bungalow","Tent/Glamping","Other"];
+const ROOM_CATEGORIES = [
+  "Deluxe Room","Superior Room","Standard Room","Junior Suite","Suite","Executive Suite","Presidential Suite",
+  "Pool View Room","Sea View Room","Garden View","Mountain View",
+  "Studio","Apartment","1 Bedroom Apartment","2 Bedroom Apartment",
+  "Villa","1 Bedroom Private Pool Villa","2 Bedroom Private Pool Villa",
+  "Chalet","Bungalow","Tent/Glamping","Other",
+];
 const VISA_STATUSES = ['Not Applied', 'Not Required', 'In Progress', 'Approved', 'Rejected'];
 const CANCEL_STATUSES = ['Pending', 'Refund Approved', 'Refund Processed', 'No Refund Due', 'Closed'];
 const TRAIN_CLASSES = ['1A','2A','3A','SL','CC','EC','2S','Sleeper','First Class','Business','Standard','Other'];
@@ -2291,9 +2297,16 @@ function RoomAssignmentBlock({ hotel, deal, onUpdate }) {
         <div key={r.id} style={{ border: '1px solid #e3eaf7', borderRadius: 9, padding: '9px 11px', marginBottom: 7, background: '#fff' }}>
           <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginBottom: 7 }}>
             <span style={{ fontSize: 10, fontWeight: 800, color: '#c9942a', background: '#faf1dc', borderRadius: 20, padding: '2px 9px' }}>ROOM {i + 1}</span>
-            <select value={r.roomType} onChange={(e) => updRoom(r.id, 'roomType', e.target.value)} style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '4px 7px', fontSize: 11 }}>
-              {ROOM_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-            </select>
+            <input
+              value={r.roomType}
+              onChange={(e) => updRoom(r.id, 'roomType', e.target.value)}
+              list="room-cat-list"
+              placeholder="Room type"
+              style={{ border: '1px solid #d4e0f5', borderRadius: 6, padding: '4px 7px', fontSize: 11, minWidth: 160 }}
+            />
+            <datalist id="room-cat-list">
+              {ROOM_CATEGORIES.map((c) => <option key={c} value={c} />)}
+            </datalist>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: '#5a6b8c', cursor: 'pointer' }}>
               <input type="checkbox" checked={!!r.extraBed} onChange={(e) => updRoom(r.id, 'extraBed', e.target.checked)} /> Extra bed
             </label>
@@ -5776,10 +5789,16 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
       </div>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Room Category</div>
-        <select value={form.roomCategory} onChange={set('roomCategory')} style={inputStyle}>
-          <option value="">Select…</option>
-          {ROOM_CATEGORIES.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <input
+          value={form.roomCategory}
+          onChange={set('roomCategory')}
+          list="room-cat-list-hotel"
+          placeholder="e.g. Deluxe Room, 1 Bedroom Pool Villa…"
+          style={inputStyle}
+        />
+        <datalist id="room-cat-list-hotel">
+          {ROOM_CATEGORIES.map((r) => <option key={r} value={r} />)}
+        </datalist>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <div>
@@ -6587,8 +6606,10 @@ const VENDOR_MODES = ['UPI', 'Bank Transfer', 'Cash collected by vendor', 'Cash 
 // deal.clientPayments[] (money FROM the client) which was already
 // wired earlier. This is money WE pay OUT to the supplier. ───────
 
-function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose, onSaved }) {
-  const [form, setForm] = useState({ amount: '', mode: VENDOR_MODES[0], date: new Date().toISOString().slice(0, 10), note: '' });
+function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose, onSaved, editing }) {
+  const [form, setForm] = useState(editing
+    ? { amount: String(editing.amount || ''), mode: editing.mode || VENDOR_MODES[0], date: editing.date || new Date().toISOString().slice(0, 10), note: editing.note || '' }
+    : { amount: '', mode: VENDOR_MODES[0], date: new Date().toISOString().slice(0, 10), note: '' });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -6598,15 +6619,29 @@ function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose,
     setSaving(true);
     setErr('');
     try {
-      const newPayment = { amount: Number(form.amount), mode: form.mode, date: form.date, note: form.note };
-      const updatedList = (deal[arrayKey] || []).map((v) =>
-        v.id === vendorId ? { ...v, payments: [...(v.payments || []), newPayment] } : v
-      );
+      let updatedList;
+      if (editing) {
+        // Update the existing payment in-place by its id
+        updatedList = (deal[arrayKey] || []).map((v) =>
+          v.id === vendorId ? {
+            ...v, payments: (v.payments || []).map((p) =>
+              p.id === editing.id ? { ...p, amount: Number(form.amount), mode: form.mode, date: form.date, note: form.note } : p
+            )
+          } : v
+        );
+      } else {
+        const newPayment = { id: 'pmt_' + Date.now(), amount: Number(form.amount), mode: form.mode, date: form.date, note: form.note };
+        updatedList = (deal[arrayKey] || []).map((v) =>
+          v.id === vendorId ? { ...v, payments: [...(v.payments || []), newPayment] } : v
+        );
+      }
       const updated = await patchDeal(deal._id, {
         [arrayKey]: updatedList,
-        auditLog: [...(deal.auditLog || []), logEntryStatic(`Paid ${vendorLabel}: ₹${Number(form.amount).toLocaleString('en-IN')}`)],
+        auditLog: [...(deal.auditLog || []), logEntryStatic(editing
+          ? `Edited payment to ${vendorLabel}: ₹${Number(form.amount).toLocaleString('en-IN')}`
+          : `Paid ${vendorLabel}: ₹${Number(form.amount).toLocaleString('en-IN')}`)],
       });
-      window.veToast && window.veToast('Vendor payment recorded ✓', 'success');
+      window.veToast && window.veToast(editing ? 'Payment updated ✓' : 'Vendor payment recorded ✓', 'success');
       onSaved(updated);
     } catch (e) {
       setErr('Could not save — check connection and try again.');
@@ -6615,7 +6650,7 @@ function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose,
   };
 
   return (
-    <ModalShell title={`💸 Pay ${vendorLabel}`} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Record Payment">
+    <ModalShell title={editing ? `✎ Edit Payment — ${vendorLabel}` : `💸 Pay ${vendorLabel}`} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Record Payment'}>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Paid (₹) *</div>
         <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
@@ -6643,8 +6678,12 @@ function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose,
 const REFUND_REASONS = ['Service Issue', 'Visa Rejection', 'Travel Plan Cancelled', 'Goodwill / Adjustment', 'Other'];
 const REFUND_APPROVERS = ['Vishal Sharma', 'Sahitya Singh'];
 
-function AddRefundModal({ deal, onClose, onSaved }) {
-  const [form, setForm] = useState({
+function AddRefundModal({ deal, onClose, onSaved, editing }) {
+  const [form, setForm] = useState(editing ? {
+    amount: String(editing.amount || ''), mode: editing.mode || REFUND_MODES[0],
+    reason: editing.reason || REFUND_REASONS[0], approvedBy: editing.approvedBy || REFUND_APPROVERS[0],
+    date: editing.date || '', refNo: editing.refNo || '', note: editing.note || '',
+  } : {
     amount: '', mode: REFUND_MODES[0], reason: REFUND_REASONS[0], approvedBy: REFUND_APPROVERS[0],
     date: '', refNo: '', note: '',
   });
@@ -6657,12 +6696,21 @@ function AddRefundModal({ deal, onClose, onSaved }) {
     setSaving(true);
     setErr('');
     try {
-      const newRefund = {
+      const refundFields = {
         amount: Number(form.amount), mode: form.mode, reason: form.reason, approvedBy: form.approvedBy,
         date: form.date || new Date().toISOString().slice(0, 10), refNo: form.refNo, note: form.note,
       };
-      const updated = await patchDeal(deal._id, { refunds: [...(deal.refunds || []), newRefund] });
-      window.veToast && window.veToast('Refund recorded ✓', 'success');
+      let updated;
+      if (editing) {
+        const updatedRefunds = (deal.refunds || []).map((r) =>
+          r === editing || (r.id && r.id === editing.id) ? { ...r, ...refundFields } : r
+        );
+        updated = await patchDeal(deal._id, { refunds: updatedRefunds });
+        window.veToast && window.veToast('Refund updated ✓', 'success');
+      } else {
+        updated = await patchDeal(deal._id, { refunds: [...(deal.refunds || []), refundFields] });
+        window.veToast && window.veToast('Refund recorded ✓', 'success');
+      }
       onSaved(updated);
     } catch (e) {
       setErr('Could not save — check connection and try again.');
@@ -6671,7 +6719,7 @@ function AddRefundModal({ deal, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="− Record Refund to Client" onClose={onClose} onSubmit={submit} saving={saving} err={err}>
+    <ModalShell title={editing ? '✎ Edit Refund' : '− Record Refund to Client'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Record Refund'}>
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Amount Refunded (₹) *</div>
         <input type="number" value={form.amount} onChange={set('amount')} placeholder="0" style={inputStyle} />
@@ -7235,6 +7283,8 @@ function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
   const payments = vendor.payments || [];
   if (!payments.length) return null;
 
+  const [editingPmt, setEditingPmt] = React.useState(null);
+
   const fmtDate = (d) => {
     if (!d) return '—';
     try {
@@ -7255,35 +7305,56 @@ function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
   };
 
   return (
-    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #d4e0f5' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#4169E1', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>
-        Payment history ({payments.length} {payments.length === 1 ? 'entry' : 'entries'})
-      </div>
-      {payments.map((p, i) => (
-        <div key={p.id || i} style={{ display: 'grid', gridTemplateColumns: '22px 1fr 1.4fr 1fr 2fr 22px', gap: 8, alignItems: 'center', padding: '5px 8px', background: i % 2 === 0 ? '#f9fafc' : '#fff', borderRadius: 6, fontSize: 11.5 }}>
-          <span style={{ color: '#94a3b8', fontWeight: 700 }}>#{i + 1}</span>
-          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0d1b3e' }}>₹{(Number(p.amount) || 0).toLocaleString('en-IN')}</span>
-          <span style={{ color: '#334e82', fontWeight: 600 }}>{p.mode || '—'}</span>
-          <span style={{ color: '#6b7a99' }}>{fmtDate(p.date)}</span>
-          <span style={{ color: '#6b7a99', fontStyle: p.note ? 'normal' : 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.note}>
-            {p.note || 'no note'}
-          </span>
-          <button
-            onClick={() => removePayment(p.id)}
-            title="Delete this payment entry"
-            style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, padding: 0 }}
-            onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#cbd5e1'}
-          >✕</button>
+    <>
+      {editingPmt && (
+        <AddVendorPaymentModal
+          deal={deal}
+          arrayKey={arrayKey}
+          vendorId={vendor.id}
+          vendorLabel={vendor.name || vendor.label || 'Vendor'}
+          editing={editingPmt}
+          onClose={() => setEditingPmt(null)}
+          onSaved={(updated) => { setEditingPmt(null); onDealUpdated && onDealUpdated(updated); }}
+        />
+      )}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #d4e0f5' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#4169E1', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>
+          Payment history ({payments.length} {payments.length === 1 ? 'entry' : 'entries'})
         </div>
-      ))}
-    </div>
+        {payments.map((p, i) => (
+          <div key={p.id || i} style={{ display: 'grid', gridTemplateColumns: '22px 1fr 1.4fr 1fr 2fr 22px 22px', gap: 6, alignItems: 'center', padding: '5px 8px', background: i % 2 === 0 ? '#f9fafc' : '#fff', borderRadius: 6, fontSize: 11.5 }}>
+            <span style={{ color: '#94a3b8', fontWeight: 700 }}>#{i + 1}</span>
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0d1b3e' }}>₹{(Number(p.amount) || 0).toLocaleString('en-IN')}</span>
+            <span style={{ color: '#334e82', fontWeight: 600 }}>{p.mode || '—'}</span>
+            <span style={{ color: '#6b7a99' }}>{fmtDate(p.date)}</span>
+            <span style={{ color: '#6b7a99', fontStyle: p.note ? 'normal' : 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.note}>
+              {p.note || 'no note'}
+            </span>
+            <button
+              onClick={() => setEditingPmt(p)}
+              title="Edit this payment"
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: 0 }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#334e82'}
+              onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+            >✎</button>
+            <button
+              onClick={() => removePayment(p.id)}
+              title="Delete this payment entry"
+              style={{ background: 'transparent', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 13, padding: 0 }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+              onMouseLeave={(e) => e.currentTarget.style.color = '#cbd5e1'}
+            >✕</button>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
 function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
+  const [editingRefund, setEditingRefund] = useState(null);
   const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
   const [editingPayment, setEditingPayment] = useState(null); // client-payment object being edited
   const [payingVendor, setPayingVendor] = useState(null); // { arrayKey, vendorId, label } for the Pay Vendor modal
@@ -9023,7 +9094,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             />
           )}
           {modal === 'payment' && <AddPaymentModal deal={deal} editing={editingPayment} onClose={() => { setModal(null); setEditingPayment(null); }} onSaved={(updated) => { handleSaved(updated); setEditingPayment(null); }} />}
-          {modal === 'refund' && <AddRefundModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'refund' && <AddRefundModal deal={deal} editing={editingRefund} onClose={() => { setModal(null); setEditingRefund(null); }} onSaved={(u) => { handleSaved(u); setEditingRefund(null); }} />}
           {modal === 'customRow' && (
             <AddCustomRowModal
               deal={deal}
@@ -9222,6 +9293,11 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                         <div className="v2-schedule-amount-val" style={{ color: '#dc2626' }}>− {fmtINR(r.amount || 0)}</div>
                         <div className="v2-schedule-status due">Refunded</div>
                       </div>
+                      <button
+                        onClick={() => { setEditingRefund(r); setModal('refund'); }}
+                        title="Edit this refund"
+                        style={{ background: 'none', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 13 }}
+                      >✏️</button>
                       <button
                         onClick={() => deleteRefund(r)}
                         disabled={busy}
