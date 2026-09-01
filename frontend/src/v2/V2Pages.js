@@ -6005,6 +6005,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
 // lock you into it.
 const CUSTOM_ROW_TYPES = [
   'Airport Transfer', 'Airport VIP Assistance', 'Alcohol / Bar Package',
+  'Early Check-in', 'Late Check-out',
   'Cruise Extension', 'Entrance Tickets', 'Event / Show Tickets',
   'Gratuities / Tips', 'Guide Charges', 'Honeymoon Package',
   'Laundry / Luggage', 'Medical / PCR Test', 'Parking / Porterage',
