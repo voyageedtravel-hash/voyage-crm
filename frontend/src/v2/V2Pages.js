@@ -5987,9 +5987,11 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
     sellingPrice: editing.sellingPrice != null ? String(editing.sellingPrice) : '',
     exchangeRate: editing.exchangeRate != null ? String(editing.exchangeRate) : '',
     visaStatus: editing.visaStatus || 'Not Applied',
+    vendorName: editing.vendorName || '',
     paxPricing: !!editing.paxPricing, paxRates: editing.paxRates || {},
   } : {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '', visaStatus: 'Not Applied',
+    vendorName: '',
     paxPricing: false, paxRates: {},
   });
   const [saving, setSaving] = useState(false);
@@ -6008,6 +6010,7 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
         sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         visaStatus: form.visaStatus,
+        vendorName: form.vendorName,
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
       };
 
@@ -6040,6 +6043,10 @@ function AddVisaModal({ deal, editing, onClose, onSaved }) {
         <select value={form.visaStatus} onChange={set('visaStatus')} style={inputStyle}>
           {VISA_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name</div>
+        <input value={form.vendorName} onChange={set('vendorName')} placeholder="e.g. VFS Global, BLS International" style={inputStyle} />
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
       <PaxRatesFields form={form} setForm={setForm} deal={deal} />
@@ -8614,7 +8621,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                         <div className="v2-hotel-code">VE</div>
                         <div className="v2-hotel-info">
                           <div className="v2-hotel-name">{v.name || 'Visa Application'}</div>
-                          <div className="v2-hotel-meta">{v.visaStatus || 'Not Applied'}</div>
+                          <div className="v2-hotel-meta">{v.vendorName ? `${v.vendorName} · ` : ''}{v.visaStatus || 'Not Applied'}</div>
                         </div>
                         <div className="v2-hotel-price">
                           <div className="v2-hotel-price-val">{fmtINRFull(vSell)}</div>
