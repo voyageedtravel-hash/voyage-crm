@@ -5090,6 +5090,8 @@ function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, labe
 //    is supplied, plain-text paste now routes straight into it.
 function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, summary }) {
   const fileInputRef = React.useRef(null);
+  const [dragOver, setDragOver] = React.useState(false);
+
   const handlePaste = (e) => {
     const items = Array.from(e.clipboardData.items || []);
     const files = items
@@ -5114,25 +5116,54 @@ function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, s
     if (files.length) onFiles(files);
     e.target.value = '';
   };
+  // Drag-and-drop support — a very common way to add screenshots that V2
+  // was missing. Users drag a file (or multiple files, if `multiple`) from
+  // their file manager or download bar and drop them onto this zone; same
+  // handler path as file-picker / clipboard paste.
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); };
+  const handleDrop = (e) => {
+    e.preventDefault(); e.stopPropagation(); setDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type && (f.type.indexOf('image') === 0 || f.type === 'application/pdf'));
+    if (files.length) onFiles(multiple ? files : files.slice(0, 1));
+  };
+
   return (
     <div
       tabIndex={0}
       onPaste={handlePaste}
-      style={{ background: '#faf7f0', border: '1px dashed #c9a84c', borderRadius: 10, padding: 14, cursor: 'text', outline: 'none' }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        background: dragOver ? '#fef3c7' : '#faf7f0',
+        border: `2px dashed ${dragOver ? '#c9961a' : '#c9a84c'}`,
+        borderRadius: 10,
+        padding: 14,
+        cursor: 'text',
+        outline: 'none',
+        transition: 'background 120ms',
+      }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 20 }}>{extracting ? '⏳' : '✨'}</span>
+        <span style={{ fontSize: 20 }}>{extracting ? '⏳' : dragOver ? '📥' : '✨'}</span>
         <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-          {extracting ? 'Reading file…' : hint}
+          {extracting ? 'Reading file…' : dragOver ? 'Drop file(s) here to extract' : hint}
         </span>
       </div>
+      {multiple && !extracting && !dragOver && (
+        <div style={{ fontSize: 10.5, color: '#7d8bab', marginTop: 4, marginLeft: 30 }}>
+          💡 Multiple screenshots supported — paste one after another, or drag &amp; drop several files at once
+        </div>
+      )}
       <button
         type="button"
         disabled={extracting}
         onClick={() => fileInputRef.current && fileInputRef.current.click()}
         style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: '#334e82', fontSize: 11.5, fontWeight: 700, textDecoration: 'underline', cursor: extracting ? 'wait' : 'pointer' }}
       >
-        or choose a file to upload
+        {multiple ? 'or choose file(s) to upload — hold Ctrl/Cmd to pick multiple' : 'or choose a file to upload'}
       </button>
       <input ref={fileInputRef} type="file" accept={accept} multiple={!!multiple} onChange={handleFileChange} disabled={extracting} style={{ display: 'none' }} />
       {summary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{summary}</div>}
@@ -5316,7 +5347,7 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Flight' : '+ Add Flight'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      <PasteZone hint="Click here, then paste (Ctrl+V) a flight screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+      <PasteZone hint="Click here, then paste (Ctrl+V) flight screenshot(s) or PDF — one at a time or many at once" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
 
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor Name * <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 10 }}>(supplier/DMC — jisko payment karni hai)</span></div>
@@ -5577,7 +5608,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Train' : '+ Add Train'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      <PasteZone hint="Click here, then paste (Ctrl+V) a ticket screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+      <PasteZone hint="Click here, then paste (Ctrl+V) train ticket screenshot(s) or PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
 
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Booking Name</div>
@@ -5676,24 +5707,41 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
       const j = await runAIExtract('hotel', files);
       const hotels = j.hotels || [];
       if (!hotels.length) throw new Error('No hotel details found in this file');
-      const h0 = hotels[0];
-      setForm((f) => ({
-        ...f,
-        hotelName: h0.hotelName || f.hotelName,
-        city: h0.city || f.city,
-        starRating: h0.starRating || f.starRating,
-        roomCategory: h0.roomCategory || f.roomCategory,
-        checkIn: h0.checkIn || f.checkIn,
-        checkOut: h0.checkOut || f.checkOut,
-        costPrice: h0.costPrice != null ? String(h0.costPrice) : f.costPrice,
-      }));
-      setExtraHotels(hotels.slice(1));
+
+      // Multi-paste flow: if the form is still empty (first paste for this
+      // modal), fill it with hotels[0] and any remainder goes into
+      // extraHotels. If the form is ALREADY filled from a previous paste,
+      // treat all newly-extracted hotels as extras — don't overwrite the
+      // primary hotel the user has been reviewing/editing. This fixes the
+      // exact bug reported: paste hotel 1 → form fills; paste hotel 2 →
+      // form used to be overwritten with hotel 2 and hotel 1 was lost.
+      // Now hotel 1 stays in the form, hotel 2 joins the extras list.
+      const formAlreadyFilled = !!(form.hotelName || '').trim();
+
+      if (!formAlreadyFilled) {
+        const h0 = hotels[0];
+        setForm((f) => ({
+          ...f,
+          hotelName: h0.hotelName || f.hotelName,
+          city: h0.city || f.city,
+          starRating: h0.starRating || f.starRating,
+          roomCategory: h0.roomCategory || f.roomCategory,
+          checkIn: h0.checkIn || f.checkIn,
+          checkOut: h0.checkOut || f.checkOut,
+          costPrice: h0.costPrice != null ? String(h0.costPrice) : f.costPrice,
+        }));
+        setExtraHotels((prev) => [...prev, ...hotels.slice(1)]);
+      } else {
+        setExtraHotels((prev) => [...prev, ...hotels]);
+      }
+
+      const totalNow = 1 + extraHotels.length + hotels.length - (formAlreadyFilled ? 0 : 1);
       setAiSummary(
-        hotels.length > 1
-          ? `✓ Found ${hotels.length} hotels. First one filled below — the other ${hotels.length - 1} will be added when you save.`
+        hotels.length > 1 || totalNow > 1
+          ? `✓ ${totalNow} hotel${totalNow > 1 ? 's' : ''} queued. First one shown below — the rest will be saved as separate cards when you click Add.`
           : '✓ Extracted — review the fields below before saving.'
       );
-      window.veToast && window.veToast('Hotel details extracted ✓', 'success');
+      window.veToast && window.veToast(`${hotels.length} hotel${hotels.length > 1 ? 's' : ''} extracted ✓`, 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read this file — try a clearer screenshot');
     } finally {
@@ -5765,7 +5813,7 @@ function AddHotelModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Hotel' : '+ Add Hotel'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <PasteZone hint="Click here, then paste (Ctrl+V) a hotel voucher screenshot/PDF" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+        <PasteZone hint="Click here, then paste (Ctrl+V) hotel voucher(s) — multiple hotels supported, paste one after another" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Hotel Name *</div>
@@ -5974,7 +6022,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
 
   return (
     <ModalShell title={editing ? '✎ Edit Land Package' : '+ Add Land Package / Itinerary'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
-      <PasteZone hint="Click here, then paste (Ctrl+V) a DMC quote/itinerary — screenshot, PDF, or plain text" accept="image/*,.pdf" onFiles={processFiles} onPlainText={handlePlainText} extracting={extracting} summary={aiSummary} />
+      <PasteZone hint="Click here, then paste (Ctrl+V) DMC quote/itinerary — screenshot(s), PDF, or plain text; multiple files supported" accept="image/*,.pdf" multiple onFiles={processFiles} onPlainText={handlePlainText} extracting={extracting} summary={aiSummary} />
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Vendor / Package Name *</div>
         <input value={form.name} onChange={set('name')} placeholder="e.g. ABC DMC — Bali 5N Land Package" style={inputStyle} />
@@ -6349,7 +6397,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Cruise' : '+ Add Cruise'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <PasteZone hint="Click here, then paste (Ctrl+V) a cruise booking confirmation" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+        <PasteZone hint="Click here, then paste (Ctrl+V) cruise booking confirmation(s)" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -6546,7 +6594,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
   return (
     <ModalShell title={editing ? '✎ Edit Insurance' : '+ Add Insurance'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={editing ? '✓ Save Changes' : '✓ Add'}>
       {!editing && (
-        <PasteZone hint="Click here, then paste (Ctrl+V) an insurance policy document" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
+        <PasteZone hint="Click here, then paste (Ctrl+V) insurance policy document(s)" accept="image/*,.pdf" multiple onFiles={processFiles} extracting={extracting} summary={aiSummary} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
