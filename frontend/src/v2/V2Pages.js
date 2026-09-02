@@ -2566,8 +2566,29 @@ function addDaysToDateStrV2(dateStr, days) {
 // Same destination-vibe fallback cover logic as V1's pickFallbackCover() —
 // V2 has no Unsplash gallery-search UI, so this (verified, curated) set of
 // fallback photos is what always renders, matched to the destination text.
+//
+// Destination-specific hero images (bali/vietnam/thailand) are served as
+// static assets from frontend/public/hero/ — deployed alongside the app so
+// they render from the same origin as the proposal HTML. They must be
+// checked BEFORE the generic bucket regexes below (mountain/tropicboat/
+// beach) — otherwise Thailand would be caught by /thailand/ inside the
+// tropicboat bucket and never see its own dedicated hero.
 function pickFallbackCoverV2(deal) {
   const _d = ((deal && deal.destination) || '').toLowerCase();
+  // Absolute URL so the image resolves both when the proposal is viewed in
+  // the CRM and when the print-to-PDF output is opened standalone. Uses the
+  // current page's origin at runtime — works on Netlify preview URLs,
+  // production, and localhost dev without hardcoding.
+  const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : '';
+  const HERO = {
+    bali:     origin + '/hero/bali.jpg',
+    vietnam:  origin + '/hero/vietnam.jpg',
+    thailand: origin + '/hero/thailand.jpg',
+  };
+  // Destination-specific — checked first
+  if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
+  if (/\bvietnam\b|hanoi|ho chi minh|saigon|da nang|hoi an|halong|ha long|phu quoc|sapa|nha trang/.test(_d)) return HERO.vietnam;
+  if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai/.test(_d)) return HERO.thailand;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -2582,7 +2603,7 @@ function pickFallbackCoverV2(deal) {
   if (/norway|finland|sweden|denmark|iceland|scandinavia|lofoten|fjord/.test(_d)) return F.nordic;
   if (/paris|france|italy|europe|london|spain|portugal|amsterdam|prague|vienna|rome/.test(_d)) return F.europe;
   if (/dubai|city|kuala|singapore|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
-  if (/thailand|phuket|krabi|pattaya|bangkok|goa|andaman/.test(_d)) return F.tropicboat;
+  if (/goa|andaman/.test(_d)) return F.tropicboat;
   return F.beach;
 }
 
