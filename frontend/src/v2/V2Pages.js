@@ -2445,7 +2445,7 @@ async function patchDeal(dealId, patch) {
    confirms before saving, nothing is auto-committed.               */
 
 const AIX_SYS = {
-  flight: 'You extract flight booking details for a travel agency CRM. From the given image(s)/text (airline PNRs, vendor quotes, screenshots, emails), output ONLY valid JSON, no markdown, no explanation: {"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE RULES — decide flightType carefully: (1) "return" (round-trip) if the journey goes A→B (with possible connections) and later comes back to the ORIGIN city B→A on a later date — put the OUTBOUND legs in "sectors" and the HOMEBOUND legs in "returnSectors". A connecting/layover stop (e.g. DEL→DOH→YYZ) is still ONE direction, not multi-city. (2) "one-way" if travel goes one direction only and never returns to the origin — all legs in "sectors", leave "returnSectors" empty. (3) "multi-city" only if there are 3+ distinct cities in an open-jaw pattern that is NOT a simple there-and-back — put every leg in "sectors" in journey order, leave "returnSectors" empty. Missing fields = empty string or null. costPrice = total quoted cost if visible.',
+  flight: 'You extract flight booking details for a travel agency CRM. The input may contain MULTIPLE separate flight bookings — different tickets for different passengers, different journeys, or different vendors. Output ONLY valid JSON, no markdown, no explanation: {"flights":[{"vendorName":string,"costPrice":number|null,"flightType":"one-way|return|multi-city","sectors":[...],"returnSectors":[...]}]}. RULES for grouping into flight objects: (A) If two screenshots show the SAME trip (outbound + return of one round-trip journey with the same PNR/booking, or all sectors of one multi-city ticket), COMBINE them into ONE flight object — outbound legs in "sectors", return legs in "returnSectors". (B) If screenshots show DIFFERENT bookings — different PNRs, different passengers, different unrelated journeys — output them as SEPARATE flight objects in the flights[] array. Do NOT force-merge unrelated tickets. Each sector object = {"from":"IATA or city","fromName":string,"to":"IATA or city","toName":string,"date":"YYYY-MM-DD","arrDate":"YYYY-MM-DD or null (only if arrival is a different day)","depTime":"HHMM 24h","arrTime":"HHMM 24h","airlineCode":"2-letter code","airlineName":string}. TRIP TYPE per flight — decide flightType carefully: (1) "return" if the journey goes A→B (with possible connections) and later comes back B→A on a later date — outbound in sectors, homebound in returnSectors. Connecting/layover stops (DEL→DOH→YYZ) are still ONE direction. (2) "one-way" if travel goes one direction only and never returns to origin — all legs in sectors, returnSectors empty. (3) "multi-city" only for 3+ distinct cities in an open-jaw pattern NOT a simple there-and-back. Missing fields = empty string or null. costPrice = total quoted cost per flight if visible.',
   hotel: 'You extract hotel booking details for a travel agency CRM. From the given image(s)/text (hotel quotes, confirmations, screenshots, emails), output ONLY valid JSON, no markdown: {"hotels":[{"vendorName":string,"city":string,"hotelName":string,"starRating":"3|4|5 or empty","roomCategory":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null}]}. One object per hotel/stay. Missing = empty string or null.',
   train: 'You extract train booking details for a travel agency CRM (domestic Indian trains like IRCTC/Rajdhani/Vande Bharat or international rail like Eurostar/Shinkansen/Trenitalia). Output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"isInternational":boolean,"tripType":"one-way|return|multi-city","segments":[...],"returnSegments":[...]}. Each segment = {"trainNo":string,"trainName":string,"from":"station code","fromStation":"full station name","to":"station code","toStation":"full station name","date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","classOfTravel":"1A|2A|3A|SL|CC|EC|2S|Sleeper|First Class|Business|Standard|Other","coach":string,"pnr":string}. RULES: (1) Distinguish tripType: "return" if journey goes A→B and later comes back B→A — outbound legs in segments, homebound in returnSegments; "one-way" if single direction; "multi-city" for 3+ cities. (2) For Indian trains: use IRCTC station codes (NDLS, MMCT, HWH, MAS, etc.) and Indian classes (1A/2A/3A/SL/CC/EC/2S). Set isInternational=false. (3) For international: use rail station codes if visible, common classes First/Business/Standard. Set isInternational=true. (4) PNR is 10 digits for IRCTC. Missing fields = empty string or null. Never invent a PNR — leave empty if unclear.',
   ticket: 'You extract e-ticket details from airline tickets issued by consolidators (Akbar, MakeMyTrip, Amadeus, etc.) for a travel agency CRM. Output ONLY valid JSON, no markdown: {"pnr":string,"airlineCode":string,"airlineName":string,"issuedDate":"YYYY-MM-DD","passengers":[{"name":string,"type":"Adult|Child|Infant","ticketNo":string,"seat":string,"baggage":string}],"segments":[{"airlineCode":string,"flightNo":string,"from":"IATA","fromName":string,"to":"IATA","toName":string,"date":"YYYY-MM-DD","depTime":"HHMM 24h","arrTime":"HHMM 24h","cabin":string,"baggage":string,"terminal":string,"status":string}]}. RULES: (1) pnr is the airline booking reference / PNR / record locator — the most important field, read it very carefully character by character. (2) Passenger names exactly as printed. (3) Include EVERY flight segment in journey order, including connections. (4) Ticket numbers are usually 13 digits. (5) Missing fields = empty string. Never invent a PNR or ticket number — leave empty if not clearly visible.',
@@ -5201,6 +5201,12 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  // Extra flights queued from multi-flight AI extractions (when the pasted
+  // screenshots represent MULTIPLE separate bookings — different PNRs,
+  // different travellers, different journeys). First flight fills this
+  // modal; the rest sit here and are saved as their own flightVendors
+  // entries when the user clicks Add.
+  const [extraFlights, setExtraFlights] = useState([]);
 
   const updSector = (list, setList, i, patch) => setList((arr) => arr.map((s, idx) => idx === i ? { ...s, ...patch } : s));
   const addSector = (setList) => setList((arr) => [...arr, emptySector()]);
@@ -5217,80 +5223,91 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
         date: x.date || '', depTime: x.depTime || '', arrTime: x.arrTime || '',
         airlineCode: (x.airlineCode || '').toUpperCase(), airlineName: x.airlineName || '',
       });
-      const newSecs = (j.sectors || []).map(mapSec);
-      const newRet = (j.returnSectors || []).map(mapSec);
-      if (!newSecs.length) throw new Error('No flight details found in this file');
 
-      // MERGE, don't overwrite, when this is a follow-up paste. Common
-      // real-world flow: paste the outbound ticket screenshot, THEN
-      // separately paste the return ticket screenshot (two different
-      // images/PDFs, pasted one after another). Each single-ticket
-      // screenshot only ever shows ONE direction, so if we blindly
-      // overwrote `sectors`/`returnSectors` on every paste, the second
-      // paste would wipe out the first — leaving what looks like two
-      // separate one-way trips instead of a single Return trip. This is
-      // exactly the bug reported: "return ki jagah one-way one-way dikha
-      // deta hai".
+      // New multi-flight shape: j.flights[] — an array of separate flight
+      // bookings. Legacy shape (single flight at top level with sectors/
+      // returnSectors) still accepted so existing bookmarks/prompts keep
+      // working. Both funnel through the same list of flight objects.
+      let flightList = Array.isArray(j.flights) ? j.flights : [];
+      if (!flightList.length && (Array.isArray(j.sectors) && j.sectors.length)) {
+        flightList = [{
+          vendorName: j.vendorName || '',
+          costPrice: j.costPrice,
+          flightType: j.flightType,
+          sectors: j.sectors,
+          returnSectors: j.returnSectors || [],
+        }];
+      }
+      if (!flightList.length) throw new Error('No flight details found in this file');
+
+      const normalizeFlight = (f) => {
+        const secs = (f.sectors || []).map(mapSec);
+        const ret = (f.returnSectors || []).map(mapSec);
+        let type = String(f.flightType || '').toLowerCase();
+        if (!['one-way', 'return', 'multi-city'].includes(type)) {
+          type = ret.length ? 'return' : (secs.length > 1 ? 'multi-city' : 'one-way');
+        }
+        return { vendorName: f.vendorName || '', costPrice: f.costPrice, flightType: type, sectors: secs, returnSectors: ret };
+      };
+      const normalized = flightList.map(normalizeFlight).filter((f) => f.sectors.length);
+      if (!normalized.length) throw new Error('No flight sectors found in this file');
+
       const hadExistingOutbound = sectors.some((s) => s.from || s.to);
       const hadExistingReturn = returnSectors.some((s) => s.from || s.to);
+      const formAlreadyFilled = hadExistingOutbound || hadExistingReturn;
 
-      if (newRet.length > 0) {
-        // This single extraction already found BOTH directions (e.g. a
-        // combined itinerary PDF) — it's self-contained, so it's safe to
-        // set both lists directly from this one result.
-        setFlightType('return');
-        setSectors(newSecs);
-        setReturnSectors(newRet);
-      } else if (!hadExistingOutbound && !hadExistingReturn) {
-        // First paste ever for this modal — plain initialize.
-        let type = String(j.flightType || '').toLowerCase();
-        if (!['one-way', 'return', 'multi-city'].includes(type)) type = newSecs.length > 1 ? 'multi-city' : 'one-way';
-        setFlightType(type);
-        setSectors(newSecs);
-      } else if (flightType === 'return' && hadExistingOutbound && !hadExistingReturn) {
-        // Return trip already selected, outbound already filled from a
-        // prior paste, return side still blank → this new single-direction
-        // extraction fills the return leg.
-        setReturnSectors(newSecs);
-      } else if (flightType === 'return' && !hadExistingOutbound && hadExistingReturn) {
-        setSectors(newSecs);
-      } else if (flightType === 'return' && hadExistingOutbound && hadExistingReturn) {
-        // Both sides already have something — treat this as an additional
-        // connecting leg on whichever side is shorter (simple heuristic).
-        if (sectors.length <= returnSectors.length) setSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
-        else setReturnSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
-      } else if (flightType === 'one-way' && hadExistingOutbound) {
-        // A one-way trip already has an outbound leg, and now a SECOND
-        // single-direction screenshot just came in. The overwhelmingly
-        // common reason someone pastes a second flight screenshot after
-        // the first is: it's the return leg. Auto-upgrade to Return.
-        setFlightType('return');
-        setReturnSectors(newSecs);
+      // Splitting logic:
+      // - If the form is empty, take the FIRST flight as the primary (fills
+      //   the modal); everything else becomes extraFlights → saved as
+      //   separate flightVendors entries on submit.
+      // - If the form is already filled from an earlier paste, the ENTIRE
+      //   new batch goes to extras — we don't touch what the user was
+      //   already reviewing.
+      // - Exception preserved for the single-flight legacy path: if the AI
+      //   returned exactly one flight AND the form is already filled, keep
+      //   the original merge-into-return-leg behaviour so someone pasting
+      //   outbound first then return still ends up with ONE round-trip
+      //   flight (not one flight + one queued extra).
+      if (!formAlreadyFilled) {
+        const primary = normalized[0];
+        setFlightType(primary.flightType);
+        setSectors(primary.sectors);
+        setReturnSectors(primary.returnSectors.length ? primary.returnSectors : [emptySector()]);
+        if (!name.trim() && primary.vendorName) setName(primary.vendorName);
+        if (!airlineCode && primary.sectors[0].airlineCode) setAirlineCode(primary.sectors[0].airlineCode);
+        if (!airlineName && primary.sectors[0].airlineName) setAirlineName(primary.sectors[0].airlineName);
+        if (primary.costPrice != null && !costPrice) setCostPrice(String(primary.costPrice));
+        setExtraFlights((prev) => [...prev, ...normalized.slice(1)]);
+      } else if (normalized.length === 1 && !normalized[0].returnSectors.length) {
+        // Legacy single-flight follow-up paste — merge into the return leg
+        // if user was building a round-trip.
+        const f0 = normalized[0];
+        if (flightType === 'return' && hadExistingOutbound && !hadExistingReturn) {
+          setReturnSectors(f0.sectors);
+        } else if (flightType === 'return' && !hadExistingOutbound && hadExistingReturn) {
+          setSectors(f0.sectors);
+        } else if (flightType === 'one-way' && hadExistingOutbound) {
+          setFlightType('return');
+          setReturnSectors(f0.sectors);
+        } else {
+          // Otherwise queue as a separate flight.
+          setExtraFlights((prev) => [...prev, f0]);
+        }
       } else {
-        // Multi-city or any other state with existing outbound data —
-        // append as an additional sector rather than replacing.
-        setSectors((arr) => [...arr.filter((s) => s.from || s.to), ...newSecs]);
-        if (sectors.filter((s) => s.from || s.to).length + newSecs.length > 1) setFlightType('multi-city');
+        setExtraFlights((prev) => [...prev, ...normalized]);
       }
 
-      // Vendor name and airline are independent. If the AI returned a
-      // vendorName (payment recipient — DMC/consolidator), use it as-is;
-      // otherwise start with a blank so user can pick between direct
-      // airline booking vs a DMC. Airline fields always come from the ticket.
-      if (!name.trim() && j.vendorName) setName(j.vendorName);
-      if (!airlineCode && newSecs[0].airlineCode) setAirlineCode(newSecs[0].airlineCode);
-      if (!airlineName && newSecs[0].airlineName) setAirlineName(newSecs[0].airlineName);
-      if (j.costPrice != null && !costPrice) setCostPrice(String(j.costPrice));
-
-      const totalLegs = newSecs.length + newRet.length;
-      setAiSummary(
-        newRet.length > 0
-          ? `✓ Extracted ${newSecs.length} outbound + ${newRet.length} return sector${newRet.length !== 1 ? 's' : ''} — review below.`
-          : hadExistingOutbound || hadExistingReturn
-            ? `✓ Added ${totalLegs} more sector${totalLegs !== 1 ? 's' : ''} — merged with what you already pasted.`
-            : '✓ Extracted — review the fields below before saving.'
-      );
-      window.veToast && window.veToast('Flight details extracted ✓', 'success');
+      const totalQueued = 1 + extraFlights.length + normalized.length - (formAlreadyFilled ? 0 : 1);
+      if (normalized.length > 1 || (formAlreadyFilled && normalized.length >= 1)) {
+        setAiSummary(`✓ ${totalQueued} flight${totalQueued > 1 ? 's' : ''} queued. First one shown below — the rest will be saved as their own flight cards when you click Add.`);
+      } else {
+        const primary = normalized[0];
+        const total = primary.sectors.length + primary.returnSectors.length;
+        setAiSummary(primary.returnSectors.length
+          ? `✓ Extracted ${primary.sectors.length} outbound + ${primary.returnSectors.length} return sector${primary.returnSectors.length !== 1 ? 's' : ''} — review below.`
+          : `✓ Extracted ${total} sector${total !== 1 ? 's' : ''} — review before saving.`);
+      }
+      window.veToast && window.veToast(`${normalized.length} flight${normalized.length > 1 ? 's' : ''} extracted ✓`, 'success');
     } catch (ex) {
       setErr(ex.message || 'Could not read this file — try a clearer screenshot');
     } finally {
@@ -5335,8 +5352,33 @@ function AddFlightModal({ deal, editing, onClose, onSaved }) {
       }
 
       const newVendor = { id: 'fl_' + Date.now(), ...vendorFields, payments: [] };
-      const updated = await patchDeal(deal._id, { flightVendors: [...(deal.flightVendors || []), newVendor] });
-      window.veToast && window.veToast('Flight added ✓', 'success');
+      // Any additional flights the AI found (multi-flight paste — different
+      // PNRs / different travellers / different journeys) get added as their
+      // own vendor entries too. Cost price only, no selling price/markup —
+      // pricing per booking is a separate decision the agent makes case by
+      // case. Vendor name defaults to the extracted vendorName or falls back
+      // to the primary vendor's name so payment tracking still works.
+      const extraVendors = extraFlights.map((f, i) => ({
+        id: 'fl_' + Date.now() + '_' + i,
+        name: f.vendorName || name,
+        airlineCode: (f.sectors[0] && f.sectors[0].airlineCode) || '',
+        airlineName: (f.sectors[0] && f.sectors[0].airlineName) || '',
+        currency: 'INR',
+        costPrice: Number(f.costPrice) || 0,
+        sellingPrice: 0,
+        exchangeRate: 1,
+        flightType: f.flightType,
+        sectors: fillAirline(f.sectors),
+        returnSectors: f.flightType === 'return' ? fillAirline(f.returnSectors) : [],
+        payments: [],
+      }));
+      const updated = await patchDeal(deal._id, {
+        flightVendors: [...(deal.flightVendors || []), newVendor, ...extraVendors],
+      });
+      window.veToast && window.veToast(
+        extraVendors.length ? `${1 + extraVendors.length} flights added ✓` : 'Flight added ✓',
+        'success'
+      );
       onSaved(updated);
     } catch (e) {
       setErr('Could not save — check connection and try again.');
