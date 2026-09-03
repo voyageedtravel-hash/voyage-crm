@@ -673,10 +673,50 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
   // (travelDates is free-text in this CRM, not a structured date, so we
   // can't compute exact days-to-departure — show the text as-is)
   const upcomingDepartures = useMemo(() => {
+    // Compute the trip's departure window from STRUCTURED data — earliest
+    // flight sector date and hotel check-in as the start, latest as the end.
+    // deal.travelDates is a free-text string ('25-Aug to 01-Sep', '6th Aug'
+    // 2026 to 10th Aug' 2026', 'Dates TBD') too inconsistent to parse
+    // reliably. Falls back to null if the deal has no bookings yet, in
+    // which case we show it — better to over-show a new booking than hide
+    // one with just a travelDates note that we can't parse.
+    const tripDates = (l) => {
+      const dates = [];
+      (l.flightVendors || []).forEach((f) => {
+        (f.sectors || []).concat(f.returnSectors || []).forEach((s) => {
+          if (s.date) dates.push(s.date);
+        });
+      });
+      (l.hotelVendors || []).forEach((h) => {
+        if (h.checkIn) dates.push(h.checkIn);
+        if (h.checkOut) dates.push(h.checkOut);
+      });
+      if (!dates.length) return { start: null, end: null };
+      const iso = dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+      if (!iso.length) return { start: null, end: null };
+      return { start: iso[0], end: iso[iso.length - 1] };
+    };
+    // Today at 00:00 in the user's local timezone — compare against END date
+    // so an in-progress trip (departed but not yet returned) still shows in
+    // "Upcoming Departures" as "currently traveling". Only fully-past trips
+    // (end date before today) get hidden.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayISO = today.toISOString().slice(0, 10);
+
     return leads
       .filter((l) => isBookedStage(l))
-      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
-      .slice(0, 4);
+      .map((l) => ({ deal: l, dates: tripDates(l) }))
+      .filter(({ dates }) => !dates.end || dates.end >= todayISO)
+      .sort((a, b) => {
+        // Soonest departure first. Deals with no parseable dates go to the
+        // end (still visible, just deprioritized).
+        const sa = a.dates.start || '9999-12-31';
+        const sb = b.dates.start || '9999-12-31';
+        return sa.localeCompare(sb);
+      })
+      .slice(0, 4)
+      .map(({ deal }) => deal);
   }, [leads]);
 
   // Follow-ups today — hot/warm leads with a follow-up date, or just recent hot/warm
@@ -7445,10 +7485,8 @@ function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
             <button
               onClick={() => setEditingPmt(p)}
               title="Edit this payment"
-              style={{ background: 'transparent', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 14, padding: 0, fontWeight: 700 }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#0d1b3e'}
-              onMouseLeave={(e) => e.currentTarget.style.color = '#334e82'}
-            >✎</button>
+              style={{ background: 'transparent', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 14, padding: 0 }}
+            >✏️</button>
             <button
               onClick={() => removePayment(p.id)}
               title="Delete this payment entry"
