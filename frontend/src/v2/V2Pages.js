@@ -7445,9 +7445,9 @@ function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
             <button
               onClick={() => setEditingPmt(p)}
               title="Edit this payment"
-              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: 0 }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#334e82'}
-              onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+              style={{ background: 'transparent', border: 'none', color: '#334e82', cursor: 'pointer', fontSize: 14, padding: 0, fontWeight: 700 }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#0d1b3e'}
+              onMouseLeave={(e) => e.currentTarget.style.color = '#334e82'}
             >✎</button>
             <button
               onClick={() => removePayment(p.id)}
