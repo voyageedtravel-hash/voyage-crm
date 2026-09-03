@@ -673,28 +673,89 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
   // (travelDates is free-text in this CRM, not a structured date, so we
   // can't compute exact days-to-departure — show the text as-is)
   const upcomingDepartures = useMemo(() => {
-    // Compute the trip's departure window from STRUCTURED data — earliest
-    // flight sector date and hotel check-in as the start, latest as the end.
-    // deal.travelDates is a free-text string ('25-Aug to 01-Sep', '6th Aug'
-    // 2026 to 10th Aug' 2026', 'Dates TBD') too inconsistent to parse
-    // reliably. Falls back to null if the deal has no bookings yet, in
-    // which case we show it — better to over-show a new booking than hide
-    // one with just a travelDates note that we can't parse.
+    // Parse a free-text travelDates string like "25-Aug to 01-Sep", "6th Aug'
+    // 2026 to 10th Aug' 2026", "28 SEP 2026", "25/08/2026 - 01/09/2026".
+    // Handles ordinals (1st/2nd/3rd/4th), Indian apostrophe-year notation
+    // (Aug' 2026), month names / IATA-style short months, and both DD-MMM
+    // and MMM-DD orderings. Returns {start, end} ISO strings, or nulls if
+    // nothing parseable.
+    const parseTravelDatesText = (text) => {
+      if (!text) return { start: null, end: null };
+      // Normalize: strip ordinal suffixes, apostrophes (used as year prefix
+      // in Indian dates like "Aug'2026"), commas, and collapse whitespace.
+      const s = String(text).toLowerCase()
+        .replace(/(\d+)(st|nd|rd|th)\b/g, '$1')
+        .replace(/[''`]/g, ' ')
+        .replace(/[,·•]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const M = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12,
+        january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12 };
+      // Order matters — try formats with YEAR present first, so a "25 Aug
+      // 2026 to 01 Sep 2026" isn't caught partially by the no-year pattern.
+      const patterns = [
+        { re: /(\d{4})-(\d{1,2})-(\d{1,2})/g,                              get: (m) => ({ y:+m[1], mo:+m[2],       d:+m[3] }) },
+        { re: /(\d{1,2})[\s\/-]([a-z]{3,9})[\s\/-](\d{4})/g,               get: (m) => ({ y:+m[3], mo:M[m[2]],     d:+m[1] }) },
+        { re: /([a-z]{3,9})[\s\/-](\d{1,2})[\s\/-](\d{4})/g,               get: (m) => ({ y:+m[3], mo:M[m[1]],     d:+m[2] }) },
+        { re: /(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/g,                      get: (m) => ({ y:+m[3], mo:+m[2],       d:+m[1] }) },
+        { re: /(\d{1,2})[\s\/-]([a-z]{3,9})\b/g,                           get: (m) => ({ y:null, mo:M[m[2]],      d:+m[1] }) },
+        { re: /\b([a-z]{3,9})[\s\/-](\d{1,2})\b/g,                         get: (m) => ({ y:null, mo:M[m[1]],      d:+m[2] }) },
+      ];
+      const found = [];
+      // Track which characters have already been consumed by an earlier
+      // (more-specific) pattern so a with-year match doesn't get re-parsed
+      // by the no-year fallback and duplicated in the output list.
+      const consumed = new Uint8Array(s.length);
+      for (const p of patterns) {
+        p.re.lastIndex = 0;
+        let m;
+        while ((m = p.re.exec(s)) !== null) {
+          let taken = false;
+          for (let i = m.index; i < m.index + m[0].length; i++) if (consumed[i]) { taken = true; break; }
+          if (taken) continue;
+          const parsed = p.get(m);
+          if (!parsed.mo || parsed.mo < 1 || parsed.mo > 12) continue;
+          if (parsed.d < 1 || parsed.d > 31) continue;
+          if (parsed.y != null && (parsed.y < 2000 || parsed.y > 2100)) continue;
+          found.push({ ...parsed, idx: m.index });
+          for (let i = m.index; i < m.index + m[0].length; i++) consumed[i] = 1;
+        }
+      }
+      if (!found.length) return { start: null, end: null };
+      // Year inference: use the first explicit year seen, else current year
+      // (which correctly flags "25-Aug to 01-Sep" written this year AS this
+      // year — so a trip that's already ended reads as past, not next year).
+      const currentYear = new Date().getFullYear();
+      const knownYear = (found.find((f) => f.y != null) || {}).y || currentYear;
+      const iso = found
+        .map((f) => `${f.y != null ? f.y : knownYear}-${String(f.mo).padStart(2, '0')}-${String(f.d).padStart(2, '0')}`)
+        .sort();
+      return { start: iso[0], end: iso[iso.length - 1] };
+    };
+
+    // Compute the trip's departure window. Primary source: structured data
+    // (flight sector dates, hotel check-in/out — always ISO YYYY-MM-DD, so
+    // reliable). Fallback: the free-text travelDates field, parsed via the
+    // helper above. Both are unioned so a partial trip with e.g. only
+    // hotels booked still gets the earliest date across all signals.
     const tripDates = (l) => {
       const dates = [];
       (l.flightVendors || []).forEach((f) => {
         (f.sectors || []).concat(f.returnSectors || []).forEach((s) => {
-          if (s.date) dates.push(s.date);
+          if (s.date && /^\d{4}-\d{2}-\d{2}$/.test(s.date)) dates.push(s.date);
         });
       });
       (l.hotelVendors || []).forEach((h) => {
-        if (h.checkIn) dates.push(h.checkIn);
-        if (h.checkOut) dates.push(h.checkOut);
+        if (h.checkIn && /^\d{4}-\d{2}-\d{2}$/.test(h.checkIn)) dates.push(h.checkIn);
+        if (h.checkOut && /^\d{4}-\d{2}-\d{2}$/.test(h.checkOut)) dates.push(h.checkOut);
       });
+      const parsed = parseTravelDatesText(l.travelDates);
+      if (parsed.start) dates.push(parsed.start);
+      if (parsed.end) dates.push(parsed.end);
       if (!dates.length) return { start: null, end: null };
-      const iso = dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-      if (!iso.length) return { start: null, end: null };
-      return { start: iso[0], end: iso[iso.length - 1] };
+      dates.sort();
+      return { start: dates[0], end: dates[dates.length - 1] };
     };
     // Today at 00:00 in the user's local timezone — compare against END date
     // so an in-progress trip (departed but not yet returned) still shows in
@@ -709,8 +770,6 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
       .map((l) => ({ deal: l, dates: tripDates(l) }))
       .filter(({ dates }) => !dates.end || dates.end >= todayISO)
       .sort((a, b) => {
-        // Soonest departure first. Deals with no parseable dates go to the
-        // end (still visible, just deprioritized).
         const sa = a.dates.start || '9999-12-31';
         const sb = b.dates.start || '9999-12-31';
         return sa.localeCompare(sb);
