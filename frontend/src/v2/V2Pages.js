@@ -7432,10 +7432,13 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 // below the progress bar inside each vendor card. Delete works via a single
 // patchDeal that rewrites the vendor's payments array.
 function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
+  // Hooks must run unconditionally — no early returns before this. React
+  // enforces hook order per component render; a bail-out earlier would make
+  // this render fewer hooks than the previous one and crash the reconciler.
+  // The early-return is now moved AFTER the hook.
+  const [editingPmt, setEditingPmt] = React.useState(null);
   const payments = vendor.payments || [];
   if (!payments.length) return null;
-
-  const [editingPmt, setEditingPmt] = React.useState(null);
 
   const fmtDate = (d) => {
     if (!d) return '—';
