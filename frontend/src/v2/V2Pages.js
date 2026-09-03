@@ -734,12 +734,23 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
       return { start: iso[0], end: iso[iso.length - 1] };
     };
 
-    // Compute the trip's departure window. Primary source: structured data
-    // (flight sector dates, hotel check-in/out — always ISO YYYY-MM-DD, so
-    // reliable). Fallback: the free-text travelDates field, parsed via the
-    // helper above. Both are unioned so a partial trip with e.g. only
-    // hotels booked still gets the earliest date across all signals.
+    // Compute the trip's departure window. Priority order:
+    // (1) User's hand-typed travelDates field, if it parses — this is the
+    //     canonical source of truth ('25-Aug to 01-Sep' is what the agent
+    //     actually promised the client). Trust it over structured data,
+    //     because stray/old vendor entries (a hotel that was booked then
+    //     later replaced but not deleted, a placeholder flight with a
+    //     future date) can otherwise push the computed end far past the
+    //     real trip window and keep a completed trip 'upcoming' forever.
+    // (2) Structured flight/hotel dates as fallback, when travelDates is
+    //     empty, 'TBD', or unparseable.
+    // (3) No signal at all → show it (better to over-show a fresh booking
+    //     than hide one).
     const tripDates = (l) => {
+      const parsed = parseTravelDatesText(l.travelDates);
+      if (parsed.start || parsed.end) {
+        return { start: parsed.start, end: parsed.end || parsed.start };
+      }
       const dates = [];
       (l.flightVendors || []).forEach((f) => {
         (f.sectors || []).concat(f.returnSectors || []).forEach((s) => {
@@ -750,9 +761,6 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
         if (h.checkIn && /^\d{4}-\d{2}-\d{2}$/.test(h.checkIn)) dates.push(h.checkIn);
         if (h.checkOut && /^\d{4}-\d{2}-\d{2}$/.test(h.checkOut)) dates.push(h.checkOut);
       });
-      const parsed = parseTravelDatesText(l.travelDates);
-      if (parsed.start) dates.push(parsed.start);
-      if (parsed.end) dates.push(parsed.end);
       if (!dates.length) return { start: null, end: null };
       dates.sort();
       return { start: dates[0], end: dates[dates.length - 1] };
