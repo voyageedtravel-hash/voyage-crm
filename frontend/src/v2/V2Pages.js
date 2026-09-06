@@ -3092,6 +3092,40 @@ function buildProposalHTMLV2(deal, opts) {
       </div>
     </div>`).join('') : '';
 
+  // Cruise blocks — same visual language as hotels: prominent photo on top,
+  // ship + cabin details, ports and dates in a right-side info panel. Not
+  // gated on showH because cruise vs stay are independent components; a
+  // flights-only proposal that happens to include a cruise leg still needs
+  // the cruise card. Uses c.mapUrl as a secondary image when present.
+  const cruises = (deal.cruiseVendors || []).filter((c) => c.shipName || c.cruiseLine || c.name);
+  const cruiseBlocks = cruises.map((c) => {
+    const nights = (() => {
+      if (!c.checkIn || !c.checkOut) return 0;
+      const n = Math.round((new Date(c.checkOut) - new Date(c.checkIn)) / 86400000);
+      return n > 0 ? n : 0;
+    })();
+    return `
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px 22px;margin-bottom:14px;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+      ${c.photoUrl ? `<img src="${escHtml(c.photoUrl)}" style="width:100%;height:auto;max-height:260px;object-fit:contain;background:#f4f7fc;border-radius:12px;margin-bottom:14px;display:block" onerror="this.style.display='none'"/>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:10px;letter-spacing:2px;color:#0d4f8b;font-weight:800">🚢 CRUISE${c.cruiseLine ? ' · ' + escHtml(c.cruiseLine.toUpperCase()) : ''}</div>
+          <div style="font-size:18px;font-weight:800;color:#0d1b3e;margin:4px 0 2px">${escHtml(c.shipName || c.name || 'Cruise')}</div>
+          <div style="font-size:12px;color:#5a6b8c">${escHtml(c.cabinCategory || '')}${c.deckNumber ? ' · Deck ' + escHtml(c.deckNumber) : ''}${c.cabinNumber ? ' · Cabin ' + escHtml(c.cabinNumber) : ''}</div>
+          ${(c.portOfEmbarkation || c.portOfDisembarkation) ? `<div style="font-size:12px;color:#334e82;margin-top:4px;font-weight:600">${escHtml(c.portOfEmbarkation || '?')} → ${escHtml(c.portOfDisembarkation || '?')}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="background:#eef4fa;border-radius:10px;padding:8px 14px;font-size:11px;color:#0d4f8b">
+            ${nights > 0 ? `<b>${nights} night${nights !== 1 ? 's' : ''}</b><br>` : ''}
+            ${c.checkIn ? 'Embark: ' + fmtDV2(c.checkIn) : ''}<br>${c.checkOut ? 'Disembark: ' + fmtDV2(c.checkOut) : ''}
+          </div>
+        </div>
+      </div>
+      ${c.itinerary ? `<div style="margin-top:12px;padding:12px 14px;background:#f8fafd;border-radius:10px;font-size:12px;color:#334e82;line-height:1.7;white-space:pre-wrap">${escHtml(c.itinerary)}</div>` : ''}
+      ${c.mapUrl ? `<img src="${escHtml(c.mapUrl)}" style="width:100%;height:auto;max-height:200px;object-fit:contain;background:#f4f7fc;border-radius:10px;margin-top:12px;display:block" onerror="this.style.display='none'"/>` : ''}
+    </div>`;
+  }).join('');
+
   const landBlocks = showH ? (function () {
     const allDays = allDayLines;
     const N = allDays.length;
@@ -3306,6 +3340,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
     ${trains.length ? `<h2 style="font-size:22px;color:#0d1b3e;margin:6px 0 14px">🚆 Your Trains</h2>${trainBlocks}` : ''}
     ${tierOptionsBlock}
     ${showH && hotels.length && !tierOptionsBlock ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🏨 Your Stays</h2>${hotelBlocks}` : ''}
+    ${cruiseBlocks ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🚢 Your Cruise${cruises.length > 1 ? 's' : ''}</h2>${cruiseBlocks}` : ''}
     ${landBlocks ? `<h2 style="font-size:22px;color:#0d1b3e;margin:20px 0 14px">🗓️ Day-wise Journey</h2>${aiIntroText ? `<div style="background:linear-gradient(135deg,#fdf6e5,#fffdf6);border:1px dashed #c9961a;border-radius:12px;padding:16px 20px;margin-bottom:16px;font-family:Georgia,'Times New Roman',serif;font-size:13px;line-height:1.8;color:#5a4a1a;font-style:italic">${escHtml(aiIntroText)}</div>` : ''}${timelineHTML}${landBlocks}` : ''}
 
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:22px">
@@ -6627,56 +6662,73 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🚢 Ship / Cabin Photo</div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🚢 Ship / Cruise Photo</div>
           <div
             onPaste={(e) => {
               const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
-              if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, photoUrl: d }))); }
+              if (it) {
+                e.preventDefault();
+                const f = it.getAsFile();
+                if (f) imgToDataURL(f, (d) => setForm((form2) => ({ ...form2, photoUrl: d })));
+              } else {
+                const t = e.clipboardData.getData('text');
+                if (t && t.trim()) setForm((form2) => ({ ...form2, photoUrl: t.trim() }));
+              }
             }}
-            style={{ border: '1px dashed #c9a84c', borderRadius: 10, padding: 10, textAlign: 'center', cursor: 'pointer', minHeight: 60, background: '#faf7f0' }}
             tabIndex={0}
+            style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'text', minHeight: 44 }}
           >
             {form.photoUrl ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-                <img src={form.photoUrl} alt="ship" style={{ width: 80, height: 56, objectFit: 'cover', borderRadius: 8 }} />
+              <>
+                <img src={form.photoUrl} alt="cruise" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+                <span style={{ fontSize: 11.5, color: '#059669', flex: 1 }}>Photo attached ✓</span>
                 <button type="button" onClick={() => setForm((f) => ({ ...f, photoUrl: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
-              </div>
+              </>
             ) : (
-              <div>
-                <label style={{ cursor: 'pointer', fontSize: 11.5, color: '#6b7a99' }}>
-                  Paste (Ctrl+V) or{' '}
-                  <span style={{ color: '#c9a84c', fontWeight: 600 }}>click to upload</span>
-                  <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, photoUrl: d }))); }} style={{ display: 'none' }} />
-                </label>
-              </div>
+              <span style={{ fontSize: 12, color: '#6b7a99' }}>Click here, then paste (Ctrl+V) a copied photo — or paste a photo URL</span>
             )}
           </div>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              if (f) imgToDataURL(f, (d) => setForm((form2) => ({ ...form2, photoUrl: d })));
+              e.target.value = '';
+            }}
+            style={{ fontSize: 11, marginTop: 6 }}
+          />
         </div>
         <div>
-          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🗺️ Itinerary / Route Map</div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🗺️ Route Map (optional)</div>
           <div
             onPaste={(e) => {
               const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
               if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, mapUrl: d }))); }
             }}
-            style={{ border: '1px dashed #0d4f8b', borderRadius: 10, padding: 10, textAlign: 'center', cursor: 'pointer', minHeight: 60, background: '#f4f8fc' }}
+            style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'text', minHeight: 44 }}
             tabIndex={0}
           >
             {form.mapUrl ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-                <img src={form.mapUrl} alt="route map" style={{ width: 80, height: 56, objectFit: 'cover', borderRadius: 8 }} />
+              <>
+                <img src={form.mapUrl} alt="route map" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+                <span style={{ fontSize: 11.5, color: '#059669', flex: 1 }}>Map attached ✓</span>
                 <button type="button" onClick={() => setForm((f) => ({ ...f, mapUrl: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
-              </div>
+              </>
             ) : (
-              <div>
-                <label style={{ cursor: 'pointer', fontSize: 11.5, color: '#6b7a99' }}>
-                  Paste (Ctrl+V) or{' '}
-                  <span style={{ color: '#0d4f8b', fontWeight: 600 }}>click to upload</span>
-                  <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, mapUrl: d }))); }} style={{ display: 'none' }} />
-                </label>
-              </div>
+              <span style={{ fontSize: 12, color: '#6b7a99' }}>Click here, then paste (Ctrl+V) a route-map image</span>
             )}
           </div>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              if (f) imgToDataURL(f, (d) => setForm((form2) => ({ ...form2, mapUrl: d })));
+              e.target.value = '';
+            }}
+            style={{ fontSize: 11, marginTop: 6 }}
+          />
         </div>
       </div>
     </ModalShell>
