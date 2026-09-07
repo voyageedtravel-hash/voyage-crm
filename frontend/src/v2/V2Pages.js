@@ -4923,15 +4923,21 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
   const [deal, setDeal] = useState(initialDeal);
   const [step, setStep] = useState('options'); // AI vibe/generation step removed — always start at options
 
-  // Options step state — mirrors V1 exactly
-  const [propFlights, setPropFlights] = useState('with'); // with | without | only
-  const [propShowPrice, setPropShowPrice] = useState(true);
-  const [propCoverUrl, setPropCoverUrl] = useState('');
-  const [propInc, setPropInc] = useState(null); // null = auto
-  const [propExc, setPropExc] = useState(null);
-  const [propCancelMode, setPropCancelMode] = useState('static');
-  const [propCancelCustom, setPropCancelCustom] = useState('');
-  const [propDays, setPropDays] = useState(null); // null = auto, array = edited
+  // Options step state — mirrors V1 exactly. Initialized from deal.proposalDefaults
+  // (persisted per-deal) so a user's custom exclusions, inclusions, and other
+  // proposal options survive across modal opens. Without this, propExc reset
+  // to null on every modal open and users' hand-typed exclusions (like the
+  // reported "Gratuities not included in above package…" line) silently
+  // reverted to the 3-line auto text every time they regenerated a PDF.
+  const _pd = initialDeal.proposalDefaults || {};
+  const [propFlights, setPropFlights] = useState(_pd.flights || 'with'); // with | without | only
+  const [propShowPrice, setPropShowPrice] = useState(_pd.showPrice != null ? _pd.showPrice : true);
+  const [propCoverUrl, setPropCoverUrl] = useState(_pd.coverUrl || '');
+  const [propInc, setPropInc] = useState(_pd.incText != null ? _pd.incText : null); // null = auto
+  const [propExc, setPropExc] = useState(_pd.excText != null ? _pd.excText : null);
+  const [propCancelMode, setPropCancelMode] = useState(_pd.cancelMode || 'static');
+  const [propCancelCustom, setPropCancelCustom] = useState(_pd.cancelCustom || '');
+  const [propDays, setPropDays] = useState(_pd.days || null); // null = auto, array = edited
   const [propCompareId, setPropCompareId] = useState('');
   // Local, unsaved copy of OCCUPANCY pricing rows (Twin/Single/Triple/Child
   // sharing, per-person) so typing doesn't fire an async patchDeal on every
@@ -5053,6 +5059,18 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
   };
 
   const generate = () => {
+    // Persist the chosen options to the deal so the next modal open loads
+    // them back instead of resetting. Fire-and-forget — don't block PDF
+    // generation on the network round-trip.
+    const defaults = {
+      flights: propFlights, showPrice: propShowPrice, coverUrl: propCoverUrl.trim(),
+      incText: propInc, excText: propExc,
+      cancelMode: propCancelMode, cancelCustom: propCancelCustom,
+      days: propDays,
+    };
+    patchDeal(deal._id, { proposalDefaults: defaults }).then((updated) => {
+      onDealUpdated && onDealUpdated(updated);
+    }).catch(() => {}); // silent — a save failure shouldn't block generating the PDF
     openProposalV2(deal, {
       mode: propFlights === 'without' ? 'withoutFlights' : propFlights === 'only' ? 'flightsOnly' : 'full',
       showPrice: propShowPrice,
