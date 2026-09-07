@@ -2688,14 +2688,16 @@ function pickFallbackCoverV2(deal) {
   // production, and localhost dev without hardcoding.
   const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : '';
   const HERO = {
-    bali:     origin + '/hero/bali.jpg',
-    vietnam:  origin + '/hero/vietnam.jpg',
-    thailand: origin + '/hero/thailand.jpg',
+    bali:      origin + '/hero/bali.jpg',
+    vietnam:   origin + '/hero/vietnam.jpg',
+    thailand:  origin + '/hero/thailand.jpg',
+    singapore: origin + '/hero/singapore.jpg',
   };
   // Destination-specific — checked first
   if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
   if (/\bvietnam\b|hanoi|ho chi minh|saigon|da nang|hoi an|halong|ha long|phu quoc|sapa|nha trang/.test(_d)) return HERO.vietnam;
   if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai/.test(_d)) return HERO.thailand;
+  if (/\bsingapore\b|sentosa|marina bay/.test(_d)) return HERO.singapore;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -2709,7 +2711,7 @@ function pickFallbackCoverV2(deal) {
   if (/kashmir|himachal|spiti|manali|shimla|leh|ladakh|nepal|bhutan|uttarakhand|mussoorie|nainital|darjeeling|gangtok|sikkim|swiss|alps/.test(_d)) return F.mountain;
   if (/norway|finland|sweden|denmark|iceland|scandinavia|lofoten|fjord/.test(_d)) return F.nordic;
   if (/paris|france|italy|europe|london|spain|portugal|amsterdam|prague|vienna|rome/.test(_d)) return F.europe;
-  if (/dubai|city|kuala|singapore|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
+  if (/dubai|city|kuala|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
   if (/goa|andaman/.test(_d)) return F.tropicboat;
   return F.beach;
 }
@@ -2762,16 +2764,24 @@ function buildProposalHTMLV2(deal, opts) {
   const mergedHotels = (() => {
     const map = new Map();
     hotels.forEach((h) => {
-      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.city || '').trim().toLowerCase()}`;
+      // Merge key intentionally includes checkIn/checkOut. The whole point
+      // of merging was to fold "2 rooms at the same hotel for the same
+      // nights" into a single card ("2 × Superior Double Room"). Two
+      // DIFFERENT stays at the same hotel (14-17 Nov + 20-21 Nov Hotel Boss
+      // Singapore — client checks out for a cruise then checks back in) are
+      // two distinct trip components and should render as two cards. Without
+      // the dates in the key, the second stay silently disappeared from the
+      // proposal PDF.
+      const ci = (h.checkIn || '').trim();
+      const co = (h.checkOut || '').trim();
+      const key = `${(h.hotelName || '').trim().toLowerCase()}::${(h.city || '').trim().toLowerCase()}::${ci}::${co}`;
       const roomsCount = Number(h.rooms) || 1;
       if (!map.has(key)) {
         map.set(key, {
           ...h,
           _totalRooms: roomsCount,
-          // roomBreakdown maps room-category → total count across all entries
           _roomBreakdown: { [h.roomCategory || 'Standard']: roomsCount },
-          // Collect distinct date ranges — if all merge cleanly to one range, show that
-          _dateRanges: [(h.checkIn || '') + '::' + (h.checkOut || '')],
+          _dateRanges: [ci + '::' + co],
           _mealPlans: new Set([h.mealPlan || 'bb']),
           _vendors: [{ source: h.vendorSource || '', rooms: roomsCount, roomCategory: h.roomCategory || 'Standard', cost: toINR(h.costPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' }],
         });
@@ -2779,22 +2789,22 @@ function buildProposalHTMLV2(deal, opts) {
         const g = map.get(key);
         g._totalRooms += roomsCount;
         g._roomBreakdown[h.roomCategory || 'Standard'] = (g._roomBreakdown[h.roomCategory || 'Standard'] || 0) + roomsCount;
-        const dr = (h.checkIn || '') + '::' + (h.checkOut || '');
-        if (!g._dateRanges.includes(dr)) g._dateRanges.push(dr);
         g._mealPlans.add(h.mealPlan || 'bb');
         g._vendors.push({ source: h.vendorSource || '', rooms: roomsCount, roomCategory: h.roomCategory || 'Standard', cost: toINR(h.costPrice, h.currency, h.exchangeRate), confirmationNo: h.confirmationNo || '' });
         if (!g.photoUrl && h.photoUrl) g.photoUrl = h.photoUrl;
         if ((Number(h.starRating) || 0) > (Number(g.starRating) || 0)) g.starRating = h.starRating;
       }
     });
-    // Build display summary for each merged hotel
-    return [...map.values()].map((g) => {
-      const rb = Object.entries(g._roomBreakdown).filter(([, n]) => n > 0);
-      const roomsSummary = rb.length === 1
-        ? `${rb[0][1]} × ${rb[0][0]}`
-        : rb.map(([cat, n]) => `${n} × ${cat}`).join(' + ');
-      return { ...g, _roomsSummary: roomsSummary };
-    });
+    return [...map.values()]
+      .map((g) => {
+        const rb = Object.entries(g._roomBreakdown).filter(([, n]) => n > 0);
+        const roomsSummary = rb.length === 1
+          ? `${rb[0][1]} × ${rb[0][0]}`
+          : rb.map(([cat, n]) => `${n} × ${cat}`).join(' + ');
+        return { ...g, _roomsSummary: roomsSummary };
+      })
+      // Sort by check-in so a multi-stay proposal reads in trip order
+      .sort((a, b) => (a.checkIn || '').localeCompare(b.checkIn || ''));
   })();
 
   const dayHdr = /^[\s#*>_-]*(?:day[\s-]*\d+|\d+(?:st|nd|rd|th)?\s+day)\b/i;
@@ -3097,7 +3107,11 @@ function buildProposalHTMLV2(deal, opts) {
   // gated on showH because cruise vs stay are independent components; a
   // flights-only proposal that happens to include a cruise leg still needs
   // the cruise card. Uses c.mapUrl as a secondary image when present.
-  const cruises = (deal.cruiseVendors || []).filter((c) => c.shipName || c.cruiseLine || c.name);
+  // Cruise block renders on ANY meaningful data — ship/line/name, but also
+  // just a photo, itinerary text, or ports of embark/disembark. If a user
+  // attached a photo and typed an itinerary but didn't fill in ship name,
+  // the whole cruise section was silently dropped from the proposal.
+  const cruises = (deal.cruiseVendors || []).filter((c) => c.shipName || c.cruiseLine || c.name || c.photoUrl || c.itinerary || c.portOfEmbarkation || c.portOfDisembarkation);
   const cruiseBlocks = cruises.map((c) => {
     const nights = (() => {
       if (!c.checkIn || !c.checkOut) return 0;
