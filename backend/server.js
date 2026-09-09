@@ -619,6 +619,67 @@ const start = async () => {
       }
     });
 
+    // ─── Route map (proposal PDF map block) ───────────────────────────
+    // Serves an SVG map for the proposal's YOUR ROUTE block. Uses pure JS
+    // (d3-geo + topojson-client + world-atlas — NO native modules like
+    // sharp) so it can't take down the backend the way an earlier PNG-
+    // based version did on Render's free tier. Renders the correct India
+    // boundary — full J&K including PoK/Gilgit-Baltistan and Aksai Chin
+    // are painted as India, per Survey of India / Constitution of India.
+    //
+    // GET (not POST) because it's loaded via <img src="…"> in the
+    // proposal HTML. Intentionally NOT behind authMiddleware — <img>
+    // tags can't carry Authorization headers. Rate limiting is the abuse
+    // guard, same as /api/fx-rates. Deterministic output for a given
+    // stop list, so we cache by request key.
+    let renderRouteMapSvg = null;
+    try {
+      renderRouteMapSvg = require("./services/route-map").renderRouteMap;
+      console.log("✓ route-map service loaded (SVG, correct India boundary)");
+    } catch (e) {
+      console.warn("⚠️  route-map service failed to load:", e.message, "— /api/route-map will return 503");
+    }
+    const routeMapCache = new Map();
+    const ROUTE_MAP_CACHE_MAX = 200;
+    const routeMapLimiter = makeRateLimiter(60);
+    app.get("/api/route-map", routeMapLimiter, (req, res) => {
+      if (!renderRouteMapSvg) {
+        return res.status(503).json({ error: "Map renderer not available" });
+      }
+      try {
+        let stops;
+        try { stops = JSON.parse(req.query.stops || "[]"); } catch { stops = null; }
+        if (!Array.isArray(stops) || stops.length < 2) {
+          return res.status(400).json({ error: "Need at least 2 stops with {name, lat, lng}" });
+        }
+        for (const s of stops) {
+          if (typeof s.lat !== "number" || typeof s.lng !== "number" || !isFinite(s.lat) || !isFinite(s.lng)) {
+            return res.status(400).json({ error: "Each stop needs numeric lat/lng" });
+          }
+        }
+        const width = Math.min(1400, Math.max(400, parseInt(req.query.width, 10) || 900));
+        const height = Math.min(1400, Math.max(400, parseInt(req.query.height, 10) || 620));
+        const key = JSON.stringify({ stops, width, height });
+        const hit = routeMapCache.get(key);
+        if (hit) {
+          res.setHeader("Content-Type", "image/svg+xml");
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          return res.send(hit);
+        }
+        const svg = renderRouteMapSvg(stops, { width, height });
+        if (routeMapCache.size >= ROUTE_MAP_CACHE_MAX) {
+          routeMapCache.delete(routeMapCache.keys().next().value);
+        }
+        routeMapCache.set(key, svg);
+        res.setHeader("Content-Type", "image/svg+xml");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.send(svg);
+      } catch (e) {
+        console.error("route-map error:", e.message);
+        res.status(500).json({ error: "Could not render map" });
+      }
+    });
+
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 

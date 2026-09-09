@@ -2031,11 +2031,72 @@ function buildMapboxRouteURL(resolved, W, H) {
   return url.length < 8000 ? url : '';
 }
 
-// Map block disabled — will be re-enabled once the backend map renderer
-// is tested and approved on a staging environment. For now proposals show
-// the numbered route text only, no map image.
+// Main entry for the proposal PDF's YOUR ROUTE block. Chronologically
+// ordered stops from flights + hotels + cruises + land vendors → passed
+// as JSON to the backend /api/route-map endpoint which returns a full
+// SVG map (correct India boundary, brochure style, transport icons on
+// route lines, cruise loops, curved return legs, only visited countries
+// in vibrant colour). The <img> loads the SVG directly — no PNG needed.
 function buildRouteMapBlockV2(deal) {
-  return '';
+  const stops = extractRouteStopsForMapV2(deal);
+  if (stops.length < 2) return '';
+  const resolved = stops.map((s) => {
+    const co = coordsForStopV2(s.name);
+    return co ? { name: s.name, lat: co[0], lng: co[1], mode: s.mode || 'car' } : null;
+  }).filter(Boolean);
+  if (resolved.length < 2) return '';
+
+  const url = `${apiBase()}/api/route-map?width=900&height=620&stops=${encodeURIComponent(JSON.stringify(resolved))}`;
+  const routeList = resolved.map((s, i) => `<b>${i + 1}.</b> ${escHtml(s.name)}`).join(' &nbsp;→&nbsp; ');
+  return `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px rgba(13,27,62,.06)">
+    <div style="font-size:11px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:12px">🗺 YOUR ROUTE</div>
+    <img src="${url}" alt="Route map" style="width:100%;height:auto;border-radius:12px;display:block" onerror="this.style.display='none'"/>
+    <div style="font-size:11.5px;color:#334e82;margin-top:12px;line-height:1.7">${routeList}</div>
+    <div style="font-size:8.5px;color:#aab4c8;margin-top:6px">Voyage-Ed · Survey of India boundaries</div>
+  </div>`;
+}
+
+// Chronology-preserving stop extractor for the map. Unlike
+// extractRouteStopsV2 (used elsewhere) this does NOT dedupe all revisits
+// — a Delhi → SIN → KL → Delhi round trip needs Delhi at both start and
+// end so the return leg is drawn on the map. Only CONSECUTIVE same-city
+// events are merged (same-city hotel checkin followed by same-city cruise
+// embark = one stop with cruise mode).
+function extractRouteStopsForMapV2(deal) {
+  const events = [];
+  (deal.flightVendors || []).forEach((f) => {
+    [...(f.sectors || []), ...(f.returnSectors || [])].forEach((s) => {
+      const date = s.date || '';
+      const from = s.fromName || s.from;
+      const to = s.toName || s.to;
+      if (from) events.push({ date, city: from, mode: null });
+      if (to) events.push({ date, city: to, mode: 'flight' });
+    });
+  });
+  (deal.hotelVendors || []).forEach((h) => {
+    if (h.city) events.push({ date: h.checkIn || '', city: h.city, mode: null });
+  });
+  (deal.cruiseVendors || []).forEach((c) => {
+    if (c.portOfEmbarkation) events.push({ date: c.checkIn || '', city: c.portOfEmbarkation, mode: 'cruise' });
+    if (c.portOfDisembarkation) events.push({ date: c.checkOut || '', city: c.portOfDisembarkation, mode: 'cruise' });
+  });
+  (deal.landVendors || []).forEach((l) => {
+    if (l.city) events.push({ date: l.startDate || '', city: l.city, mode: 'car' });
+  });
+  events.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  const stops = [];
+  events.forEach((e) => {
+    if (!e.city) return;
+    const last = stops[stops.length - 1];
+    if (last && String(last.name).toLowerCase().trim() === String(e.city).toLowerCase().trim()) {
+      // Same city as last — merge; adopt the incoming mode if this event has one
+      if (e.mode && !last.mode) last.mode = e.mode;
+      return;
+    }
+    stops.push({ name: e.city, mode: e.mode || 'car' });
+  });
+  if (stops.length) stops[0].mode = null;
+  return stops;
 }
 
 function detectMapRegionV2(stops) {
