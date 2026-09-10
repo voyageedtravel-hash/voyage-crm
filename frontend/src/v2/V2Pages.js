@@ -273,6 +273,86 @@ const sellINR = (d) => {
 };
 const costINR = (d) => dealVendors(d).reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
 const paidINR = (d) => sumBy(d.clientPayments, 'amount');
+
+// ─── Cancellation helpers ────────────────────────────────────────────
+// Sum of amounts Voyage-Ed has actually paid TO vendors (across every
+// vendor category). Different from costINR — that's the vendor's total
+// quoted cost. This is what's actually left VE's bank account.
+const vendorPaidINR = (d) => dealVendors(d).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+
+// Sum of amounts recovered FROM vendors after a cancellation (refunds
+// vendors gave back to Voyage-Ed). Zero for non-cancelled deals.
+const vendorRecoveredINR = (d) => {
+  const rec = d.cancellation && d.cancellation.vendorRecovery;
+  return Array.isArray(rec) ? rec.reduce((s, r) => s + (Number(r.amount) || 0), 0) : 0;
+};
+
+// Full P&L breakdown for a cancelled deal — used by the summary panel
+// on the deal, and later by the cancellations report. Sign convention:
+// positive netProfit = Voyage-Ed made money on the cancellation (rare —
+// happens when the client-side cancellation charge exceeds unrecoverable
+// vendor payments). Negative = the cancellation cost Voyage-Ed money.
+const computeCancellationImpact = (d) => {
+  const collected = paidINR(d);
+  const refundedToClient = refundedINR(d);
+  const netFromClient = collected - refundedToClient;
+  const paidToVendors = vendorPaidINR(d);
+  const recoveredFromVendors = vendorRecoveredINR(d);
+  const netVendorCost = paidToVendors - recoveredFromVendors;
+  const netProfit = netFromClient - netVendorCost;
+  return { collected, refundedToClient, netFromClient, paidToVendors, recoveredFromVendors, netVendorCost, netProfit };
+};
+
+// Suggest a cancellation charge based on the deal's policy + how many
+// days before departure. Returns null if the policy is missing or dates
+// can't be parsed — the modal will fall back to letting the user type
+// the charge manually.
+const suggestCancellationCharge = (deal, cancellationDate) => {
+  const sell = sellINR(deal);
+  if (!sell) return null;
+  // Parse departure date from deal.travelDates (free text) — reuse the
+  // same regex approach as the Upcoming Departures filter.
+  const parseFirstDate = (text) => {
+    if (!text) return null;
+    const s = String(text).toLowerCase()
+      .replace(/(\d+)(st|nd|rd|th)\b/g, '$1')
+      .replace(/[''`]/g, ' ').replace(/[,·•]/g, ' ').replace(/\s+/g, ' ').trim();
+    const M = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12 };
+    const patterns = [
+      /(\d{4})-(\d{1,2})-(\d{1,2})/, /(\d{1,2})[\s\/-]([a-z]{3,9})[\s\/-](\d{4})/,
+      /([a-z]{3,9})[\s\/-](\d{1,2})[\s\/-](\d{4})/, /(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/,
+      /(\d{1,2})[\s\/-]([a-z]{3,9})\b/,
+    ];
+    for (const p of patterns) {
+      const m = s.match(p);
+      if (!m) continue;
+      let y, mo, day;
+      if (p === patterns[0]) { y = +m[1]; mo = +m[2]; day = +m[3]; }
+      else if (p === patterns[1]) { y = +m[3]; mo = M[m[2]]; day = +m[1]; }
+      else if (p === patterns[2]) { y = +m[3]; mo = M[m[1]]; day = +m[2]; }
+      else if (p === patterns[3]) { y = +m[3]; mo = +m[2]; day = +m[1]; }
+      else { y = new Date().getFullYear(); mo = M[m[2]]; day = +m[1]; }
+      if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31 && y >= 2000 && y <= 2100) {
+        return new Date(y, mo - 1, day);
+      }
+    }
+    return null;
+  };
+  const departure = parseFirstDate(deal.travelDates);
+  if (!departure) return null;
+  const cancel = cancellationDate ? new Date(cancellationDate) : new Date();
+  const days = Math.round((departure - cancel) / 86400000);
+  // Industry-standard cancellation grid (matches what Voyage-Ed's proposal
+  // PDF currently discloses to the client). The modal shows these as
+  // suggested values — the user always overrides.
+  let pct;
+  if (days > 45) pct = 10;
+  else if (days > 30) pct = 25;
+  else if (days > 15) pct = 50;
+  else if (days > 7) pct = 75;
+  else pct = 100;
+  return { amount: Math.round(sell * pct / 100), pct, days };
+};
 const refundedINR = (d) => sumBy(d.refunds, 'amount');
 // Matches V1's dealFinance() exactly: netSell = sell - refunded, then
 // GPM and balance are both computed off the *net* figure (a refund is
@@ -7129,6 +7209,262 @@ function AddVendorPaymentModal({ deal, arrayKey, vendorId, vendorLabel, onClose,
 const REFUND_REASONS = ['Service Issue', 'Visa Rejection', 'Travel Plan Cancelled', 'Goodwill / Adjustment', 'Other'];
 const REFUND_APPROVERS = ['Vishal Sharma', 'Sahitya Singh'];
 
+const CANCELLATION_REASONS = [
+  { value: 'client_medical', label: '🏥 Client — medical emergency' },
+  { value: 'client_visa_reject', label: '🛂 Visa rejected' },
+  { value: 'client_personal', label: '👤 Client — personal / plans changed' },
+  { value: 'client_financial', label: '💸 Client — financial reasons' },
+  { value: 'vendor_cancelled', label: '🏨 Vendor / airline cancelled' },
+  { value: 'force_majeure', label: '⛔ Force majeure (weather, political, pandemic)' },
+  { value: 'no_show', label: '❌ Client no-show' },
+  { value: 'other', label: '📝 Other (specify below)' },
+];
+
+function DealCancellationModal({ deal, onClose, onSaved }) {
+  const isCancelling = !isCancelledStage(deal); // false when re-editing an already-cancelled deal
+  const existing = deal.cancellation || {};
+
+  const [form, setForm] = useState({
+    cancelledAt: existing.cancelledAt || new Date().toISOString().slice(0, 10),
+    reason: existing.reason || CANCELLATION_REASONS[0].value,
+    reasonDetails: existing.reasonDetails || '',
+    cancellationCharges: existing.cancellationCharges != null ? String(existing.cancellationCharges) : '',
+    notes: existing.notes || '',
+    // Also let user record a client refund from this same modal
+    recordRefundNow: false,
+    refundAmount: '',
+    refundMode: 'Bank Transfer',
+  });
+  const [chargeOverridden, setChargeOverridden] = useState(existing.cancellationCharges != null);
+  // Per-vendor recovery — start with what's saved, or one empty row per vendor
+  const allVendors = dealVendors(deal);
+  const initialRecovery = allVendors.map((v) => {
+    const saved = (existing.vendorRecovery || []).find((r) => r.vendorId === v.id);
+    return {
+      vendorId: v.id,
+      vendorName: v.name || v.hotelName || v.airlineName || v.label || 'Vendor',
+      arrayKey: v.arrayKey || '',
+      paid: sumBy(v.payments, 'amount'),
+      amount: saved ? String(saved.amount || '') : '',
+      note: saved ? (saved.note || '') : '',
+    };
+  });
+  const [recovery, setRecovery] = useState(initialRecovery);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Auto-suggest cancellation charge on reason/date change unless user has
+  // manually overridden. Only kicks in when policy + travel dates parseable.
+  React.useEffect(() => {
+    if (chargeOverridden) return;
+    const suggestion = suggestCancellationCharge(deal, form.cancelledAt);
+    if (suggestion) setForm((f) => ({ ...f, cancellationCharges: String(suggestion.amount) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.cancelledAt]);
+
+  const suggestion = suggestCancellationCharge(deal, form.cancelledAt);
+
+  // Live P&L preview — what the impact will be after this save
+  const preview = (() => {
+    const collected = paidINR(deal);
+    const currentRefunded = refundedINR(deal);
+    const extraRefund = form.recordRefundNow ? (Number(form.refundAmount) || 0) : 0;
+    const projRefund = currentRefunded + extraRefund;
+    const paidToVendors = vendorPaidINR(deal);
+    const projRecovery = recovery.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const netFromClient = collected - projRefund;
+    const netVendorCost = paidToVendors - projRecovery;
+    return { collected, projRefund, netFromClient, paidToVendors, projRecovery, netVendorCost, netProfit: netFromClient - netVendorCost };
+  })();
+
+  const submit = async () => {
+    const cancellationCharges = Number(form.cancellationCharges) || 0;
+    if (cancellationCharges < 0) { setErr('Cancellation charges cannot be negative'); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      const cancellation = {
+        cancelledAt: form.cancelledAt,
+        reason: form.reason,
+        reasonDetails: form.reasonDetails.trim(),
+        cancellationCharges,
+        vendorRecovery: recovery
+          .filter((r) => Number(r.amount) > 0)
+          .map((r) => ({ vendorId: r.vendorId, vendorName: r.vendorName, amount: Number(r.amount), note: r.note })),
+        notes: form.notes.trim(),
+        cancelledBy: (typeof window !== 'undefined' && window.__veUserName) || '',
+        updatedAt: new Date().toISOString(),
+      };
+      const patch = { cancellation };
+      // If moving into Cancelled for the first time, also flip the stage.
+      if (isCancelling) patch.stage = 'Cancelled';
+      // Optional inline refund
+      if (form.recordRefundNow && Number(form.refundAmount) > 0) {
+        patch.refunds = [
+          ...(deal.refunds || []),
+          {
+            amount: Number(form.refundAmount),
+            mode: form.refundMode,
+            reason: 'Cancellation refund',
+            date: form.cancelledAt,
+            note: `Auto-recorded from cancellation on ${form.cancelledAt}`,
+          },
+        ];
+      }
+      const updated = await patchDeal(deal._id, patch);
+      window.veToast && window.veToast(isCancelling ? 'Deal cancelled ✓' : 'Cancellation details updated ✓', 'success');
+      onSaved(updated);
+    } catch (e) {
+      setErr('Could not save — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  const fmt = (n) => '₹' + (Number(n) || 0).toLocaleString('en-IN');
+  const setRec = (i, k, v) => setRecovery((r) => r.map((x, ix) => ix === i ? { ...x, [k]: v } : x));
+
+  return (
+    <ModalShell
+      title={isCancelling ? '❌ Cancel Deal' : '✎ Edit Cancellation Details'}
+      onClose={onClose}
+      onSubmit={submit}
+      saving={saving}
+      err={err}
+      submitLabel={isCancelling ? '✓ Cancel Deal' : '✓ Save Changes'}
+    >
+      {/* Live P&L preview */}
+      <div style={{ background: '#0d1b3e', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 4 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, color: '#c9a84c', letterSpacing: 2, marginBottom: 8 }}>💰 FINANCIAL IMPACT PREVIEW</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 12 }}>
+          <div>
+            <div style={{ color: '#8ea0c6', fontSize: 10 }}>CLIENT SIDE</div>
+            <div>Collected: <b style={{ color: '#5eead4' }}>{fmt(preview.collected)}</b></div>
+            <div>Refunded: <b style={{ color: '#fca5a5' }}>{fmt(preview.projRefund)}</b></div>
+            <div style={{ borderTop: '1px solid #334e82', marginTop: 4, paddingTop: 4 }}>
+              Net with VE: <b>{fmt(preview.netFromClient)}</b>
+            </div>
+          </div>
+          <div>
+            <div style={{ color: '#8ea0c6', fontSize: 10 }}>VENDOR SIDE</div>
+            <div>Paid to vendors: <b style={{ color: '#fca5a5' }}>{fmt(preview.paidToVendors)}</b></div>
+            <div>Recovered: <b style={{ color: '#5eead4' }}>{fmt(preview.projRecovery)}</b></div>
+            <div style={{ borderTop: '1px solid #334e82', marginTop: 4, paddingTop: 4 }}>
+              Net vendor cost: <b>{fmt(preview.netVendorCost)}</b>
+            </div>
+          </div>
+        </div>
+        <div style={{ borderTop: '1px dashed #334e82', marginTop: 10, paddingTop: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 10, color: '#8ea0c6' }}>NET P&amp;L ON CANCELLATION</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: preview.netProfit >= 0 ? '#5eead4' : '#fca5a5', marginTop: 4 }}>
+            {preview.netProfit >= 0 ? '+' : ''}{fmt(preview.netProfit)}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 1: Reason & date */}
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Cancellation Date *</div>
+        <input type="date" value={form.cancelledAt} onChange={set('cancelledAt')} style={inputStyle} />
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Reason *</div>
+        <select value={form.reason} onChange={set('reason')} style={inputStyle}>
+          {CANCELLATION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+      </div>
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Details / Notes</div>
+        <textarea value={form.reasonDetails} onChange={set('reasonDetails')} placeholder="e.g. Client's father in ICU, cancellation requested 5 days before departure" rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+      </div>
+
+      {/* Section 2: Cancellation charges */}
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>
+          Cancellation Charges (what Voyage-Ed retains) *
+        </div>
+        <input
+          type="number"
+          value={form.cancellationCharges}
+          onChange={(e) => { set('cancellationCharges')(e); setChargeOverridden(true); }}
+          placeholder="0"
+          style={inputStyle}
+        />
+        {suggestion && (
+          <div style={{ fontSize: 11, color: '#334e82', marginTop: 6, padding: '6px 10px', background: '#f0f5fd', borderRadius: 6 }}>
+            💡 Suggested per policy: <b>{fmt(suggestion.amount)}</b> ({suggestion.pct}% of {fmt(sellINR(deal))}) — trip is {suggestion.days} days away
+            {!chargeOverridden && ' (auto-filled)'}
+            {chargeOverridden && Number(form.cancellationCharges) !== suggestion.amount && (
+              <button
+                type="button"
+                onClick={() => { setForm((f) => ({ ...f, cancellationCharges: String(suggestion.amount) })); setChargeOverridden(false); }}
+                style={{ marginLeft: 8, background: 'none', border: 'none', color: '#c9961a', fontWeight: 700, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+              >Reset to suggested</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Section 3: Per-vendor recovery */}
+      {allVendors.length > 0 && (
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>
+            💰 Recovery from Vendors (paise wapas mile?)
+          </div>
+          <div style={{ fontSize: 10.5, color: '#6b7a99', marginBottom: 6 }}>
+            Kis vendor ne kitna refund diya. Amount 0 chhodo agar kuch nahi mila (non-refundable).
+          </div>
+          <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #e3eaf7', borderRadius: 8 }}>
+            {recovery.map((r, i) => (
+              <div key={r.vendorId + i} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 2fr', gap: 6, padding: '8px 10px', borderBottom: i < recovery.length - 1 ? '1px solid #f4f7fc' : 'none', alignItems: 'center', fontSize: 11.5 }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#0d1b3e' }}>{r.vendorName}</div>
+                  <div style={{ fontSize: 9.5, color: '#94a3b8' }}>Paid: {fmt(r.paid)}</div>
+                </div>
+                <input type="number" placeholder="Recovered" value={r.amount} onChange={(e) => setRec(i, 'amount', e.target.value)}
+                  style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                <div style={{ fontSize: 10, color: Number(r.amount) >= r.paid ? '#059669' : '#c9961a', fontWeight: 700 }}>
+                  {r.paid > 0 ? `${Math.round((Number(r.amount) || 0) / r.paid * 100)}% recovered` : '—'}
+                </div>
+                <input placeholder="Note (e.g. 60% policy)" value={r.note} onChange={(e) => setRec(i, 'note', e.target.value)}
+                  style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section 4: Optional inline client refund */}
+      <div style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 8, padding: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#0d1b3e' }}>
+          <input type="checkbox" checked={form.recordRefundNow} onChange={(e) => setForm((f) => ({ ...f, recordRefundNow: e.target.checked }))} />
+          Also record a client refund now
+        </label>
+        {form.recordRefundNow && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4, fontSize: 10 }}>Refund Amount (₹)</div>
+              <input type="number" value={form.refundAmount} onChange={set('refundAmount')} style={inputStyle}
+                placeholder={`Suggested: ${paidINR(deal) - (Number(form.cancellationCharges) || 0)}`} />
+            </div>
+            <div>
+              <div className="v2-detail-field-label" style={{ marginBottom: 4, fontSize: 10 }}>Mode</div>
+              <select value={form.refundMode} onChange={set('refundMode')} style={inputStyle}>
+                {REFUND_MODES.map((m) => <option key={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Internal Notes</div>
+        <textarea value={form.notes} onChange={set('notes')} placeholder="Anything for team reference — e.g. approvals, escalations, vendor conversation summary" rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+      </div>
+    </ModalShell>
+  );
+}
+
 function AddRefundModal({ deal, onClose, onSaved, editing }) {
   const [form, setForm] = useState(editing ? {
     amount: String(editing.amount || ''), mode: editing.mode || REFUND_MODES[0],
@@ -8536,6 +8872,11 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             <button className="v2-hero-btn" onClick={addDestination} disabled={busy} title="Same client ke liye naya destination banao — details automatic copy ho jayengi">➕ Add Destination</button>
             <button className="v2-hero-btn" onClick={duplicateDeal} disabled={busy} title="Full duplicate — vendors/itinerary/pricing copy, payments/refunds fresh">⧉ Duplicate</button>
             <button className="v2-hero-btn" onClick={generateCallScript} disabled={busy || callScriptBusy} title="AI phone call ke liye Hinglish script generate kare — client ka context use karke">🎯 Call Prep</button>
+            {isCancelledStage(deal) ? (
+              <button className="v2-hero-btn" onClick={() => setModal('dealCancellation')} disabled={busy} title="Cancellation ka poora record — reason, charges, vendor recovery — update kar sakte ho jab recovery amounts aati rahein" style={{ color: '#c9961a' }}>✎ Edit Cancellation</button>
+            ) : (
+              <button className="v2-hero-btn" onClick={() => setModal('dealCancellation')} disabled={busy} title="Deal cancel karo — reason, cancellation charges, vendor recovery aur client refund sab ek jagah" style={{ color: '#c9961a' }}>❌ Cancel Deal</button>
+            )}
             <button className="v2-hero-btn" onClick={deleteDeal} disabled={busy} title="Ye deal delete karo (aur linked destinations bhi option pe)" style={{ color: '#dc2626' }}>🗑 Delete</button>
             <button className="v2-hero-btn gold" onClick={() => setModal('proposalBuilder')}>📄 Proposal PDF</button>
             <button className="v2-hero-btn" onClick={() => {
@@ -8615,6 +8956,75 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           </div>
         </div>
       </div>
+
+      {/* Cancellation Summary — only visible for cancelled deals */}
+      {isCancelledStage(deal) && deal.cancellation && (() => {
+        const impact = computeCancellationImpact(deal);
+        const c = deal.cancellation;
+        const reasonLabel = (CANCELLATION_REASONS.find((r) => r.value === c.reason) || {}).label || c.reason;
+        const recoveryRows = c.vendorRecovery || [];
+        const totalRecovered = recoveryRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        return (
+          <div style={{ background: 'linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%)', border: '2px solid #fecaca', borderRadius: 16, padding: 20, margin: '18px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#dc2626', letterSpacing: 2 }}>❌ DEAL CANCELLED</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#0d1b3e', marginTop: 4 }}>{reasonLabel}</div>
+                {c.reasonDetails && <div style={{ fontSize: 12, color: '#6b7a99', marginTop: 4, fontStyle: 'italic' }}>{c.reasonDetails}</div>}
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>Cancelled on {c.cancelledAt}{c.cancelledBy ? ` by ${c.cancelledBy}` : ''}</div>
+              </div>
+              <button className="v2-acc-btn-sm" onClick={() => setModal('dealCancellation')} disabled={busy} style={{ color: '#c9961a', borderColor: '#fde68a' }}>✎ Edit</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 12 }}>
+              <div style={{ background: '#fff', borderRadius: 10, padding: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', letterSpacing: 1 }}>NET FROM CLIENT</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINRFull(impact.netFromClient)}</div>
+                <div style={{ fontSize: 9.5, color: '#6b7a99', marginTop: 2 }}>Collected {fmtINRFull(impact.collected)} · Refunded {fmtINRFull(impact.refundedToClient)}</div>
+              </div>
+              <div style={{ background: '#fff', borderRadius: 10, padding: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', letterSpacing: 1 }}>NET VENDOR COST</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINRFull(impact.netVendorCost)}</div>
+                <div style={{ fontSize: 9.5, color: '#6b7a99', marginTop: 2 }}>Paid {fmtINRFull(impact.paidToVendors)} · Recovered {fmtINRFull(impact.recoveredFromVendors)}</div>
+              </div>
+              <div style={{ background: '#fff', borderRadius: 10, padding: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', letterSpacing: 1 }}>CANCEL CHARGES</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#c9961a', marginTop: 4 }}>{fmtINRFull(c.cancellationCharges || 0)}</div>
+                <div style={{ fontSize: 9.5, color: '#6b7a99', marginTop: 2 }}>Retained by Voyage-Ed</div>
+              </div>
+              <div style={{ background: impact.netProfit >= 0 ? '#d1fae5' : '#fee2e2', border: `2px solid ${impact.netProfit >= 0 ? '#10b981' : '#dc2626'}`, borderRadius: 10, padding: 10 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: impact.netProfit >= 0 ? '#065f46' : '#991b1b', letterSpacing: 1 }}>NET P&amp;L</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: impact.netProfit >= 0 ? '#065f46' : '#991b1b', marginTop: 4 }}>
+                  {impact.netProfit >= 0 ? '+' : ''}{fmtINRFull(impact.netProfit)}
+                </div>
+                <div style={{ fontSize: 9.5, color: impact.netProfit >= 0 ? '#065f46' : '#991b1b', marginTop: 2, fontWeight: 600 }}>
+                  {impact.netProfit >= 0 ? 'Profit on cancellation' : 'Loss on cancellation'}
+                </div>
+              </div>
+            </div>
+
+            {recoveryRows.length > 0 && (
+              <div style={{ background: '#fff', borderRadius: 10, padding: '10px 14px' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, marginBottom: 8 }}>💰 VENDOR RECOVERY ({recoveryRows.length} vendors · {fmtINRFull(totalRecovered)} total)</div>
+                {recoveryRows.map((r, i) => (
+                  <div key={r.vendorId + i} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr 3fr', gap: 8, padding: '5px 0', borderTop: i > 0 ? '1px dashed #f4f7fc' : 'none', fontSize: 11.5 }}>
+                    <div style={{ color: '#0d1b3e', fontWeight: 600 }}>{r.vendorName}</div>
+                    <div style={{ color: '#059669', fontWeight: 700 }}>{fmtINRFull(r.amount)}</div>
+                    <div style={{ color: '#6b7a99', fontStyle: r.note ? 'normal' : 'italic' }}>{r.note || 'No note'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {c.notes && (
+              <div style={{ marginTop: 10, padding: 10, background: '#fff', borderRadius: 8, fontSize: 11.5, color: '#6b7a99' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', letterSpacing: 1, marginBottom: 4 }}>INTERNAL NOTES</div>
+                {c.notes}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Stay Options (Tiered Pricing) */}
       <div className="v2-acc" style={{ marginBottom: 24 }}>
@@ -9566,6 +9976,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             />
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'dealCancellation' && <DealCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {callScriptOpen && (
