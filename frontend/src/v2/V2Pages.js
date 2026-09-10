@@ -1863,6 +1863,15 @@ const CITY_COORDS = {
   bangkok: [13.76, 100.50], pattaya: [12.93, 100.88], phuket: [7.88, 98.39], krabi: [8.09, 98.91],
   "chiang mai": [18.79, 98.98], "koh samui": [9.51, 100.01], singapore: [1.35, 103.82],
   "kuala lumpur": [3.14, 101.69], langkawi: [6.35, 99.80], penang: [5.41, 100.33],
+  // Malaysia cruise ports — Port Klang is KL's cruise gateway; both spellings
+  // are seen on tickets (older vs newer). Include bare 'klang' / 'kelang'
+  // for AI-extracted itineraries and common terminal names.
+  "port klang": [3.00, 101.40], "port kelang": [3.00, 101.40], klang: [3.00, 101.40], kelang: [3.00, 101.40],
+  westport: [3.00, 101.40], "boustead cruise centre": [3.00, 101.40], "swettenham pier": [5.42, 100.35],
+  malacca: [2.19, 102.25], melaka: [2.19, 102.25], "kota kinabalu": [5.98, 116.07], kuching: [1.55, 110.35],
+  redang: [5.78, 103.01], tioman: [2.80, 104.16], "pulau tioman": [2.80, 104.16],
+  "genting highlands": [3.42, 101.79], genting: [3.42, 101.79],
+  cameron: [4.47, 101.38], "cameron highlands": [4.47, 101.38],
   bali: [-8.41, 115.19], denpasar: [-8.65, 115.22], ubud: [-8.51, 115.26], kuta: [-8.72, 115.17],
   seminyak: [-8.69, 115.17], nusa: [-8.80, 115.22], jakarta: [-6.21, 106.85],
   "siem reap": [13.36, 103.86], "phnom penh": [11.56, 104.92],
@@ -2056,12 +2065,64 @@ function buildRouteMapBlockV2(deal) {
   </div>`;
 }
 
+// Scan a free-text field for city/port names present in CITY_COORDS.
+// Longest-first matching so "Port Klang" wins over a bare "Klang", and
+// "Ho Chi Minh City" wins over "Ho Chi Minh". Word-boundary check so
+// "goa" doesn't fire inside "goal". Case-insensitive. Deterministic —
+// no API calls, no cost, no async — this runs the same way every render.
+//
+// Used by extractRouteStopsForMapV2 below to surface intermediate stops
+// from cruise itineraries ("Day 2: Port Klang, Day 3: Penang") and
+// land package day-wise itineraries ("Day 3: Ubud → Kuta beach") that
+// would otherwise never reach the map — those fields are free text,
+// and only the structured city/embark/disembark fields make it to the
+// map through the primary extraction path.
+function scanTextForKnownCities(text) {
+  if (!text) return [];
+  const lower = String(text).toLowerCase();
+  const keys = Object.keys(CITY_COORDS).sort((a, b) => b.length - a.length);
+  const claimed = new Uint8Array(lower.length);
+  const hits = [];
+  for (const key of keys) {
+    let idx = 0;
+    while ((idx = lower.indexOf(key, idx)) !== -1) {
+      const before = idx === 0 ? ' ' : lower[idx - 1];
+      const after = idx + key.length >= lower.length ? ' ' : lower[idx + key.length];
+      const isBoundary = /[^a-z]/.test(before) && /[^a-z]/.test(after);
+      if (!isBoundary) { idx += key.length; continue; }
+      let taken = false;
+      for (let i = idx; i < idx + key.length; i++) if (claimed[i]) { taken = true; break; }
+      if (!taken) {
+        hits.push({ key, idx });
+        for (let i = idx; i < idx + key.length; i++) claimed[i] = 1;
+      }
+      idx += key.length;
+    }
+  }
+  hits.sort((a, b) => a.idx - b.idx);
+  // Dedupe consecutive same-city hits (someone writes "Penang harbour, Penang town" → one Penang)
+  const out = [];
+  hits.forEach((h) => {
+    const last = out[out.length - 1];
+    if (last && last.key === h.key) return;
+    out.push(h);
+  });
+  return out.map((h) => ({ name: h.key, coords: CITY_COORDS[h.key] }));
+}
+
 // Chronology-preserving stop extractor for the map. Unlike
 // extractRouteStopsV2 (used elsewhere) this does NOT dedupe all revisits
 // — a Delhi → SIN → KL → Delhi round trip needs Delhi at both start and
 // end so the return leg is drawn on the map. Only CONSECUTIVE same-city
 // events are merged (same-city hotel checkin followed by same-city cruise
 // embark = one stop with cruise mode).
+//
+// Also scans free-text cruise itineraries and land package itineraries
+// for known cities/ports and inserts them as intermediate stops between
+// the parent vendor's start and end dates. Without this, the reported
+// case (Singapore1 proposal with cruise itinerary going SIN → Port Klang
+// → Penang → SIN) rendered as a single Delhi ↔ Singapore arc because
+// Port Klang and Penang only lived in cruise.itinerary text.
 function extractRouteStopsForMapV2(deal) {
   const events = [];
   (deal.flightVendors || []).forEach((f) => {
@@ -2078,10 +2139,37 @@ function extractRouteStopsForMapV2(deal) {
   });
   (deal.cruiseVendors || []).forEach((c) => {
     if (c.portOfEmbarkation) events.push({ date: c.checkIn || '', city: c.portOfEmbarkation, mode: 'cruise' });
+    // Intermediate cruise ports from the free-text itinerary. Inserted
+    // between embark and disembark with a suffix on the checkIn date so
+    // ordering is stable and strictly before disembark.
+    if (c.itinerary) {
+      const intermediate = scanTextForKnownCities(c.itinerary);
+      intermediate.forEach((port, i) => {
+        // Skip if this port matches the embark or disembark city — those
+        // are already covered by the structured events above.
+        const em = String(c.portOfEmbarkation || '').toLowerCase();
+        const dm = String(c.portOfDisembarkation || '').toLowerCase();
+        if (port.name === em || port.name === dm) return;
+        const baseDate = c.checkIn || '';
+        events.push({ date: baseDate + ' ' + String(i + 1).padStart(2, '0'), city: port.name, mode: 'cruise' });
+      });
+    }
     if (c.portOfDisembarkation) events.push({ date: c.checkOut || '', city: c.portOfDisembarkation, mode: 'cruise' });
   });
   (deal.landVendors || []).forEach((l) => {
     if (l.city) events.push({ date: l.startDate || '', city: l.city, mode: 'car' });
+    // Intermediate cities from a land package's day-wise itinerary text.
+    // A Bali DMC package saying "Day 3: Ubud → Kuta beach" adds Ubud and
+    // Kuta between start and end dates.
+    const text = [l.itinerary, l.notes].filter(Boolean).join('\n');
+    if (text) {
+      const cities = scanTextForKnownCities(text);
+      cities.forEach((city, i) => {
+        if (String(city.name).toLowerCase() === String(l.city || '').toLowerCase()) return;
+        const baseDate = l.startDate || '';
+        events.push({ date: baseDate + ' ' + String(i + 1).padStart(2, '0'), city: city.name, mode: 'car' });
+      });
+    }
   });
   events.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const stops = [];
@@ -2089,7 +2177,6 @@ function extractRouteStopsForMapV2(deal) {
     if (!e.city) return;
     const last = stops[stops.length - 1];
     if (last && String(last.name).toLowerCase().trim() === String(e.city).toLowerCase().trim()) {
-      // Same city as last — merge; adopt the incoming mode if this event has one
       if (e.mode && !last.mode) last.mode = e.mode;
       return;
     }
