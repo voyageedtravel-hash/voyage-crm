@@ -11756,6 +11756,89 @@ function ReportsV2({ leads }) {
     return Object.values(byMonth).sort((a, b) => a.key.localeCompare(b.key));
   }, [bookedDeals]);
 
+  // ─── Cancellations analytics ──────────────────────────────────────
+  const [cxRange, setCxRange] = useState('all'); // all | month | quarter | ytd
+  const cancellations = useMemo(() => {
+    // Only fully-cancelled deals with a cancellation record. Deals that
+    // just got moved to stage 'Cancelled' without going through the modal
+    // still count in the list (zero-metadata cancellations), but they show
+    // up flagged as 'incomplete record' so someone can go back and add
+    // reason + charges + recovery.
+    let list = leads.filter((d) => isCancelledStage(d));
+    // Range filter — based on cancellation date if present, else deal createdAt
+    const now = new Date();
+    const cutoffs = {
+      all: null,
+      month: new Date(now.getFullYear(), now.getMonth(), 1),
+      quarter: new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1),
+      ytd: new Date(now.getFullYear(), 0, 1),
+    };
+    const cutoff = cutoffs[cxRange];
+    if (cutoff) {
+      list = list.filter((d) => {
+        const dateStr = (d.cancellation && d.cancellation.cancelledAt) || d.updatedAt || d.createdAt;
+        if (!dateStr) return false;
+        return new Date(dateStr) >= cutoff;
+      });
+    }
+    return list.map((d) => {
+      const impact = computeCancellationImpact(d);
+      return {
+        deal: d,
+        impact,
+        cancelledAt: (d.cancellation && d.cancellation.cancelledAt) || d.updatedAt || d.createdAt || '',
+        reason: (d.cancellation && d.cancellation.reason) || 'no_record',
+        cancellationCharges: (d.cancellation && Number(d.cancellation.cancellationCharges)) || 0,
+        hasRecord: !!(d.cancellation && d.cancellation.reason),
+      };
+    }).sort((a, b) => String(b.cancelledAt).localeCompare(String(a.cancelledAt)));
+  }, [leads, cxRange]);
+
+  const cxAggregate = useMemo(() => {
+    if (cancellations.length === 0) return null;
+    const total = cancellations.reduce((acc, c) => ({
+      count: acc.count + 1,
+      dealValue: acc.dealValue + sellINR(c.deal),
+      collected: acc.collected + c.impact.collected,
+      refunded: acc.refunded + c.impact.refundedToClient,
+      paidToVendors: acc.paidToVendors + c.impact.paidToVendors,
+      recovered: acc.recovered + c.impact.recoveredFromVendors,
+      chargesRetained: acc.chargesRetained + c.cancellationCharges,
+      netPnL: acc.netPnL + c.impact.netProfit,
+    }), { count: 0, dealValue: 0, collected: 0, refunded: 0, paidToVendors: 0, recovered: 0, chargesRetained: 0, netPnL: 0 });
+    const recoveryRate = total.paidToVendors > 0 ? Math.round(total.recovered / total.paidToVendors * 100) : 0;
+    const lossOnes = cancellations.filter((c) => c.impact.netProfit < 0);
+    const profitOnes = cancellations.filter((c) => c.impact.netProfit >= 0);
+    return { ...total, recoveryRate, lossCount: lossOnes.length, profitCount: profitOnes.length };
+  }, [cancellations]);
+
+  const cxByReason = useMemo(() => {
+    const map = {};
+    cancellations.forEach((c) => {
+      const key = c.reason || 'no_record';
+      if (!map[key]) map[key] = { reason: key, count: 0, loss: 0 };
+      map[key].count++;
+      map[key].loss += Math.max(0, -c.impact.netProfit); // loss is negative netProfit
+    });
+    return Object.values(map).sort((a, b) => b.count - a.count);
+  }, [cancellations]);
+
+  const cxByMonth = useMemo(() => {
+    const map = {};
+    cancellations.forEach((c) => {
+      const key = String(c.cancelledAt).slice(0, 7) || '0000-00';
+      if (!map[key]) map[key] = { key, mon: '', count: 0, loss: 0 };
+      map[key].count++;
+      map[key].loss += Math.max(0, -c.impact.netProfit);
+    });
+    Object.keys(map).forEach((k) => {
+      if (k === '0000-00') { map[k].mon = 'Undated'; return; }
+      const [y, m] = k.split('-');
+      map[k].mon = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+    });
+    return Object.values(map).sort((a, b) => a.key.localeCompare(b.key));
+  }, [cancellations]);
+
   return (
     <main className="v2-page">
       <div className="v2-page-header">
@@ -11767,6 +11850,159 @@ function ReportsV2({ leads }) {
 
       <CycleTracker leads={leads} />
       <DetailedReport leads={leads} />
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">❌ Cancellations</h3>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {[['month', 'This Month'], ['quarter', 'Quarter'], ['ytd', 'YTD'], ['all', 'All Time']].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setCxRange(k)}
+                style={{
+                  background: cxRange === k ? '#0d1b3e' : '#f4f7fc',
+                  color: cxRange === k ? '#fff' : '#334e82',
+                  border: '1px solid ' + (cxRange === k ? '#0d1b3e' : '#e3eaf7'),
+                  borderRadius: 8, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                }}
+              >{label}</button>
+            ))}
+            {cancellations.length > 0 && (
+              <button className="v2-view-all" onClick={() => downloadCSV('cancellations.csv', [
+                ['Deal', 'Client', 'Cancelled On', 'Reason', 'Deal Value (INR)', 'Charges Retained (INR)', 'Collected (INR)', 'Refunded (INR)', 'Vendor Paid (INR)', 'Recovered (INR)', 'Net P&L (INR)'],
+                ...cancellations.map((c) => [
+                  c.deal.dealNumber || '', c.deal.clientName || '', c.cancelledAt || '',
+                  (CANCELLATION_REASONS.find((r) => r.value === c.reason) || {}).label || c.reason,
+                  sellINR(c.deal), c.cancellationCharges,
+                  c.impact.collected, c.impact.refundedToClient,
+                  c.impact.paidToVendors, c.impact.recoveredFromVendors,
+                  c.impact.netProfit,
+                ]),
+              ])} style={{ marginLeft: 8 }}>⬇ Export CSV</button>
+            )}
+          </div>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+          Every cancelled deal, aggregate P&amp;L impact, reason breakdown, and vendor recovery success rate. Track leaks and negotiate better vendor policies.
+        </p>
+
+        {cancellations.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#6b7a99', padding: '20px 0', textAlign: 'center' }}>
+            {cxRange === 'all' ? 'No cancellations recorded yet.' : `No cancellations in this ${cxRange === 'month' ? 'month' : cxRange === 'quarter' ? 'quarter' : 'year'}.`}
+          </div>
+        ) : (
+          <>
+            {/* KPI tiles */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#dc2626', letterSpacing: 1.5 }}>CANCELLATIONS</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{cxAggregate.count}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>Deal value: {fmtINRFull(cxAggregate.dealValue)}</div>
+              </div>
+              <div style={{ background: cxAggregate.netPnL >= 0 ? '#d1fae5' : '#fef2f2', border: `1px solid ${cxAggregate.netPnL >= 0 ? '#10b981' : '#fecaca'}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: cxAggregate.netPnL >= 0 ? '#065f46' : '#dc2626', letterSpacing: 1.5 }}>NET P&amp;L</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: cxAggregate.netPnL >= 0 ? '#065f46' : '#dc2626', marginTop: 4 }}>
+                  {cxAggregate.netPnL >= 0 ? '+' : ''}{fmtINRFull(cxAggregate.netPnL)}
+                </div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>
+                  {cxAggregate.profitCount} profitable · {cxAggregate.lossCount} loss
+                </div>
+              </div>
+              <div style={{ background: '#f0f5fd', border: '1px solid #c2d2ee', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#334e82', letterSpacing: 1.5 }}>CHARGES RETAINED</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#334e82', marginTop: 4 }}>{fmtINRFull(cxAggregate.chargesRetained)}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>From clients on cancellation</div>
+              </div>
+              <div style={{ background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#c9961a', letterSpacing: 1.5 }}>VENDOR RECOVERY</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#c9961a', marginTop: 4 }}>{cxAggregate.recoveryRate}%</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>
+                  {fmtINRFull(cxAggregate.recovered)} of {fmtINRFull(cxAggregate.paidToVendors)} back
+                </div>
+              </div>
+            </div>
+
+            {/* Reason breakdown + monthly trend side by side */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, marginBottom: 8 }}>WHY CANCELLATIONS HAPPEN</div>
+                <table className="info" style={{ width: '100%', fontSize: 12 }}>
+                  <thead><tr><th>Reason</th><th style={{ textAlign: 'center' }}>Count</th><th style={{ textAlign: 'right' }}>Loss (₹)</th></tr></thead>
+                  <tbody>
+                    {cxByReason.map((r, i) => {
+                      const label = (CANCELLATION_REASONS.find((x) => x.value === r.reason) || {}).label || (r.reason === 'no_record' ? '⚠ No cancellation record' : r.reason);
+                      const pct = Math.round(r.count / cxAggregate.count * 100);
+                      return (
+                        <tr key={i}>
+                          <td>
+                            {label}
+                            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2, position: 'relative', height: 4, background: '#f4f7fc', borderRadius: 2 }}>
+                              <div style={{ position: 'absolute', top: 0, left: 0, height: 4, borderRadius: 2, background: '#dc2626', width: pct + '%' }}></div>
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 700 }}>{r.count} <span style={{ color: '#94a3b8', fontWeight: 400, fontSize: 10 }}>({pct}%)</span></td>
+                          <td style={{ textAlign: 'right', fontWeight: 600, color: r.loss > 0 ? '#dc2626' : '#94a3b8' }}>{r.loss > 0 ? fmtINR(r.loss) : '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, marginBottom: 8 }}>MONTHLY TREND</div>
+                <table className="info" style={{ width: '100%', fontSize: 12 }}>
+                  <thead><tr><th>Month</th><th style={{ textAlign: 'center' }}>Count</th><th style={{ textAlign: 'right' }}>Loss</th></tr></thead>
+                  <tbody>
+                    {cxByMonth.map((m, i) => (
+                      <tr key={i}>
+                        <td>{m.mon}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 700 }}>{m.count}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: m.loss > 0 ? '#dc2626' : '#94a3b8' }}>{m.loss > 0 ? fmtINR(m.loss) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Individual cancellations list */}
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5, marginBottom: 8 }}>ALL CANCELLED DEALS</div>
+            <table className="info" style={{ width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>Deal</th>
+                  <th>Client</th>
+                  <th>Reason</th>
+                  <th>Cancelled</th>
+                  <th style={{ textAlign: 'right' }}>Charges</th>
+                  <th style={{ textAlign: 'right' }}>Recovery</th>
+                  <th style={{ textAlign: 'right' }}>Net P&amp;L</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cancellations.map((c, i) => {
+                  const label = (CANCELLATION_REASONS.find((x) => x.value === c.reason) || {}).label || (c.reason === 'no_record' ? '⚠ Incomplete record' : c.reason);
+                  return (
+                    <tr key={i} style={{ cursor: 'pointer' }} onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('deals')} title="Open Deals page">
+                      <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#334e82' }}>{c.deal.dealNumber || '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{c.deal.clientName || '—'}</td>
+                      <td>{label}</td>
+                      <td style={{ fontSize: 11, color: '#6b7a99' }}>{c.cancelledAt || '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{c.cancellationCharges > 0 ? fmtINR(c.cancellationCharges) : '—'}</td>
+                      <td style={{ textAlign: 'right', color: c.impact.paidToVendors > 0 ? (c.impact.recoveredFromVendors / c.impact.paidToVendors >= 0.5 ? '#059669' : '#c9961a') : '#94a3b8', fontWeight: 600 }}>
+                        {c.impact.paidToVendors > 0 ? `${Math.round(c.impact.recoveredFromVendors / c.impact.paidToVendors * 100)}%` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: c.impact.netProfit >= 0 ? '#059669' : '#dc2626' }}>
+                        {c.impact.netProfit >= 0 ? '+' : ''}{fmtINR(c.impact.netProfit)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       <div className="v2-panel" style={{ marginBottom: 24 }}>
         <div className="v2-panel-header">
