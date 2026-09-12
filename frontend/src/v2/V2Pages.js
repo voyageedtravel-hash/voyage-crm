@@ -924,6 +924,7 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
       {showDues && <VendorDuesModal leads={leads} onClose={() => setShowDues(false)} onDealClick={(d) => { setShowDues(false); onDealClick(d); }} />}
       {showNewLead && (
         <NewLeadModal
+          allLeads={leads}
           onClose={() => setShowNewLead(false)}
           onCreated={(created) => {
             setShowNewLead(false);
@@ -1210,15 +1211,70 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
 
 /* ─── NEW LEAD MODAL — real POST to /api/leads ────────── */
 
-function NewLeadModal({ onClose, onCreated }) {
+// Popular Voyage-Ed destinations with typical trip pattern. Selecting one
+// pre-fills the destination + adds a hint in remarks about the base itinerary.
+// Templates are conservative — they don't lock the user into anything, they
+// just save 30 seconds of typing on the most common quotes.
+const PACKAGE_TEMPLATES = [
+  { key: 'bali_5n', label: '🏝 Bali · 5 Nights (Ubud + Kuta/Seminyak)', destination: 'Bali', nights: 5, hint: 'Standard Bali 5N: 2N Ubud + 3N Kuta/Seminyak, water sports, Uluwatu sunset, spa. Include Denpasar transfers.' },
+  { key: 'thailand_6n', label: '🐘 Thailand · 6 Nights (Phuket + Krabi)', destination: 'Thailand', nights: 6, hint: 'Standard Thailand 6N: 3N Phuket + 3N Krabi, Phi Phi island tour, James Bond island, Tiger Kingdom optional.' },
+  { key: 'thailand_bkk_pty', label: '🇹🇭 Bangkok + Pattaya · 5 Nights', destination: 'Thailand', nights: 5, hint: 'Bangkok + Pattaya combo: 2N Bangkok (city + temples) + 3N Pattaya (Coral Island, Alcazar show, Nong Nooch garden).' },
+  { key: 'vietnam_7n', label: '🇻🇳 Vietnam · 7 Nights (Hanoi + Ha Long + HCMC)', destination: 'Vietnam', nights: 7, hint: 'Vietnam N-to-S: 2N Hanoi + 1N Ha Long cruise + 3N HCMC + 1N Mekong. Include Hanoi → HCMC domestic flight.' },
+  { key: 'singapore_4n', label: '🇸🇬 Singapore · 4 Nights (family)', destination: 'Singapore', nights: 4, hint: 'Standard family: Sentosa 1-day, Gardens by the Bay + MBS, Universal Studios, Night Safari. Skip cruise unless client asks.' },
+  { key: 'sing_cruise_7n', label: '🚢 Singapore + Cruise · 7 Nights', destination: 'Singapore + Cruise', nights: 7, hint: '3N Singapore hotel + 3N cruise loop (Port Klang / Penang / Phuket) + 1N post-cruise Singapore. Include SIN return flight.' },
+  { key: 'dubai_5n', label: '🕌 Dubai · 5 Nights', destination: 'Dubai', nights: 5, hint: 'Standard Dubai 5N: Desert safari, Dhow cruise, Burj Khalifa, Global Village (Nov-Mar), Miracle Garden (Nov-Apr). Optional Abu Dhabi day.' },
+  { key: 'europe_10n', label: '🗼 Europe · 10 Nights (5 countries)', destination: 'Europe', nights: 10, hint: 'Switzerland (Zurich/Lucerne/Interlaken) + Austria (Innsbruck/Salzburg/Vienna) + Czechia (Prague) + Hungary (Budapest). Trains between cities.' },
+  { key: 'kashmir_6n', label: '🏔 Kashmir · 6 Nights (Srinagar + Gulmarg + Pahalgam)', destination: 'Kashmir', nights: 6, hint: '2N Srinagar (Dal Lake shikara + houseboat) + 2N Gulmarg (gondola) + 2N Pahalgam (Betaab Valley). Snowfall season Dec-Mar.' },
+  { key: 'ladakh_6n', label: '🕉 Ladakh · 6 Nights (Leh + Nubra + Pangong)', destination: 'Ladakh', nights: 6, hint: '2N Leh (acclimatization + monasteries) + 1N Nubra (Bactrian camels) + 1N Pangong Tso + 2N Leh. Season May-Sep only, need permits.' },
+  { key: 'kerala_6n', label: '🌴 Kerala · 6 Nights (Kochi + Munnar + Alleppey)', destination: 'Kerala', nights: 6, hint: 'Standard Kerala: 1N Kochi + 2N Munnar (tea gardens) + 1N Thekkady + 1N Alleppey houseboat + 1N Kochi. Add Kovalam beach optional.' },
+  { key: 'goa_4n', label: '🌊 Goa · 4 Nights', destination: 'Goa', nights: 4, hint: 'Standard Goa 4N: North Goa 2N (Baga/Calangute) + South Goa 2N (Palolem/Colva). Boat cruise + spice plantation optional.' },
+];
+
+function NewLeadModal({ onClose, onCreated, allLeads }) {
   const [form, setForm] = useState({
     clientName: '', contactNo: '', email: '', destination: '',
     travelDates: '', adults: '2', children: '0', leadSource: '', remarks: '',
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+
+  // Repeat customer detection — as user types phone/email, look for matches
+  // in existing leads. Match on last 10 digits of phone (handles +91/91/no-code
+  // variations) OR case-insensitive email. Skip if no allLeads provided
+  // (fallback for callers that don't pass it).
+  const repeatCustomer = React.useMemo(() => {
+    if (!Array.isArray(allLeads) || allLeads.length === 0) return null;
+    const phoneDigits = String(form.contactNo || '').replace(/\D/g, '').slice(-10);
+    const email = String(form.email || '').trim().toLowerCase();
+    if (!phoneDigits && !email) return null;
+    const matches = allLeads.filter((l) => {
+      const lPhone = String(l.contactNo || '').replace(/\D/g, '').slice(-10);
+      const lEmail = String(l.email || '').trim().toLowerCase();
+      return (phoneDigits && phoneDigits === lPhone) || (email && email === lEmail);
+    });
+    if (matches.length === 0) return null;
+    // Sort past trips by createdAt desc
+    matches.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const bookedCount = matches.filter((m) => /booked|completed/i.test(m.stage || '')).length;
+    const cancelledCount = matches.filter((m) => isCancelledStage(m)).length;
+    const destinations = [...new Set(matches.map((m) => m.destination).filter(Boolean))];
+    return { matches, bookedCount, cancelledCount, destinations };
+  }, [form.contactNo, form.email, allLeads]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const applyTemplate = (key) => {
+    setSelectedTemplate(key);
+    if (!key) return;
+    const tpl = PACKAGE_TEMPLATES.find((t) => t.key === key);
+    if (!tpl) return;
+    setForm((f) => ({
+      ...f,
+      destination: tpl.destination,
+      remarks: f.remarks ? f.remarks + '\n\n' + tpl.hint : tpl.hint,
+    }));
+  };
 
   const submit = async () => {
     if (!form.clientName.trim()) { setErr('Client name is required'); return; }
@@ -1258,10 +1314,51 @@ function NewLeadModal({ onClose, onCreated }) {
         </div>
         <div style={{ padding: '22px 26px', display: 'grid', gap: 14 }}>
           {err && <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 14px', borderRadius: 10, fontSize: 12 }}>{err}</div>}
+
+          {/* Package template dropdown — quick-start for common quotes */}
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 6, color: '#c9961a' }}>⚡ Quick Start (optional)</div>
+            <select value={selectedTemplate} onChange={(e) => applyTemplate(e.target.value)} style={inputStyle}>
+              <option value="">— Start from scratch —</option>
+              {PACKAGE_TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+            {selectedTemplate && (
+              <div style={{ fontSize: 10.5, color: '#059669', marginTop: 4, fontWeight: 600 }}>
+                ✓ Template applied — destination + hint pre-filled. Adjust as needed.
+              </div>
+            )}
+          </div>
+
           <div>
             <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Client Name *</div>
             <input value={form.clientName} onChange={set('clientName')} placeholder="Full name" style={inputStyle} />
           </div>
+
+          {/* Repeat customer detection — appears when phone or email matches an existing lead */}
+          {repeatCustomer && (
+            <div style={{ background: 'linear-gradient(135deg, #fef3c7 0%, #fef9e6 100%)', border: '2px solid #fbbf24', borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 18 }}>🎉</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#92400e', letterSpacing: 0.5 }}>REPEAT CUSTOMER DETECTED</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: '#78350f', lineHeight: 1.5 }}>
+                <b>{repeatCustomer.matches.length}</b> past deal{repeatCustomer.matches.length === 1 ? '' : 's'} on file
+                {repeatCustomer.bookedCount > 0 && <> · <b style={{ color: '#059669' }}>{repeatCustomer.bookedCount} booked/completed</b></>}
+                {repeatCustomer.cancelledCount > 0 && <> · <b style={{ color: '#dc2626' }}>{repeatCustomer.cancelledCount} cancelled</b></>}
+                {repeatCustomer.destinations.length > 0 && (
+                  <div style={{ marginTop: 4 }}>Past trips: {repeatCustomer.destinations.slice(0, 5).join(', ')}{repeatCustomer.destinations.length > 5 ? ` +${repeatCustomer.destinations.length - 5}` : ''}</div>
+                )}
+                {repeatCustomer.matches[0] && repeatCustomer.matches[0].clientName && !form.clientName && (
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, clientName: repeatCustomer.matches[0].clientName }))}
+                    style={{ marginTop: 8, background: '#0d1b3e', color: '#c9961a', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' }}
+                  >Auto-fill name: {repeatCustomer.matches[0].clientName}</button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div>
               <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Phone</div>
@@ -1497,6 +1594,7 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
     <main className="v2-page">
       {showNewLead && (
         <NewLeadModal
+          allLeads={leads}
           onClose={() => setShowNewLead(false)}
           onCreated={(created) => {
             setShowNewLead(false);
