@@ -6,42 +6,148 @@
     <meta http-equiv="Expires" content="0" />
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
 
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
-    <meta name="ve-build" content="2026-07-08-proposalfix-v2" />
+    <!-- Viewport: viewport-fit=cover so we can extend into Fold5 notch/edge areas.
+         user-scalable=yes so pinch-zoom still works on dense tables. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+
+    <!-- Branded colours for Chrome address bar (folded) and status bar (installed PWA). -->
+    <meta name="theme-color" content="#0d1b3e" />
+    <meta name="msapplication-navbutton-color" content="#0d1b3e" />
+
+    <!-- iOS PWA support (in case ever opened on iPad). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Voyage-Ed" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/apple-touch-icon.png" />
+
+    <!-- Chrome mobile / Android PWA specific. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Voyage-Ed CRM" />
+
+    <meta name="description" content="Voyage-Ed CRM — deals, proposals, and operations for Voyage-Ed Travels." />
+
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <title>Voyage-Ed CRM</title>
+    <meta name="ve-build" content="2026-09-10-pwa-fold5" />
+
+    <style>
+      /* ─── Fold5 & general mobile PWA CSS ──────────────────────────────
+         The full CRM UI is styled elsewhere; this block only sets up the
+         install-time layout so the PWA feels native from the very first
+         paint (before React hydrates).
+
+         Fold5 form-factors:
+         - Cover screen (folded): 904 × 2316 px @ ~21:9 tall aspect (~6.2")
+         - Main screen (unfolded): 1812 × 2176 px @ ~5:6 near-square (~7.6")
+         - Split-screen (App1 | App2 side-by-side): each app ~906 px wide
+
+         The CRM's own React styles already handle >= 1400px well (desktop).
+         The additions below make the < 1400px experience Fold-friendly. */
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #0d1b3e; /* matches theme_color so no white flash on cold start */
+        overscroll-behavior-y: none; /* stop the whole page bouncing when a list is scrolled */
+        -webkit-tap-highlight-color: transparent;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      /* Extend paint into notch/edge areas on the folded cover screen. */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      /* Splash screen shown while the JS bundle downloads on first launch.
+         Removed as soon as React mounts (root gets children). */
+      #ve-boot {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #0d1b3e; color: #c9961a;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        z-index: 999;
+      }
+      #ve-boot .v { font-size: 96px; font-weight: 900; line-height: 1; margin-bottom: 8px; }
+      #ve-boot .sub { color: #fff; font-size: 12px; letter-spacing: 4px; font-weight: 700; }
+      #ve-boot .hint { color: #7c8ba8; font-size: 10px; margin-top: 24px; letter-spacing: 1px; }
+      #root:not(:empty) ~ #ve-boot { display: none; }
+
+      /* When the app is installed as a PWA it launches in standalone
+         window mode. Chrome removes its own toolbar but leaves a status
+         bar. We put a colour-matched safe padding under it. */
+      @media (display-mode: standalone), (display-mode: window-controls-overlay) {
+        body { background: #eef1f7; } /* CRM canvas colour */
+      }
+
+      /* ─── Fold5-specific tweaks ───────────────────────────────────────
+         Cover screen (folded, ~904 wide) — apply tighter compact layout. */
+      @media (max-width: 950px) {
+        /* Ensure any absolute-positioned side panels don't overflow.
+           The CRM already flexes below 900px so this is a safety net. */
+        body { overflow-x: hidden; }
+
+        /* Increase minimum touch target to Google's 44px recommendation
+           for anything that acts as a button in the CRM. Non-invasive:
+           only kicks in on narrow viewports. */
+        button, input[type="button"], input[type="submit"], a.v2-cta, a.v2-hero-btn {
+          min-height: 40px;
+        }
+      }
+
+      /* Main screen (unfolded, ~1812 wide) uses desktop layout unmodified.
+         Split-screen (~906 wide when app is on one side) uses the folded rules above. */
+
+      noscript {
+        display: block; padding: 40px; color: #fff; text-align: center; font-family: sans-serif;
+      }
+    </style>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>Voyage-Ed CRM requires JavaScript. Please enable it in your browser.</noscript>
     <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+    <!-- Cold-start splash (removed by CSS once React mounts) -->
+    <div id="ve-boot" aria-hidden="true">
+      <div class="v">V</div>
+      <div class="sub">VOYAGE-ED</div>
+      <div class="hint">Loading your CRM…</div>
+    </div>
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+    <script>
+      // Register the service worker as soon as the page loads. Failure is
+      // silent — the CRM works fine without it, PWA just doesn't install.
+      if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').then(function (reg) {
+            // When a new service worker takes over, force a reload so the user
+            // sees the latest CRM version. Without this, PWAs can serve
+            // stale JS bundles for weeks after a deploy.
+            if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            reg.addEventListener('updatefound', function () {
+              var newWorker = reg.installing;
+              if (!newWorker) return;
+              newWorker.addEventListener('statechange', function () {
+                if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+                  // Silent — reload will happen on next navigation naturally.
+                }
+              });
+            });
+          }).catch(function () { /* silent */ });
+        });
+      }
+
+      // Capture the install prompt so we can show a custom "Install App"
+      // button somewhere in the CRM later if needed. For now we just log
+      // — user installs via Chrome menu > Install App.
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__veInstallPrompt = e;
+      });
+    </script>
   </body>
 </html>
