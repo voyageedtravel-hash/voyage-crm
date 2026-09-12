@@ -5811,6 +5811,86 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
     setPropDays(days.length ? days : ['']);
   };
 
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewFindings, setReviewFindings] = useState(null);
+  const runTripReview = async () => {
+    setReviewLoading(true);
+    setReviewFindings(null);
+    try {
+      const T = (deal.travellers || []).filter((t) => !t.cancelled);
+      const hotels = (deal.hotelVendors || []).map((h) => ({
+        name: h.hotelName, city: h.city, checkIn: h.checkIn, checkOut: h.checkOut,
+        rooms: h.rooms, mealPlan: h.mealPlan, stars: h.starRating,
+      }));
+      const flightSummary = (deal.flightVendors || []).flatMap((f) =>
+        [...(f.sectors || []).map((s) => ({ leg: 'outbound', ...s })),
+         ...(f.returnSectors || []).map((s) => ({ leg: 'return', ...s }))]
+      ).map((s) => ({ leg: s.leg, from: s.fromName || s.from, to: s.toName || s.to, date: s.date, airline: s.airlineName || s.airlineCode }));
+      const visas = (deal.visaVendors || []).map((v) => ({ country: v.country, status: v.visaStatus, expiry: v.visaExpiry }));
+      const cruises = (deal.cruiseVendors || []).map((c) => ({
+        line: c.cruiseLine, ship: c.shipName,
+        embark: c.portOfEmbarkation, disembark: c.portOfDisembarkation,
+        checkIn: c.checkIn, checkOut: c.checkOut,
+      }));
+      const land = (deal.landVendors || []).map((l) => ({
+        city: l.city, start: l.startDate, end: l.endDate, hasItinerary: !!l.itinerary,
+      }));
+
+      const payload = {
+        destination: deal.destination,
+        travelDates: deal.travelDates,
+        adults: deal.adults, children: deal.children,
+        sellingPrice: sellINR(deal),
+        vendorCost: costINR(deal),
+        marginPct: sellINR(deal) > 0 ? Math.round((sellINR(deal) - costINR(deal)) / sellINR(deal) * 100) : 0,
+        clientCollected: paidINR(deal),
+        travellers: T.map((t) => ({
+          name: [t.firstName, t.lastName].filter(Boolean).join(' '),
+          nationality: t.nationality, passport: !!t.passportNo,
+          passportExpiry: t.passportExpiry, hasPhoto: !!t.passportPhoto,
+        })),
+        flights: flightSummary,
+        hotels, visas, cruises, land,
+      };
+
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 700,
+          system: `You are a senior travel-agency operations reviewer for Voyage-Ed. Given a deal JSON, find issues that would embarrass the agency if the proposal went out unchecked. Check for:
+
+1. Missing components — no visa for international, no return flight for round-trip, no hotel for nights covered by flights, cruise without a flight to reach the port.
+2. Date mismatches — hotel dates don't cover flight dates, cruise embark AFTER disembark, checkout AFTER return flight.
+3. Traveller readiness — passport expiry within 6 months of departure, missing passport numbers, missing passport photos for international.
+4. Financial red flags — margin below 5%, selling price zero, cost > selling.
+5. Destination-specific gotchas — Ladakh trip in Dec-Apr (roads closed), Kashmir houseboat without permit reminder, Schengen without insurance, UAE without OK-to-board note for Indian passport, etc.
+6. Anything obviously missing for the destination.
+
+Respond ONLY with a JSON object: {"severity":"blocker"|"warn"|"ok","findings":[{"level":"blocker"|"warn"|"info","area":"visa|flight|hotel|traveller|finance|other","msg":"short specific message under 120 chars"}]}.
+severity=blocker if ANY blocker-level finding exists, warn if only warns, ok if nothing to flag.
+Findings array can be empty if deal looks clean.
+No preamble, no markdown, just JSON.`,
+          messages: [{ role: 'user', content: JSON.stringify(payload) }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error((data.error && (data.error.message || data.error)) || 'AI error');
+      const text = (data.content || []).map((c) => c.text || '').join('').trim();
+      const clean = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+      let parsed;
+      try { parsed = JSON.parse(clean); } catch (e) {
+        parsed = { severity: 'warn', findings: [{ level: 'info', area: 'other', msg: text.slice(0, 200) }] };
+      }
+      setReviewFindings(parsed);
+    } catch (e) {
+      setReviewFindings({ severity: 'warn', findings: [{ level: 'info', area: 'other', msg: 'AI review failed — check connection and try again.' }] });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   const generate = () => {
     // Persist the chosen options to the deal so the next modal open loads
     // them back instead of resetting. Fire-and-forget — don't block PDF
@@ -5968,6 +6048,45 @@ function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpda
             <div style={{ fontSize: 10, color: '#8a6d1a', marginTop: 4 }}>💡 Yeh terms proposal + legal T&C dono mein automatically apply hongi.</div>
           </div>
         )}
+
+        {/* AI Trip Reviewer — quality gate before generating PDF */}
+        <div style={{ background: '#f8fafd', border: '2px dashed #c2d2ee', borderRadius: 12, padding: 14, marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#0d1b3e', letterSpacing: 0.5 }}>🔍 AI Trip Review</div>
+              <div style={{ fontSize: 10.5, color: '#6b7a99', marginTop: 2 }}>AI proposal se pehle deal check karega — missing components, date mismatches, financial red flags.</div>
+            </div>
+            <button
+              onClick={runTripReview}
+              disabled={reviewLoading}
+              style={{ background: '#334e82', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 11, fontWeight: 700, cursor: reviewLoading ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >{reviewLoading ? '⏳ Reviewing…' : '⚡ Run Review'}</button>
+          </div>
+          {reviewFindings && (
+            (() => {
+              const sev = reviewFindings.severity || 'ok';
+              const findings = reviewFindings.findings || [];
+              const bannerColor = sev === 'blocker' ? { bg: '#fef2f2', border: '#fecaca', text: '#991b1b', label: '🚫 BLOCKERS FOUND — fix before sending' }
+                                : sev === 'warn' ? { bg: '#fffbeb', border: '#fde68a', text: '#92400e', label: '⚠️ WARNINGS — review before sending' }
+                                : { bg: '#d1fae5', border: '#10b981', text: '#065f46', label: '✓ ALL GOOD — ready to send' };
+              return (
+                <div style={{ background: bannerColor.bg, border: `1px solid ${bannerColor.border}`, borderRadius: 8, padding: '10px 12px', marginTop: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: bannerColor.text, letterSpacing: 0.5, marginBottom: findings.length ? 8 : 0 }}>{bannerColor.label}</div>
+                  {findings.map((f, i) => {
+                    const dot = f.level === 'blocker' ? '🔴' : f.level === 'warn' ? '🟡' : 'ℹ️';
+                    return (
+                      <div key={i} style={{ fontSize: 11.5, color: bannerColor.text, marginBottom: 4, lineHeight: 1.5 }}>
+                        <span style={{ marginRight: 4 }}>{dot}</span>
+                        <span style={{ textTransform: 'uppercase', fontSize: 9.5, fontWeight: 700, opacity: 0.7, marginRight: 6 }}>{f.area}:</span>
+                        {f.msg}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()
+          )}
+        </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={generate} style={{ flex: 1, background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#fff', border: 'none', borderRadius: 11, padding: 13, cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>🖨 Preview / PDF</button>
@@ -8440,10 +8559,17 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
     nationality: editing.nationality || 'Indian',
     passportPhoto: editing.passportPhoto || '',
     documents: Array.isArray(editing.documents) ? editing.documents : [],
+    emergencyContactName: editing.emergencyContactName || '',
+    emergencyContactPhone: editing.emergencyContactPhone || '',
+    emergencyContactRelation: editing.emergencyContactRelation || '',
+    dietaryPreference: editing.dietaryPreference || '',
+    medicalNotes: editing.medicalNotes || '',
   } : {
     firstName: '', lastName: '', salutation: 'Mr', type: 'Adult', dob: '',
     idType: 'Passport', passportNo: '', passportIssue: '', passportExpiry: '', nationality: 'Indian',
     passportPhoto: '', documents: [],
+    emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
+    dietaryPreference: '', medicalNotes: '',
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -8534,6 +8660,39 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Nationality</div>
         <input value={form.nationality} onChange={set('nationality')} style={inputStyle} />
+      </div>
+
+      {/* Emergency contact — kept optional, usually only filled for the primary
+          traveller in a group. Comes to voucher printouts and post-trip records. */}
+      <div style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 8, padding: 12 }}>
+        <div className="v2-detail-field-label" style={{ marginBottom: 8, color: '#dc2626' }}>🚨 Emergency Contact (recommended for primary traveller)</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 4, fontSize: 10 }}>Name</div>
+            <input value={form.emergencyContactName} onChange={set('emergencyContactName')} placeholder="Full name" style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 4, fontSize: 10 }}>Phone</div>
+            <input value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} placeholder="+91 …" style={inputStyle} />
+          </div>
+          <div>
+            <div className="v2-detail-field-label" style={{ marginBottom: 4, fontSize: 10 }}>Relation</div>
+            <input value={form.emergencyContactRelation} onChange={set('emergencyContactRelation')} placeholder="Spouse / Parent / Sibling" style={inputStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Dietary + medical — small fields, big value on-ground (hotel meals,
+          in-flight meals, medical emergencies abroad). */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>🍽 Dietary Preference</div>
+          <input value={form.dietaryPreference} onChange={set('dietaryPreference')} placeholder="Veg / Jain / Vegan / Halal / None" style={inputStyle} />
+        </div>
+        <div>
+          <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>💊 Medical Notes (private)</div>
+          <input value={form.medicalNotes} onChange={set('medicalNotes')} placeholder="Allergies / meds / conditions" style={inputStyle} />
+        </div>
       </div>
 
       {/* Passport photo — for auto-filling other trip components and record-keeping */}
