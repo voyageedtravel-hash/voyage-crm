@@ -5940,6 +5940,7 @@ function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, labe
 //    is supplied, plain-text paste now routes straight into it.
 function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, summary }) {
   const fileInputRef = React.useRef(null);
+  const cameraInputRef = React.useRef(null);
   const [dragOver, setDragOver] = React.useState(false);
 
   const handlePaste = (e) => {
@@ -6016,6 +6017,29 @@ function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, s
         {multiple ? 'or choose file(s) to upload — hold Ctrl/Cmd to pick multiple' : 'or choose a file to upload'}
       </button>
       <input ref={fileInputRef} type="file" accept={accept} multiple={!!multiple} onChange={handleFileChange} disabled={extracting} style={{ display: 'none' }} />
+
+      {/* Camera capture — on Fold5 / any mobile this opens the native
+          camera app directly (with document scan / edge detection mode
+          when available). Desktop browsers usually treat capture as a
+          hint and just show a file picker, so we render this button
+          unconditionally — worst case it just acts as another file
+          picker on desktop, best case (mobile) it opens the camera. */}
+      {!extracting && (
+        <label style={{ display: 'inline-block', marginTop: 8, marginLeft: 12 }}>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+          />
+          <span style={{ background: '#0d1b3e', color: '#c9961a', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', display: 'inline-block' }}>
+            📷 Scan with camera
+          </span>
+        </label>
+      )}
+
       {summary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{summary}</div>}
     </div>
   );
@@ -8435,16 +8459,39 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
             <span style={{ fontSize: 12, color: '#6b7a99' }}>Click here, then paste (Ctrl+V) passport bio-page — or use file picker below</span>
           )}
         </div>
-        <input
-          type="file"
-          accept="image/*,.pdf"
-          onChange={(e) => {
-            const f = e.target.files && e.target.files[0];
-            if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, passportPhoto: d })));
-            e.target.value = '';
-          }}
-          style={{ fontSize: 11, marginTop: 6 }}
-        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <label style={{ flex: 1, cursor: 'pointer' }}>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, passportPhoto: d })));
+                e.target.value = '';
+              }}
+              style={{ display: 'none' }}
+            />
+            <div style={{ textAlign: 'center', padding: '6px 10px', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 6, fontSize: 11, fontWeight: 600, color: '#334e82' }}>
+              📁 Choose from gallery / file
+            </div>
+          </label>
+          <label style={{ flex: 1, cursor: 'pointer' }}>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, passportPhoto: d })));
+                e.target.value = '';
+              }}
+              style={{ display: 'none' }}
+            />
+            <div style={{ textAlign: 'center', padding: '6px 10px', background: '#0d1b3e', border: '1px solid #0d1b3e', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#c9961a' }}>
+              📷 Scan with camera
+            </div>
+          </label>
+        </div>
       </div>
 
       {/* Additional documents — visa scans, PAN, driving licence, etc. */}
@@ -8471,22 +8518,48 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
             >✕</button>
           </div>
         ))}
-        <input
-          type="file"
-          accept="image/*,.pdf"
-          multiple
-          onChange={(e) => {
-            const files = Array.from(e.target.files || []);
-            files.forEach((f) => {
-              imgToDataURL(f, (d) => setForm((prev) => ({
-                ...prev,
-                documents: [...prev.documents, { id: 'doc_' + Date.now() + Math.random().toString(36).slice(2, 6), name: f.name.replace(/\.[^.]+$/, ''), imageDataUrl: d, uploadedAt: new Date().toISOString() }],
-              })));
-            });
-            e.target.value = '';
-          }}
-          style={{ fontSize: 11, marginTop: 8 }}
-        />
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <label style={{ flex: 1, cursor: 'pointer' }}>
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                files.forEach((f) => {
+                  imgToDataURL(f, (d) => setForm((prev) => ({
+                    ...prev,
+                    documents: [...prev.documents, { id: 'doc_' + Date.now() + Math.random().toString(36).slice(2, 6), name: f.name.replace(/\.[^.]+$/, ''), imageDataUrl: d, uploadedAt: new Date().toISOString() }],
+                  })));
+                });
+                e.target.value = '';
+              }}
+              style={{ display: 'none' }}
+            />
+            <div style={{ textAlign: 'center', padding: '6px 10px', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 6, fontSize: 11, fontWeight: 600, color: '#334e82' }}>
+              📁 Upload files
+            </div>
+          </label>
+          <label style={{ flex: 1, cursor: 'pointer' }}>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) imgToDataURL(f, (d) => setForm((prev) => ({
+                  ...prev,
+                  documents: [...prev.documents, { id: 'doc_' + Date.now() + Math.random().toString(36).slice(2, 6), name: f.name.replace(/\.[^.]+$/, ''), imageDataUrl: d, uploadedAt: new Date().toISOString() }],
+                })));
+                e.target.value = '';
+              }}
+              style={{ display: 'none' }}
+            />
+            <div style={{ textAlign: 'center', padding: '6px 10px', background: '#0d1b3e', border: '1px solid #0d1b3e', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#c9961a' }}>
+              📷 Scan with camera
+            </div>
+          </label>
+        </div>
       </div>
     </ModalShell>
   );
@@ -8941,6 +9014,41 @@ function CommunicationsPanel({ deal, onDealUpdated }) {
                   <img src={form.screenshot} alt="attachment" style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4 }} />
                   <span style={{ fontSize: 10.5, color: '#059669', flex: 1 }}>Screenshot attached ✓</span>
                   <button onClick={() => setForm((f) => ({ ...f, screenshot: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11 }}>Remove</button>
+                </div>
+              )}
+              {!form.screenshot && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <label style={{ flex: 1, cursor: 'pointer' }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files && e.target.files[0];
+                        if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, screenshot: d })));
+                        e.target.value = '';
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                    <div style={{ textAlign: 'center', padding: '4px 8px', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 6, fontSize: 10.5, fontWeight: 600, color: '#334e82' }}>
+                      📁 Attach image
+                    </div>
+                  </label>
+                  <label style={{ flex: 1, cursor: 'pointer' }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        const f = e.target.files && e.target.files[0];
+                        if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, screenshot: d })));
+                        e.target.value = '';
+                      }}
+                      style={{ display: 'none' }}
+                    />
+                    <div style={{ textAlign: 'center', padding: '4px 8px', background: '#0d1b3e', border: '1px solid #0d1b3e', borderRadius: 6, fontSize: 10.5, fontWeight: 700, color: '#c9961a' }}>
+                      📷 Camera
+                    </div>
+                  </label>
                 </div>
               )}
               <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
