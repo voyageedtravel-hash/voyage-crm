@@ -8316,9 +8316,12 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
     idType: editing.idType || 'Passport', passportNo: editing.passportNo || '',
     passportIssue: editing.passportIssue || '', passportExpiry: editing.passportExpiry || '',
     nationality: editing.nationality || 'Indian',
+    passportPhoto: editing.passportPhoto || '',
+    documents: Array.isArray(editing.documents) ? editing.documents : [],
   } : {
     firstName: '', lastName: '', salutation: 'Mr', type: 'Adult', dob: '',
     idType: 'Passport', passportNo: '', passportIssue: '', passportExpiry: '', nationality: 'Indian',
+    passportPhoto: '', documents: [],
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -8409,6 +8412,81 @@ function AddTravellerModal({ deal, editing, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Nationality</div>
         <input value={form.nationality} onChange={set('nationality')} style={inputStyle} />
+      </div>
+
+      {/* Passport photo — for auto-filling other trip components and record-keeping */}
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>📷 Passport / ID Photo</div>
+        <div
+          tabIndex={0}
+          onPaste={(e) => {
+            const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+            if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, passportPhoto: d }))); }
+          }}
+          style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'text', minHeight: 44 }}
+        >
+          {form.passportPhoto ? (
+            <>
+              <img src={form.passportPhoto} alt="passport" style={{ width: 56, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+              <span style={{ fontSize: 11.5, color: '#059669', flex: 1 }}>Photo attached ✓</span>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, passportPhoto: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>Remove</button>
+            </>
+          ) : (
+            <span style={{ fontSize: 12, color: '#6b7a99' }}>Click here, then paste (Ctrl+V) passport bio-page — or use file picker below</span>
+          )}
+        </div>
+        <input
+          type="file"
+          accept="image/*,.pdf"
+          onChange={(e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) imgToDataURL(f, (d) => setForm((prev) => ({ ...prev, passportPhoto: d })));
+            e.target.value = '';
+          }}
+          style={{ fontSize: 11, marginTop: 6 }}
+        />
+      </div>
+
+      {/* Additional documents — visa scans, PAN, driving licence, etc. */}
+      <div>
+        <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>
+          📎 Other Documents ({form.documents.length})
+        </div>
+        <div style={{ fontSize: 10.5, color: '#6b7a99', marginBottom: 6 }}>
+          Old visa scans, PAN card, driving licence, sponsor's ID — anything worth keeping on file
+        </div>
+        {form.documents.map((doc, i) => (
+          <div key={doc.id || i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderBottom: '1px dashed #e3eaf7', fontSize: 11 }}>
+            {doc.imageDataUrl && <img src={doc.imageDataUrl} alt={doc.name} style={{ width: 40, height: 30, objectFit: 'cover', borderRadius: 4 }} />}
+            <input
+              value={doc.name || ''}
+              onChange={(e) => setForm((f) => ({ ...f, documents: f.documents.map((d, ix) => ix === i ? { ...d, name: e.target.value } : d) }))}
+              placeholder="Document name (e.g. UK visa 2024)"
+              style={{ ...inputStyle, padding: '4px 8px', fontSize: 11, flex: 1 }}
+            />
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, documents: f.documents.filter((_, ix) => ix !== i) }))}
+              style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 13 }}
+            >✕</button>
+          </div>
+        ))}
+        <input
+          type="file"
+          accept="image/*,.pdf"
+          multiple
+          onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            files.forEach((f) => {
+              imgToDataURL(f, (d) => setForm((prev) => ({
+                ...prev,
+                documents: [...prev.documents, { id: 'doc_' + Date.now() + Math.random().toString(36).slice(2, 6), name: f.name.replace(/\.[^.]+$/, ''), imageDataUrl: d, uploadedAt: new Date().toISOString() }],
+              })));
+            });
+            e.target.value = '';
+          }}
+          style={{ fontSize: 11, marginTop: 8 }}
+        />
       </div>
     </ModalShell>
   );
@@ -8664,6 +8742,423 @@ function OpsChecklistPanel({ deal, onDealUpdated }) {
               >+</button>
             </div>
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Feature 7: Document Alerts Panel ─────────────────────────────
+// Scans travellers + visa vendors for missing / expiring documents and
+// surfaces them before departure so agents catch problems early. No
+// alerts = collapsed 'All docs OK' badge.
+function DocumentAlertsPanel({ deal }) {
+  const alerts = React.useMemo(() => {
+    const out = [];
+    const today = new Date();
+    const parseDate = (s) => {
+      if (!s) return null;
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    // Trip departure — use first flight sector date or hotel checkIn
+    let depart = null;
+    (deal.flightVendors || []).forEach((f) => {
+      (f.sectors || []).forEach((s) => {
+        const d = parseDate(s.date);
+        if (d && (!depart || d < depart)) depart = d;
+      });
+    });
+    if (!depart) (deal.hotelVendors || []).forEach((h) => {
+      const d = parseDate(h.checkIn);
+      if (d && (!depart || d < depart)) depart = d;
+    });
+
+    // Per-traveller checks
+    (deal.travellers || []).filter((t) => !t.cancelled).forEach((t) => {
+      const name = [t.firstName, t.lastName].filter(Boolean).join(' ') || 'Traveller';
+      if (!t.passportNo) {
+        out.push({ severity: 'high', icon: '📄', msg: `${name} — Passport number missing` });
+      }
+      const expiry = parseDate(t.passportExpiry);
+      if (t.passportNo && !expiry) {
+        out.push({ severity: 'med', icon: '⏳', msg: `${name} — Passport expiry date missing` });
+      } else if (expiry) {
+        // Most countries need 6 months validity beyond return date
+        const cutoff = depart ? new Date(depart.getTime() + 180 * 86400000) : new Date(today.getTime() + 180 * 86400000);
+        if (expiry < cutoff) {
+          const daysToDeparture = depart ? Math.round((depart - today) / 86400000) : null;
+          out.push({
+            severity: expiry < today ? 'high' : 'med',
+            icon: '⚠️',
+            msg: `${name} — Passport expires ${expiry.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} (needs 6+ months validity${daysToDeparture != null ? `; trip in ${daysToDeparture} days` : ''})`,
+          });
+        }
+      }
+      if (!t.passportPhoto) {
+        out.push({ severity: 'low', icon: '📷', msg: `${name} — Passport photo not uploaded` });
+      }
+    });
+
+    // Visa expiry checks — from visa vendor entries
+    (deal.visaVendors || []).forEach((v) => {
+      if (v.visaExpiry) {
+        const exp = parseDate(v.visaExpiry);
+        if (exp && depart && exp < depart) {
+          out.push({ severity: 'high', icon: '🛂', msg: `Visa expiring ${exp.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} — before trip departure` });
+        }
+      }
+    });
+
+    return out.sort((a, b) => ({ high: 0, med: 1, low: 2 })[a.severity] - ({ high: 0, med: 1, low: 2 })[b.severity]);
+  }, [deal]);
+
+  return (
+    <div>
+      <div className="v2-side-panel-head">
+        <span className="v2-side-panel-title">
+          📋 Document Alerts <span style={{ fontSize: 10, color: alerts.length ? '#dc2626' : '#059669', fontWeight: 500, marginLeft: 4 }}>({alerts.length})</span>
+        </span>
+      </div>
+      {alerts.length === 0 ? (
+        <div style={{ fontSize: 11, color: '#059669', padding: '4px 0', fontWeight: 600 }}>✓ All traveller documents look complete</div>
+      ) : (
+        <div>
+          {alerts.map((a, i) => {
+            const bg = a.severity === 'high' ? '#fef2f2' : a.severity === 'med' ? '#fffbeb' : '#f4f7fc';
+            const border = a.severity === 'high' ? '#fecaca' : a.severity === 'med' ? '#fde68a' : '#e3eaf7';
+            const color = a.severity === 'high' ? '#991b1b' : a.severity === 'med' ? '#92400e' : '#334e82';
+            return (
+              <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 6, padding: '6px 8px', marginBottom: 6, fontSize: 11, color, lineHeight: 1.4 }}>
+                <span style={{ marginRight: 4 }}>{a.icon}</span>{a.msg}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Feature 8: Communications Panel ───────────────────────────────
+// Chronological log of client conversations across channels. Optional
+// screenshot for WhatsApp records — 'wo kya bola tha' problem solved.
+const COMM_CHANNELS = [
+  { value: 'whatsapp', label: '💬 WhatsApp', color: '#25D366' },
+  { value: 'email', label: '📧 Email', color: '#4285F4' },
+  { value: 'phone', label: '📞 Phone', color: '#c9961a' },
+  { value: 'sms', label: '💬 SMS', color: '#8b5cf6' },
+  { value: 'meeting', label: '🤝 Meeting', color: '#0d1b3e' },
+];
+
+function CommunicationsPanel({ deal, onDealUpdated }) {
+  const [expanded, setExpanded] = React.useState(true);
+  const [showForm, setShowForm] = React.useState(false);
+  const [form, setForm] = React.useState({ channel: 'whatsapp', direction: 'out', body: '', screenshot: '' });
+  const [busy, setBusy] = React.useState(false);
+  const comms = Array.isArray(deal.communications) ? deal.communications : [];
+
+  const add = async () => {
+    if (!form.body.trim() && !form.screenshot) return;
+    setBusy(true);
+    const newEntry = {
+      id: 'comm_' + Date.now(),
+      at: new Date().toISOString(),
+      by: (typeof window !== 'undefined' && window.__veUserName) || '',
+      channel: form.channel,
+      direction: form.direction,
+      body: form.body.trim(),
+      screenshot: form.screenshot || '',
+    };
+    try {
+      const updated = await patchDeal(deal._id, { communications: [...comms, newEntry] });
+      onDealUpdated && onDealUpdated(updated);
+      setForm({ channel: form.channel, direction: 'out', body: '', screenshot: '' });
+      setShowForm(false);
+      window.veToast && window.veToast('Communication logged ✓', 'success');
+    } catch (e) {
+      window.veToast && window.veToast('Could not save', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm('Delete this communication log?')) return;
+    const updated = await patchDeal(deal._id, { communications: comms.filter((c) => c.id !== id) });
+    onDealUpdated && onDealUpdated(updated);
+  };
+
+  const fmt = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+
+  const sorted = [...comms].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+  return (
+    <div>
+      <div className="v2-side-panel-head" style={{ cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
+        <span className="v2-side-panel-title">
+          💬 Communications <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, marginLeft: 4 }}>({comms.length})</span>
+        </span>
+        <span style={{ color: '#94a3b8', fontSize: 12 }}>{expanded ? '▾' : '▸'}</span>
+      </div>
+      {expanded && (
+        <>
+          {!showForm ? (
+            <button
+              onClick={() => setShowForm(true)}
+              style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 6, padding: '6px 8px', fontSize: 11, fontWeight: 600, color: '#334e82', cursor: 'pointer', marginBottom: 8 }}
+            >+ Log conversation</button>
+          ) : (
+            <div style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 6 }}>
+                <select value={form.channel} onChange={(e) => setForm((f) => ({ ...f, channel: e.target.value }))} style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}>
+                  {COMM_CHANNELS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+                <select value={form.direction} onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value }))} style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}>
+                  <option value="out">→ Sent to client</option>
+                  <option value="in">← Received from client</option>
+                </select>
+              </div>
+              <textarea
+                value={form.body}
+                onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                onPaste={(e) => {
+                  const it = Array.from(e.clipboardData.items || []).find((x) => x.type && x.type.indexOf('image') === 0);
+                  if (it) { e.preventDefault(); const f2 = it.getAsFile(); if (f2) imgToDataURL(f2, (d) => setForm((prev) => ({ ...prev, screenshot: d }))); }
+                }}
+                placeholder="Summary of the conversation — or paste a WhatsApp screenshot"
+                rows={3}
+                style={{ ...inputStyle, padding: '6px 8px', fontSize: 11, resize: 'vertical', width: '100%', fontFamily: 'inherit' }}
+              />
+              {form.screenshot && (
+                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <img src={form.screenshot} alt="attachment" style={{ width: 48, height: 36, objectFit: 'cover', borderRadius: 4 }} />
+                  <span style={{ fontSize: 10.5, color: '#059669', flex: 1 }}>Screenshot attached ✓</span>
+                  <button onClick={() => setForm((f) => ({ ...f, screenshot: '' }))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 11 }}>Remove</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button onClick={add} disabled={busy || (!form.body.trim() && !form.screenshot)} style={{ flex: 1, background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>{busy ? 'Saving…' : 'Save'}</button>
+                <button onClick={() => { setShowForm(false); setForm({ channel: 'whatsapp', direction: 'out', body: '', screenshot: '' }); }} style={{ background: '#fff', color: '#6b7a99', border: '1px solid #e3eaf7', borderRadius: 6, padding: '5px 10px', fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {sorted.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', padding: '4px 0' }}>No conversations logged yet.</div>
+          ) : (
+            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+              {sorted.map((c) => {
+                const chan = COMM_CHANNELS.find((x) => x.value === c.channel) || COMM_CHANNELS[0];
+                return (
+                  <div key={c.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e3eaf7', fontSize: 11 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: chan.color }}>{chan.label}</span>
+                      <span style={{ fontSize: 9.5, color: '#94a3b8' }}>{c.direction === 'in' ? '← in' : '→ out'}</span>
+                      <span style={{ fontSize: 9.5, color: '#94a3b8', flex: 1 }}>· {fmt(c.at)}{c.by ? ` · ${c.by}` : ''}</span>
+                      <button onClick={() => remove(c.id)} style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 12, padding: 0 }} title="Delete">✕</button>
+                    </div>
+                    {c.body && <div style={{ color: '#334e82', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.body}</div>}
+                    {c.screenshot && <img src={c.screenshot} alt="attachment" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 6, marginTop: 4 }} />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Feature 9: Team Collaboration Panel ──────────────────────────
+// Internal notes + tasks. Both hidden from client-facing outputs; visible
+// only inside the CRM to the team. Activity log stays on deal.auditLog
+// (already exists) so this panel focuses on the actionable pieces.
+function TeamCollabPanel({ deal, onDealUpdated }) {
+  const [tab, setTab] = React.useState('notes'); // notes | tasks
+  const [busy, setBusy] = React.useState(false);
+  const [noteText, setNoteText] = React.useState('');
+  const [taskForm, setTaskForm] = React.useState({ title: '', assignee: '', dueDate: '' });
+  const notes = Array.isArray(deal.internalNotes) ? deal.internalNotes : [];
+  const tasks = Array.isArray(deal.tasks) ? deal.tasks : [];
+
+  const currentUser = (typeof window !== 'undefined' && window.__veUserName) || '';
+
+  const addNote = async () => {
+    if (!noteText.trim()) return;
+    setBusy(true);
+    const entry = { id: 'note_' + Date.now(), at: new Date().toISOString(), by: currentUser, body: noteText.trim() };
+    try {
+      const updated = await patchDeal(deal._id, { internalNotes: [...notes, entry] });
+      onDealUpdated && onDealUpdated(updated);
+      setNoteText('');
+      window.veToast && window.veToast('Note added ✓', 'success');
+    } catch (e) {
+      window.veToast && window.veToast('Could not save', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeNote = async (id) => {
+    if (!window.confirm('Delete this note?')) return;
+    const updated = await patchDeal(deal._id, { internalNotes: notes.filter((n) => n.id !== id) });
+    onDealUpdated && onDealUpdated(updated);
+  };
+
+  const addTask = async () => {
+    if (!taskForm.title.trim()) return;
+    setBusy(true);
+    const entry = {
+      id: 'task_' + Date.now(), title: taskForm.title.trim(), assignee: taskForm.assignee.trim(),
+      dueDate: taskForm.dueDate, done: false, doneAt: '', doneBy: '',
+      createdAt: new Date().toISOString(), createdBy: currentUser,
+    };
+    try {
+      const updated = await patchDeal(deal._id, { tasks: [...tasks, entry] });
+      onDealUpdated && onDealUpdated(updated);
+      setTaskForm({ title: '', assignee: '', dueDate: '' });
+      window.veToast && window.veToast('Task added ✓', 'success');
+    } catch (e) {
+      window.veToast && window.veToast('Could not save', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggleTask = async (id) => {
+    const updated = tasks.map((t) => {
+      if (t.id !== id) return t;
+      const nowDone = !t.done;
+      return { ...t, done: nowDone, doneAt: nowDone ? new Date().toISOString() : '', doneBy: nowDone ? currentUser : '' };
+    });
+    const r = await patchDeal(deal._id, { tasks: updated });
+    onDealUpdated && onDealUpdated(r);
+  };
+  const removeTask = async (id) => {
+    if (!window.confirm('Delete this task?')) return;
+    const r = await patchDeal(deal._id, { tasks: tasks.filter((t) => t.id !== id) });
+    onDealUpdated && onDealUpdated(r);
+  };
+
+  const fmt = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const overdueOrDue = (task) => {
+    if (!task.dueDate || task.done) return null;
+    const due = new Date(task.dueDate);
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const days = Math.round((due - now) / 86400000);
+    if (days < 0) return { text: `Overdue ${Math.abs(days)}d`, color: '#dc2626' };
+    if (days === 0) return { text: 'Today', color: '#c9961a' };
+    if (days <= 2) return { text: `In ${days}d`, color: '#c9961a' };
+    return { text: `In ${days}d`, color: '#059669' };
+  };
+
+  const openTaskCount = tasks.filter((t) => !t.done).length;
+
+  return (
+    <div>
+      <div className="v2-side-panel-head">
+        <span className="v2-side-panel-title">
+          👥 Team <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, marginLeft: 4 }}>({notes.length} notes · {openTaskCount} open tasks)</span>
+        </span>
+      </div>
+      {/* Tab switcher */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10, borderBottom: '1px solid #e3eaf7', paddingBottom: 6 }}>
+        <button onClick={() => setTab('notes')} style={{ background: tab === 'notes' ? '#0d1b3e' : '#f4f7fc', color: tab === 'notes' ? '#fff' : '#334e82', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Notes</button>
+        <button onClick={() => setTab('tasks')} style={{ background: tab === 'tasks' ? '#0d1b3e' : '#f4f7fc', color: tab === 'tasks' ? '#fff' : '#334e82', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Tasks</button>
+      </div>
+
+      {tab === 'notes' && (
+        <>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <input
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); } }}
+              placeholder="Internal note — team can see, client can't"
+              style={{ ...inputStyle, padding: '5px 8px', fontSize: 11, flex: 1 }}
+            />
+            <button onClick={addNote} disabled={busy || !noteText.trim()} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>+</button>
+          </div>
+          {notes.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', padding: '4px 0' }}>No internal notes yet.</div>
+          ) : (
+            <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+              {[...notes].reverse().map((n) => (
+                <div key={n.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e3eaf7', fontSize: 11 }}>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 2 }}>
+                    <span style={{ fontSize: 9.5, color: '#94a3b8', flex: 1 }}>{n.by || 'Anonymous'} · {fmt(n.at)}</span>
+                    <button onClick={() => removeNote(n.id)} style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, padding: 0 }} title="Delete">✕</button>
+                  </div>
+                  <div style={{ color: '#334e82', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === 'tasks' && (
+        <>
+          <div style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+            <input
+              value={taskForm.title}
+              onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Task title"
+              style={{ ...inputStyle, padding: '4px 8px', fontSize: 11, width: '100%', marginBottom: 4 }}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 4, marginBottom: 4 }}>
+              <input
+                value={taskForm.assignee}
+                onChange={(e) => setTaskForm((f) => ({ ...f, assignee: e.target.value }))}
+                placeholder="Assignee (name)"
+                style={{ ...inputStyle, padding: '4px 8px', fontSize: 11 }}
+              />
+              <input
+                type="date"
+                value={taskForm.dueDate}
+                onChange={(e) => setTaskForm((f) => ({ ...f, dueDate: e.target.value }))}
+                style={{ ...inputStyle, padding: '4px 6px', fontSize: 11 }}
+              />
+            </div>
+            <button onClick={addTask} disabled={busy || !taskForm.title.trim()} style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', width: '100%' }}>+ Add task</button>
+          </div>
+          {tasks.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', padding: '4px 0' }}>No tasks yet.</div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+              {[...tasks].sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || String(a.dueDate).localeCompare(String(b.dueDate))).map((t) => {
+                const status = overdueOrDue(t);
+                return (
+                  <div key={t.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e3eaf7', fontSize: 11, opacity: t.done ? 0.6 : 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                      <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id)} style={{ marginTop: 2, accentColor: '#10b981', cursor: 'pointer' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: '#0d1b3e', textDecoration: t.done ? 'line-through' : 'none', fontWeight: 600 }}>{t.title}</div>
+                        <div style={{ fontSize: 9.5, color: '#94a3b8', marginTop: 2 }}>
+                          {t.assignee && <span>👤 {t.assignee}</span>}
+                          {t.dueDate && <span style={{ marginLeft: 8 }}>📅 {t.dueDate}</span>}
+                          {status && <span style={{ marginLeft: 8, color: status.color, fontWeight: 700 }}>· {status.text}</span>}
+                        </div>
+                      </div>
+                      <button onClick={() => removeTask(t.id)} style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 11, padding: 0 }} title="Delete">✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -10645,6 +11140,21 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           {/* Ops Checklist — pre-departure task tracking */}
           <div className="v2-side-card">
             <OpsChecklistPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
+          </div>
+
+          {/* Feature 7: Document alerts — missing passports, expiring visas */}
+          <div className="v2-side-card">
+            <DocumentAlertsPanel deal={deal} />
+          </div>
+
+          {/* Feature 8: Communications log — WhatsApp/email/phone conversations */}
+          <div className="v2-side-card">
+            <CommunicationsPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
+          </div>
+
+          {/* Feature 9: Team notes + tasks */}
+          <div className="v2-side-card">
+            <TeamCollabPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
           </div>
 
           {(deal.cancellations || []).length > 0 && (
