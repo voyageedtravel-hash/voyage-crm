@@ -13672,14 +13672,61 @@ export default function V2Pages() {
   // a stale banner (rendered below the header via StaleBanner) tells them
   // what they're seeing may be a few minutes behind.
   if (error && !items.length) {
+    // 401 = not logged in. In a fresh PWA install this is the very first
+    // thing the user sees — 'V1 view is still working' is confusing when
+    // they have never seen V1 either. Show a proper login CTA that hides
+    // the V2 overlay so V1's login form (which is always mounted
+    // underneath) becomes visible. After they log in, V2 re-renders
+    // automatically because handleFetch retries when the token appears.
+    const is401 = /\b401\b/.test(String(error)) || /unauthori[sz]ed/i.test(String(error));
+    if (is401) {
+      return (
+        <main className="v2-page">
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: 24, textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🔐</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#0d1b3e', marginBottom: 8 }}>Login required</div>
+            <div style={{ fontSize: 13, color: '#6b7a99', maxWidth: 340, lineHeight: 1.5, marginBottom: 20 }}>
+              Aap logged out ho — session expire ho gaya ya ye phone pe pehli baar login karna hai. Login karo, sab kuch wapas load ho jayega.
+            </div>
+            <button
+              onClick={() => {
+                // Clear the (invalid/expired) token — otherwise index.js's
+                // auth-check interval keeps deciding V2 should be visible
+                // and puts the overlay back seconds later, showing the 401
+                // error again. Clearing forces both V1 and V2 to treat the
+                // session as logged out, so V1's login screen becomes the
+                // only thing rendering.
+                try { localStorage.removeItem('token'); } catch (e) {}
+                const v2Root = document.getElementById('voyage-v2pages-root');
+                if (v2Root) v2Root.style.display = 'none';
+                // Reload — cleanest way to hand control back to V1's login
+                // flow. Without this, V1 stays in whatever state it was in
+                // and may not re-check auth until the next navigation.
+                window.location.reload();
+              }}
+              style={{ background: '#0d1b3e', color: '#c9961a', border: '2px solid #c9961a', borderRadius: 999, padding: '12px 28px', fontSize: 14, fontWeight: 800, cursor: 'pointer', boxShadow: '0 6px 20px rgba(13,27,62,.25)' }}
+            >Go to Login →</button>
+            <button
+              onClick={refetch}
+              style={{ marginTop: 12, background: 'none', border: 'none', color: '#334e82', fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+            >or retry loading</button>
+          </div>
+        </main>
+      );
+    }
+    // Non-401 errors (server down, network issue) — show original message
     return (
       <main className="v2-page">
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, padding: 24, color: '#dc2626' }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Couldn't load data</div>
           <div style={{ fontSize: 13 }}>{error}</div>
           <div style={{ fontSize: 12, marginTop: 12, color: '#6b7a99' }}>
-            V1 view is still working — turn off V2 layout to continue there.
+            Check your internet connection and try again. If the problem persists, contact support.
           </div>
+          <button
+            onClick={refetch}
+            style={{ marginTop: 12, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+          >↻ Retry</button>
         </div>
       </main>
     );
