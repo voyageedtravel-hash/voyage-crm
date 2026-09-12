@@ -12983,6 +12983,74 @@ function ReportsV2({ leads }) {
     return Object.values(byMonth).sort((a, b) => a.key.localeCompare(b.key));
   }, [bookedDeals]);
 
+  // ─── Client Dues Aging Dashboard ──────────────────────────────────
+  // Every booked deal with balance > 0, bucketed by days since the LAST
+  // event that mattered (payment received, deal edit, whichever is
+  // latest). Not by trip date — because a client may owe on a trip
+  // 3 months away, and calling those "180 days overdue" is misleading.
+  // Aging buckets follow standard AR practice: 0-30, 31-60, 61-90, 90+.
+  const clientDues = useMemo(() => {
+    const now = Date.now();
+    const withDue = leads
+      .filter((d) => !isCancelledStage(d) && balanceINR(d) > 0)
+      .map((d) => {
+        // Age from latest client payment date; fallback to deal.updatedAt/createdAt
+        const payments = (d.clientPayments || []).slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+        const lastPaymentDate = payments[0] && payments[0].date;
+        const referenceDate = lastPaymentDate || d.updatedAt || d.createdAt || new Date().toISOString();
+        const days = Math.round((now - new Date(referenceDate).getTime()) / 86400000);
+        return {
+          deal: d,
+          balance: balanceINR(d),
+          days: Math.max(0, days),
+          lastActivity: referenceDate,
+          bucket: days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+',
+        };
+      });
+    const totals = { count: withDue.length, total: withDue.reduce((s, x) => s + x.balance, 0) };
+    const byBucket = { '0-30': { count: 0, total: 0 }, '31-60': { count: 0, total: 0 }, '61-90': { count: 0, total: 0 }, '90+': { count: 0, total: 0 } };
+    withDue.forEach((x) => { byBucket[x.bucket].count++; byBucket[x.bucket].total += x.balance; });
+    return { list: withDue.sort((a, b) => b.days - a.days), totals, byBucket };
+  }, [leads]);
+
+  // ─── Vendor Payments Master Dashboard ─────────────────────────────
+  // Every vendor across every active deal with cost > payments = pending.
+  // Aggregated by vendor NAME (case-insensitive) so 'Hotel Boss Singapore'
+  // due across 4 deals shows as ONE row with 4 deal references and the
+  // combined amount — matching how the ops team actually thinks about
+  // vendor relationships when paying.
+  const vendorDues = useMemo(() => {
+    const byVendor = new Map();
+    leads
+      .filter((d) => !isCancelledStage(d))
+      .forEach((d) => {
+        dealVendors(d).forEach((v) => {
+          const name = (v.name || v.hotelName || v.airlineName || v.vendorSource || v.label || 'Unnamed').trim();
+          if (!name || name === 'Unnamed') return;
+          const cost = toINR(v.costPrice, v.currency, v.exchangeRate);
+          const paid = sumBy(v.payments, 'amount');
+          const pending = cost - paid;
+          if (pending <= 0) return;
+          const key = name.toLowerCase();
+          if (!byVendor.has(key)) byVendor.set(key, { name, deals: [], totalCost: 0, totalPaid: 0, totalPending: 0 });
+          const row = byVendor.get(key);
+          row.deals.push({ deal: d, cost, paid, pending, vendor: v });
+          row.totalCost += cost;
+          row.totalPaid += paid;
+          row.totalPending += pending;
+        });
+      });
+    const list = [...byVendor.values()].sort((a, b) => b.totalPending - a.totalPending);
+    const grand = list.reduce((s, r) => ({
+      pending: s.pending + r.totalPending,
+      cost: s.cost + r.totalCost,
+      paid: s.paid + r.totalPaid,
+      vendors: s.vendors + 1,
+      dealRefs: s.dealRefs + r.deals.length,
+    }), { pending: 0, cost: 0, paid: 0, vendors: 0, dealRefs: 0 });
+    return { list, grand };
+  }, [leads]);
+
   // ─── Cancellations analytics ──────────────────────────────────────
   const [cxRange, setCxRange] = useState('all'); // all | month | quarter | ytd
   const cancellations = useMemo(() => {
@@ -13077,6 +13145,167 @@ function ReportsV2({ leads }) {
 
       <CycleTracker leads={leads} />
       <DetailedReport leads={leads} />
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">💰 Client Dues — Aging</h3>
+          {clientDues.list.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('client-dues-aging.csv', [
+              ['Deal', 'Client', 'Phone', 'Destination', 'Balance (INR)', 'Days Since Activity', 'Bucket', 'Last Activity'],
+              ...clientDues.list.map((x) => [
+                x.deal.dealNumber || '', x.deal.clientName || '', x.deal.clientPhone || '',
+                x.deal.destination || '', x.balance, x.days, x.bucket, x.lastActivity,
+              ]),
+            ])}>⬇ Export CSV</button>
+          )}
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+          Sabhi pending payments client-wise, aging buckets ke saath. 90+ days wale sabse critical — call ya WhatsApp reminder abhi bhejo.
+        </p>
+        {clientDues.list.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#059669', padding: '20px 0', textAlign: 'center', fontWeight: 600 }}>✓ All client payments up to date — no dues pending.</div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
+              <div style={{ background: '#0d1b3e', border: '1px solid #0d1b3e', borderRadius: 10, padding: 12, color: '#fff' }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#c9a84c', letterSpacing: 1.5 }}>TOTAL PENDING</div>
+                <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>{fmtINRFull(clientDues.totals.total)}</div>
+                <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>from {clientDues.totals.count} deal{clientDues.totals.count === 1 ? '' : 's'}</div>
+              </div>
+              {['0-30', '31-60', '61-90', '90+'].map((bucket) => {
+                const b = clientDues.byBucket[bucket];
+                const critical = bucket === '90+';
+                const stale = bucket === '61-90';
+                return (
+                  <div key={bucket} style={{ background: critical ? '#fef2f2' : stale ? '#fffbeb' : '#f0f5fd', border: `1px solid ${critical ? '#fecaca' : stale ? '#fde68a' : '#c2d2ee'}`, borderRadius: 10, padding: 12 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: critical ? '#dc2626' : stale ? '#c9961a' : '#334e82', letterSpacing: 1.5 }}>{bucket} DAYS</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINR(b.total)}</div>
+                    <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>{b.count} deal{b.count === 1 ? '' : 's'}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <table className="info" style={{ width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>Deal</th>
+                  <th>Client</th>
+                  <th>Destination</th>
+                  <th style={{ textAlign: 'right' }}>Balance</th>
+                  <th style={{ textAlign: 'center' }}>Age</th>
+                  <th style={{ textAlign: 'center' }}>Bucket</th>
+                  <th style={{ textAlign: 'center' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clientDues.list.map((x, i) => {
+                  const critical = x.bucket === '90+';
+                  const stale = x.bucket === '61-90';
+                  const phone = String(x.deal.clientPhone || '').replace(/[^\d+]/g, '');
+                  const waMsg = `Hi ${x.deal.clientName || 'Sir/Ma\'am'}, gentle reminder — trip ${x.deal.destination || ''} ke liye pending payment ₹${x.balance.toLocaleString('en-IN')} hai. Please arrange at your earliest convenience. — Voyage-Ed`;
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontFamily: 'monospace', fontWeight: 700, color: '#334e82', cursor: 'pointer' }} onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('deals')}>{x.deal.dealNumber || '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{x.deal.clientName || '—'}</td>
+                      <td>{x.deal.destination || '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>{fmtINR(x.balance)}</td>
+                      <td style={{ textAlign: 'center', fontSize: 11, color: '#6b7a99' }}>{x.days}d</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ background: critical ? '#fee2e2' : stale ? '#fef3c7' : '#f0f5fd', color: critical ? '#dc2626' : stale ? '#c9961a' : '#334e82', padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700 }}>{x.bucket}</span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {phone ? (
+                          <a href={`https://wa.me/${phone.replace(/^\+/, '')}?text=${encodeURIComponent(waMsg)}`} target="_blank" rel="noopener noreferrer" style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer', textDecoration: 'none', display: 'inline-block' }}>💬 WhatsApp</a>
+                        ) : <span style={{ color: '#94a3b8', fontSize: 10 }}>No phone</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
+
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">🏦 Vendor Payments — Master</h3>
+          {vendorDues.list.length > 0 && (
+            <button className="v2-view-all" onClick={() => downloadCSV('vendor-payments-pending.csv', [
+              ['Vendor', 'Deals Count', 'Total Cost (INR)', 'Paid (INR)', 'Pending (INR)'],
+              ...vendorDues.list.map((v) => [v.name, v.deals.length, v.totalCost, v.totalPaid, v.totalPending]),
+            ])}>⬇ Export CSV</button>
+          )}
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+          Sabhi active deals ke pending vendor payments ek jagah, vendor-wise consolidated. Cash flow planning aur vendor relationships dono ke liye.
+        </p>
+        {vendorDues.list.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#059669', padding: '20px 0', textAlign: 'center', fontWeight: 600 }}>✓ All vendors paid up — no pending vendor payments.</div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#dc2626', letterSpacing: 1.5 }}>TOTAL PENDING</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINRFull(vendorDues.grand.pending)}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>across {vendorDues.grand.vendors} vendor{vendorDues.grand.vendors === 1 ? '' : 's'}</div>
+              </div>
+              <div style={{ background: '#f0f5fd', border: '1px solid #c2d2ee', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#334e82', letterSpacing: 1.5 }}>TOTAL COST</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINRFull(vendorDues.grand.cost)}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>quoted by vendors</div>
+              </div>
+              <div style={{ background: '#d1fae5', border: '1px solid #10b981', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#065f46', letterSpacing: 1.5 }}>ALREADY PAID</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{fmtINRFull(vendorDues.grand.paid)}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>{Math.round(vendorDues.grand.paid / (vendorDues.grand.cost || 1) * 100)}% of cost</div>
+              </div>
+              <div style={{ background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, color: '#c9961a', letterSpacing: 1.5 }}>DEAL REFERENCES</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', marginTop: 4 }}>{vendorDues.grand.dealRefs}</div>
+                <div style={{ fontSize: 10, color: '#6b7a99', marginTop: 2 }}>vendor-deal links pending</div>
+              </div>
+            </div>
+            <table className="info" style={{ width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th style={{ textAlign: 'center' }}>Deals</th>
+                  <th style={{ textAlign: 'right' }}>Total Cost</th>
+                  <th style={{ textAlign: 'right' }}>Paid</th>
+                  <th style={{ textAlign: 'right' }}>Pending</th>
+                  <th style={{ textAlign: 'center' }}>Progress</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vendorDues.list.map((v, i) => {
+                  const pct = v.totalCost > 0 ? Math.round(v.totalPaid / v.totalCost * 100) : 0;
+                  return (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 700, color: '#0d1b3e' }}>
+                        {v.name}
+                        <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400, marginTop: 2 }}>
+                          {v.deals.slice(0, 3).map((d) => d.deal.dealNumber || '—').join(', ')}{v.deals.length > 3 ? ` + ${v.deals.length - 3} more` : ''}
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 700 }}>{v.deals.length}</td>
+                      <td style={{ textAlign: 'right', color: '#6b7a99' }}>{fmtINR(v.totalCost)}</td>
+                      <td style={{ textAlign: 'right', color: '#059669', fontWeight: 600 }}>{fmtINR(v.totalPaid)}</td>
+                      <td style={{ textAlign: 'right', color: '#dc2626', fontWeight: 700 }}>{fmtINR(v.totalPending)}</td>
+                      <td style={{ textAlign: 'center', minWidth: 120 }}>
+                        <div style={{ background: '#f4f7fc', borderRadius: 8, height: 6, position: 'relative', overflow: 'hidden' }}>
+                          <div style={{ background: pct >= 100 ? '#10b981' : pct >= 50 ? '#c9961a' : '#dc2626', width: pct + '%', height: '100%', transition: 'width 200ms' }} />
+                        </div>
+                        <div style={{ fontSize: 9.5, color: '#6b7a99', marginTop: 2, fontWeight: 700 }}>{pct}% paid</div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       <div className="v2-panel" style={{ marginBottom: 24 }}>
         <div className="v2-panel-header">
