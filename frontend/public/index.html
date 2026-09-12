@@ -119,35 +119,114 @@
     </div>
 
     <script>
-      // Register the service worker as soon as the page loads. Failure is
-      // silent — the CRM works fine without it, PWA just doesn't install.
+      // Service worker registration + auto-reload on new deploy.
+      // Without the reload step, users kept seeing stale bundles for
+      // days because Chrome's default is to wait until every tab is
+      // closed before activating a new SW.
       if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
         window.addEventListener('load', function () {
           navigator.serviceWorker.register('/sw.js').then(function (reg) {
-            // When a new service worker takes over, force a reload so the user
-            // sees the latest CRM version. Without this, PWAs can serve
-            // stale JS bundles for weeks after a deploy.
-            if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            // Ping the SW to check for updates on every load — makes new
+            // deploys visible on the next open, not days later.
+            reg.update().catch(function () {});
+
+            // When a new SW finishes installing behind the current one,
+            // tell it to skipWaiting so it activates immediately.
+            function promptNewSW() {
+              if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+            if (reg.waiting) promptNewSW();
             reg.addEventListener('updatefound', function () {
-              var newWorker = reg.installing;
-              if (!newWorker) return;
-              newWorker.addEventListener('statechange', function () {
-                if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
-                  // Silent — reload will happen on next navigation naturally.
+              var nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', function () {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  promptNewSW();
                 }
               });
+            });
+
+            // When the new SW takes control, force one reload so the
+            // page runs the fresh JS bundle. Guard against reload loops
+            // by only reloading if we haven't already just reloaded.
+            var reloaded = false;
+            navigator.serviceWorker.addEventListener('controllerchange', function () {
+              if (reloaded) return;
+              reloaded = true;
+              window.location.reload();
             });
           }).catch(function () { /* silent */ });
         });
       }
 
-      // Capture the install prompt so we can show a custom "Install App"
-      // button somewhere in the CRM later if needed. For now we just log
-      // — user installs via Chrome menu > Install App.
+      // Capture install prompt so we can show a custom button.
       window.addEventListener('beforeinstallprompt', function (e) {
         e.preventDefault();
         window.__veInstallPrompt = e;
+        // Dispatch a custom event so React (or the fallback DOM button
+        // below) can react and reveal the install button.
+        window.dispatchEvent(new CustomEvent('ve-install-available'));
       });
+      window.addEventListener('appinstalled', function () {
+        window.__veInstallPrompt = null;
+        var btn = document.getElementById('ve-install-btn');
+        if (btn) btn.remove();
+      });
+
+      // Floating "Install App" button — only shown when browser has
+      // fired beforeinstallprompt AND we're not already running as a
+      // standalone PWA. Cleaner UX than digging through Chrome's menu.
+      function veShowInstallBtn() {
+        if (window.matchMedia('(display-mode: standalone)').matches) return;
+        if (document.getElementById('ve-install-btn')) return;
+        var btn = document.createElement('button');
+        btn.id = 've-install-btn';
+        btn.innerHTML = '📱 Install App';
+        btn.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:9999;background:#0d1b3e;color:#c9961a;border:2px solid #c9961a;border-radius:999px;padding:12px 20px;font-size:13px;font-weight:800;letter-spacing:.5px;cursor:pointer;box-shadow:0 6px 20px rgba(13,27,62,.35);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+        btn.onclick = function () {
+          if (!window.__veInstallPrompt) {
+            alert('Install nahi ho pa raha — Chrome menu (three dots top-right) → "Install app" try karo, ya browser refresh karke dobara try karo.');
+            return;
+          }
+          window.__veInstallPrompt.prompt();
+          window.__veInstallPrompt.userChoice.then(function (choice) {
+            if (choice.outcome === 'accepted') {
+              btn.remove();
+              window.__veInstallPrompt = null;
+            }
+          });
+        };
+        document.body.appendChild(btn);
+      }
+      window.addEventListener('ve-install-available', veShowInstallBtn);
+      // Also try after a short delay in case the event already fired
+      // before this handler was attached.
+      setTimeout(function () {
+        if (window.__veInstallPrompt) veShowInstallBtn();
+      }, 1500);
+
+      // ─── Nuclear reset ──────────────────────────────────────────────
+      // A "Force Refresh" mechanism for when a broken SW or wrong-cache
+      // scenario has trapped the user in stale content. Triple-tap the
+      // Voyage-Ed logo splash area (or add ?reset=1 to any URL) and it
+      // wipes every service worker + every cache, then hard-reloads.
+      window.veHardReset = async function () {
+        try {
+          if ('serviceWorker' in navigator) {
+            var regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }
+          if ('caches' in window) {
+            var keys = await caches.keys();
+            await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }
+        } catch (e) {}
+        // Force network reload, no cache
+        window.location.replace(window.location.pathname + '?_freshload=' + Date.now());
+      };
+      if (/[?&]reset=1/.test(window.location.search)) {
+        window.veHardReset();
+      }
     </script>
   </body>
 </html>

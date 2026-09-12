@@ -35,8 +35,13 @@ if (typeof window !== 'undefined') {
 }
 
 function initVoyagePages() {
-  // Only mount if logged in (token exists) — else V1 login screen shows
-  const isV2Pages = () => localStorage.getItem('voyage:v2pages') === 'on';
+  // Only mount if logged in (token exists) — else V1 login screen shows.
+  //
+  // Default is now ON — check is 'not explicitly off' rather than
+  // 'explicitly on'. So a fresh install / new user / cleared browser gets
+  // V2 immediately. Someone who explicitly toggled V2 OFF (localStorage
+  // value === 'off') still gets V1, preserving their choice.
+  const isV2Pages = () => localStorage.getItem('voyage:v2pages') !== 'off';
 
   const container = document.createElement('div');
   container.id = 'voyage-v2pages-root';

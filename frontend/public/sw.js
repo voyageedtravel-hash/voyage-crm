@@ -1,64 +1,66 @@
-// Voyage-Ed CRM service worker
+// Voyage-Ed CRM service worker — v4 (aggressive freshness)
 //
-// Purpose: enable install-to-home-screen behaviour and give a minimal
-// offline shell (last-visited page + brand icons) so the app opens even
-// when Fold5 is on flaky airport wifi. This is NOT a full offline CRM
-// — API calls still need network, but the app frame loads instantly
-// from cache and shows a friendly "offline, retrying…" state rather
-// than Chrome's dinosaur.
+// Two rules:
+// 1. NEVER serve stale index.html / bundle JS — those are network-first
+//    with a 6-second timeout. Old data reports were fixed here.
+// 2. Static assets (icons, fonts, hero images) may be cached long-term.
+//
+// SKIP_WAITING messaging so a new SW takes over immediately, plus a
+// controllerchange trigger in index.html reloads the page one time
+// when the fresh SW activates — no stale bundles surviving across
+// deploys.
 
-const CACHE_VERSION = 'voyage-ed-v3';
+const CACHE_VERSION = 'voyage-ed-v5';
 const OFFLINE_URL = '/index.html';
 
-// Shell assets — always kept in cache
 const SHELL = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  '/', '/index.html', '/manifest.json',
+  '/icon-192.png', '/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_VERSION);
-    // addAll is atomic — if any request fails the whole install fails,
-    // so use individual adds and swallow errors. On a fresh deploy some
-    // paths may 404 briefly; better to install and heal on next fetch.
     await Promise.all(SHELL.map((url) => cache.add(url).catch(() => null)));
+    // Skip waiting immediately so the new SW activates as soon as possible.
     self.skipWaiting();
   })());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // Clean up caches from previous SW versions.
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
 
+// Allow the page to tell us to skip waiting (used when a new SW is
+// installed while the current page is still open — index.html sends
+// SKIP_WAITING so the new SW takes over without the user re-launching).
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Never cache API calls, POST requests, or cross-origin requests —
-  // CRM data must always be fresh from the backend.
   if (req.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
 
-  // Navigation requests (page loads) — try network first with fast timeout,
-  // fall back to cached index.html so the app opens offline.
+  // Navigation requests — always network-first with 6s timeout, fallback
+  // to cached offline shell only when actually offline.
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
         const network = await Promise.race([
-          fetch(req),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 3000)),
+          fetch(req, { cache: 'no-store' }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 6000)),
         ]);
-        // Update cache in the background
         const cache = await caches.open(CACHE_VERSION);
         cache.put(OFFLINE_URL, network.clone()).catch(() => {});
         return network;
@@ -70,9 +72,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets — cache-first with background update (stale-while-revalidate).
-  // Fold5 users open the app dozens of times a day; near-zero-latency loads
-  // matter more than always-fresh CSS bundles.
+  // JS/CSS bundles — network-first too. CRA bundles have content-hash
+  // filenames so a new deploy always has different URLs; still, if the
+  // browser requests a NAME we don't recognise (new hash), we must go
+  // to network. Never serve a stale hashed bundle by mistake.
+  if (/\.(js|css)$/.test(url.pathname)) {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(req);
+        if (res && res.status === 200) {
+          const cache = await caches.open(CACHE_VERSION);
+          cache.put(req, res.clone()).catch(() => {});
+        }
+        return res;
+      } catch (e) {
+        const cache = await caches.open(CACHE_VERSION);
+        const cached = await cache.match(req);
+        return cached || new Response('Offline', { status: 503 });
+      }
+    })());
+    return;
+  }
+
+  // Everything else (icons, fonts, hero images) — cache-first, background
+  // update. Long-lived static assets, safe to cache.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_VERSION);
     const cached = await cache.match(req);

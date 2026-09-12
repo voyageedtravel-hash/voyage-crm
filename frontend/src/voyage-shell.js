@@ -69,7 +69,7 @@ function Sidebar() {
     // When V2 Pages overlay is on, the sidebar's active state is driven by
     // handleNavClick + the 'voyage:nav' events, not by reading V1's DOM
     // (which sits hidden underneath the overlay).
-    if (localStorage.getItem('voyage:v2pages') === 'on') return;
+    if (localStorage.getItem('voyage:v2pages') !== 'off') return;
 
     // Look at document title / URL / visible h1 to guess screen
     const h1 = document.querySelector('h1');
@@ -123,7 +123,7 @@ function Sidebar() {
 
     // When V2 Pages overlay is active, route within it via a custom event
     // instead of hunting for V1 DOM buttons hidden underneath the overlay.
-    const v2PagesOn = localStorage.getItem('voyage:v2pages') === 'on';
+    const v2PagesOn = localStorage.getItem('voyage:v2pages') !== 'off';
     if (v2PagesOn) {
       const v2Routable = {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
