@@ -3657,6 +3657,433 @@ const HOTEL_VOUCHER_TC = [
   'Full cancellation charges are applicable on early check-out unless otherwise specified.',
 ];
 
+// ─── Visa Cover Letter Generator ─────────────────────────────────
+// Country-wise embassy formats. Each template is a function that takes
+// a filled-in context object (client, travellers, itinerary, flights,
+// hotels, dates) and returns the Word-compatible HTML body. Common
+// placeholders like [OCCUPATION], [SPONSOR NAME], [PURPOSE CONTEXT] are
+// deliberately left in the output so the agent can search-replace them
+// in Word before sending — those live on the client's profile, not on
+// the trip, so the CRM can't auto-fill them without a full client-
+// context module. The download is served as an .doc file with
+// application/msword MIME type so Word opens it directly and the agent
+// can save-as .docx after editing.
+
+const VISA_COVER_LETTER_DEFAULTS = {
+  // Fallback country label -> template key mapping. Extended in the
+  // resolver below with fuzzy match on deal.destination.
+  turkey: 'turkiye', türkiye: 'turkiye', turkiye: 'turkiye',
+  france: 'schengen', germany: 'schengen', italy: 'schengen', spain: 'schengen',
+  netherlands: 'schengen', switzerland: 'schengen', austria: 'schengen',
+  belgium: 'schengen', greece: 'schengen', portugal: 'schengen',
+  'czech republic': 'schengen', czechia: 'schengen', hungary: 'schengen',
+  poland: 'schengen', denmark: 'schengen', norway: 'schengen',
+  sweden: 'schengen', finland: 'schengen', iceland: 'schengen',
+  europe: 'schengen',
+  uk: 'uk', 'united kingdom': 'uk', england: 'uk', britain: 'uk',
+  usa: 'usa', 'united states': 'usa', america: 'usa',
+  uae: 'uae', dubai: 'uae', 'abu dhabi': 'uae',
+  thailand: 'thailand', bangkok: 'thailand', phuket: 'thailand',
+  singapore: 'singapore',
+  vietnam: 'vietnam', hanoi: 'vietnam',
+  malaysia: 'malaysia', 'kuala lumpur': 'malaysia',
+  indonesia: 'indonesia', bali: 'indonesia',
+  japan: 'japan', tokyo: 'japan',
+  australia: 'australia', sydney: 'australia',
+  'sri lanka': 'srilanka', srilanka: 'srilanka',
+};
+
+const pickCoverLetterKey = (deal) => {
+  const dest = String(deal.destination || '').toLowerCase().trim();
+  if (!dest) return 'generic';
+  // Try full match first, then word-by-word
+  if (VISA_COVER_LETTER_DEFAULTS[dest]) return VISA_COVER_LETTER_DEFAULTS[dest];
+  for (const key of Object.keys(VISA_COVER_LETTER_DEFAULTS)) {
+    if (dest.includes(key)) return VISA_COVER_LETTER_DEFAULTS[key];
+  }
+  return 'generic';
+};
+
+// Country-specific recipients + subject lines. The body itself follows a
+// common structure — differences are mainly the recipient block, the
+// country name usage, and small wording tweaks per embassy convention.
+const VISA_COVER_LETTER_META = {
+  turkiye: {
+    label: 'Türkiye Tourist Visa',
+    recipient: 'The Visa Officer\nConsulate General of the Republic of Türkiye',
+    country: 'Republic of Türkiye',
+    subject: 'Cover Letter for Tourist Visa Application',
+    visaType: 'Tourist Visa',
+    countryShort: 'Türkiye',
+    returnCity: 'Türkiye',
+  },
+  schengen: {
+    label: 'Schengen Tourist Visa',
+    recipient: 'The Visa Officer\nEmbassy / Consulate General\n[EMBASSY CITY]',
+    country: 'Schengen area',
+    subject: 'Cover Letter for Schengen Short-Stay Tourist Visa Application',
+    visaType: 'Schengen Short-Stay (Type C) Tourist Visa',
+    countryShort: 'the Schengen area',
+    returnCity: 'the Schengen area',
+  },
+  uk: {
+    label: 'UK Standard Visitor Visa',
+    recipient: 'The Entry Clearance Officer\nUK Visas and Immigration',
+    country: 'United Kingdom',
+    subject: 'Cover Letter for UK Standard Visitor Visa Application',
+    visaType: 'UK Standard Visitor Visa',
+    countryShort: 'the United Kingdom',
+    returnCity: 'the United Kingdom',
+  },
+  usa: {
+    label: 'US B-1/B-2 Visitor Visa',
+    recipient: 'The Consular Officer\nConsulate General of the United States of America',
+    country: 'United States of America',
+    subject: 'Cover Letter for B-1/B-2 Visitor Visa Application',
+    visaType: 'B-1/B-2 Visitor Visa',
+    countryShort: 'the United States',
+    returnCity: 'the United States',
+  },
+  uae: {
+    label: 'UAE Tourist Visa',
+    recipient: 'The Visa Officer\nConsulate General of the United Arab Emirates',
+    country: 'United Arab Emirates',
+    subject: 'Cover Letter for UAE Tourist Visa Application',
+    visaType: 'UAE Tourist Visa',
+    countryShort: 'the UAE',
+    returnCity: 'the UAE',
+  },
+  thailand: {
+    label: 'Thailand Tourist Visa',
+    recipient: 'The Visa Officer\nRoyal Thai Embassy / Consulate General',
+    country: 'Kingdom of Thailand',
+    subject: 'Cover Letter for Thailand Tourist Visa Application',
+    visaType: 'Thailand Tourist Visa',
+    countryShort: 'Thailand',
+    returnCity: 'Thailand',
+  },
+  singapore: {
+    label: 'Singapore Tourist Visa',
+    recipient: 'The Visa Officer\nHigh Commission of the Republic of Singapore',
+    country: 'Republic of Singapore',
+    subject: 'Cover Letter for Singapore Tourist Visa Application',
+    visaType: 'Singapore Tourist Visa',
+    countryShort: 'Singapore',
+    returnCity: 'Singapore',
+  },
+  vietnam: {
+    label: 'Vietnam Tourist Visa',
+    recipient: 'The Visa Officer\nEmbassy of the Socialist Republic of Vietnam',
+    country: 'Socialist Republic of Vietnam',
+    subject: 'Cover Letter for Vietnam Tourist Visa Application',
+    visaType: 'Vietnam Tourist Visa',
+    countryShort: 'Vietnam',
+    returnCity: 'Vietnam',
+  },
+  malaysia: {
+    label: 'Malaysia Tourist Visa',
+    recipient: 'The Visa Officer\nHigh Commission of Malaysia',
+    country: 'Malaysia',
+    subject: 'Cover Letter for Malaysia Tourist Visa Application',
+    visaType: 'Malaysia Tourist Visa',
+    countryShort: 'Malaysia',
+    returnCity: 'Malaysia',
+  },
+  indonesia: {
+    label: 'Indonesia Tourist Visa',
+    recipient: 'The Visa Officer\nConsulate General of the Republic of Indonesia',
+    country: 'Republic of Indonesia',
+    subject: 'Cover Letter for Indonesia Tourist Visa Application',
+    visaType: 'Indonesia Tourist Visa',
+    countryShort: 'Indonesia',
+    returnCity: 'Indonesia',
+  },
+  japan: {
+    label: 'Japan Tourist Visa',
+    recipient: 'The Visa Officer\nEmbassy of Japan',
+    country: 'Japan',
+    subject: 'Cover Letter for Japan Tourist Visa Application',
+    visaType: 'Japan Tourist Visa',
+    countryShort: 'Japan',
+    returnCity: 'Japan',
+  },
+  australia: {
+    label: 'Australia Visitor Visa',
+    recipient: 'The Visa Officer\nAustralian High Commission',
+    country: 'Australia',
+    subject: 'Cover Letter for Australia Visitor (Subclass 600) Visa Application',
+    visaType: 'Australia Visitor (Subclass 600) Visa',
+    countryShort: 'Australia',
+    returnCity: 'Australia',
+  },
+  srilanka: {
+    label: 'Sri Lanka ETA',
+    recipient: 'The Visa Officer\nHigh Commission of the Democratic Socialist Republic of Sri Lanka',
+    country: 'Sri Lanka',
+    subject: 'Cover Letter for Sri Lanka ETA Application',
+    visaType: 'Sri Lanka Electronic Travel Authorization (ETA)',
+    countryShort: 'Sri Lanka',
+    returnCity: 'Sri Lanka',
+  },
+  generic: {
+    label: 'Tourist Visa',
+    recipient: 'The Visa Officer\nEmbassy / Consulate General\n[EMBASSY NAME]',
+    country: '[DESTINATION COUNTRY]',
+    subject: 'Cover Letter for Tourist Visa Application',
+    visaType: 'Tourist Visa',
+    countryShort: '[DESTINATION]',
+    returnCity: '[DESTINATION]',
+  },
+};
+
+// Extract itinerary details from deal — dates, cities, flights, hotels.
+function buildCoverLetterContext(deal, primaryTraveller) {
+  const t = primaryTraveller || (deal.travellers && deal.travellers[0]) || {};
+  const fullName = [t.salutation, t.firstName, t.lastName].filter(Boolean).join(' ').trim() || deal.clientName || '[APPLICANT NAME]';
+  const passportNo = t.passportNo || '[PASSPORT NUMBER]';
+  const nationality = t.nationality || 'Indian';
+
+  // Flight dates → outbound + return
+  const allSectors = [];
+  (deal.flightVendors || []).forEach((f) => {
+    (f.sectors || []).forEach((s) => allSectors.push({ ...s, isReturn: false }));
+    (f.returnSectors || []).forEach((s) => allSectors.push({ ...s, isReturn: true }));
+  });
+  const outbound = allSectors.filter((s) => !s.isReturn).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const returnLegs = allSectors.filter((s) => s.isReturn).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const firstFlight = outbound[0] || {};
+  const lastReturn = returnLegs[returnLegs.length - 1] || allSectors[allSectors.length - 1] || {};
+
+  const fmtDate = (d) => {
+    if (!d) return '[DATE]';
+    try {
+      return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+    } catch { return d; }
+  };
+
+  const departureDate = fmtDate(firstFlight.date);
+  const returnDate = fmtDate(lastReturn.date);
+  const departureRoute = firstFlight.fromName || firstFlight.from
+    ? `${firstFlight.fromName || firstFlight.from} to ${firstFlight.toName || firstFlight.to}`
+    : `[DEPARTURE CITY] to [ARRIVAL CITY]`;
+  const returnRoute = lastReturn.fromName || lastReturn.from
+    ? `${lastReturn.fromName || lastReturn.from} to ${lastReturn.toName || lastReturn.to}`
+    : `[RETURN CITY] to [HOME CITY]`;
+
+  // Cities visited from hotels + destination
+  const cities = new Set();
+  (deal.hotelVendors || []).forEach((h) => { if (h.city) cities.add(h.city); });
+  if (deal.destination && cities.size === 0) cities.add(deal.destination);
+  const citiesList = [...cities].join(', ') || '[DESTINATION]';
+
+  // Companion travellers
+  const companions = (deal.travellers || []).filter((tr) => tr !== t && !tr.cancelled);
+
+  return {
+    deal, t, fullName, passportNo, nationality,
+    departureDate, returnDate, departureRoute, returnRoute, citiesList,
+    companions, outbound, returnLegs, fmtDate,
+  };
+}
+
+// Build the .doc HTML — one common structure with per-country tweaks.
+function buildVisaCoverLetterHTML(deal, opts) {
+  const key = (opts && opts.templateKey) || pickCoverLetterKey(deal);
+  const meta = VISA_COVER_LETTER_META[key] || VISA_COVER_LETTER_META.generic;
+  const primaryTraveller = (deal.travellers || [])[opts && opts.travellerIndex ? opts.travellerIndex : 0];
+  const ctx = buildCoverLetterContext(deal, primaryTraveller);
+
+  const highlight = (txt) => `<span style="background:#fff59d;color:#0d1b3e;font-weight:bold">${txt}</span>`;
+
+  // Flight details block
+  const flightRows = ctx.outbound.map((s) => {
+    return `<tr><td style="padding:4px 8px;border:1px solid #ccc"><b>Outbound</b></td><td style="padding:4px 8px;border:1px solid #ccc">${ctx.fmtDate(s.date)}</td><td style="padding:4px 8px;border:1px solid #ccc">${s.fromName || s.from || '—'} → ${s.toName || s.to || '—'}</td><td style="padding:4px 8px;border:1px solid #ccc">${s.airlineName || s.airlineCode || '—'}</td></tr>`;
+  }).join('');
+  const returnRows = ctx.returnLegs.map((s) => {
+    return `<tr><td style="padding:4px 8px;border:1px solid #ccc"><b>Return</b></td><td style="padding:4px 8px;border:1px solid #ccc">${ctx.fmtDate(s.date)}</td><td style="padding:4px 8px;border:1px solid #ccc">${s.fromName || s.from || '—'} → ${s.toName || s.to || '—'}</td><td style="padding:4px 8px;border:1px solid #ccc">${s.airlineName || s.airlineCode || '—'}</td></tr>`;
+  }).join('');
+
+  // Hotel details block
+  const hotelRows = (deal.hotelVendors || []).map((h) => {
+    return `<tr><td style="padding:4px 8px;border:1px solid #ccc">${h.hotelName || '—'}</td><td style="padding:4px 8px;border:1px solid #ccc">${h.city || '—'}</td><td style="padding:4px 8px;border:1px solid #ccc">${ctx.fmtDate(h.checkIn)}</td><td style="padding:4px 8px;border:1px solid #ccc">${ctx.fmtDate(h.checkOut)}</td></tr>`;
+  }).join('');
+
+  // Companion section
+  const companionText = ctx.companions.length > 0
+    ? `<p>I will be travelling ${ctx.companions.length === 1 ? 'with' : 'along with'} ${ctx.companions.map((c) => {
+        const name = [c.salutation, c.firstName, c.lastName].filter(Boolean).join(' ');
+        const rel = c._relationship || '[RELATIONSHIP]';
+        const nat = c.nationality || 'Indian';
+        const pp = c.passportNo ? ` (Passport No: ${c.passportNo})` : '';
+        return `<b>${name}</b>${pp}, ${rel}, ${nat} citizen`;
+      }).join('; ')}.</p>`
+    : '';
+
+  // Documents list — derive from what's actually in the deal
+  const docsList = ['Passport copy'];
+  if ((deal.flightVendors || []).length > 0) docsList.push('Flight reservations');
+  if ((deal.hotelVendors || []).length > 0) docsList.push('Hotel bookings');
+  if ((deal.insuranceVendors || []).length > 0) docsList.push('Travel insurance');
+  docsList.push('Sponsor letter and financial documents ' + highlight('[UPDATE IF DIFFERENT]'));
+  docsList.push('Bank statements (last 6 months) ' + highlight('[APPLICANT / SPONSOR]'));
+  docsList.push('ITR / Form 16 (last 2-3 years) ' + highlight('[APPLICANT / SPONSOR]'));
+  docsList.push('Employment / education proof ' + highlight('[EDIT AS PER OCCUPATION]'));
+  docsList.push('Other supporting documents as required');
+
+  const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>Visa Cover Letter — ${escHtml(ctx.fullName)}</title>
+<xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml>
+<style>
+  body { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; color: #000; }
+  h1, h2, h3 { font-family: Arial, sans-serif; }
+  p { margin: 0 0 10pt 0; }
+  table { border-collapse: collapse; margin: 10pt 0; }
+  .placeholder { background: #fff59d; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<p style="text-align:right"><b>Date:</b> ${todayStr}</p>
+
+<p><b>To,</b><br>
+${meta.recipient.replace(/\n/g, '<br>')}</p>
+
+<p><b>Subject: ${meta.subject}</b></p>
+
+<p>Dear Sir/Madam,</p>
+
+<p>My name is <b>${escHtml(ctx.fullName)}</b> (Passport No.: <b>${escHtml(ctx.passportNo)}</b>), an <b>${escHtml(ctx.nationality)}</b> citizen, and I am writing to respectfully apply for a <b>${meta.visaType}</b> to visit ${meta.countryShort}.</p>
+
+<p>The purpose of my visit is purely <b>tourism</b>. ${highlight('[PURPOSE CONTEXT — e.g. explore rich history, culture, architecture and natural beauty; visit specific attractions]')}. During my visit, I intend to travel to <b>${escHtml(ctx.citiesList)}</b>.</p>
+
+${companionText}
+
+<p><b>Occupation / Background:</b> ${highlight('[OCCUPATION — e.g. Software Engineer at XYZ Pvt Ltd / MBBS graduate preparing for NEET-PG / Business owner running ABC Enterprises]')}. ${highlight('[ADDITIONAL PROFESSIONAL CONTEXT — leaves approved, exam schedule, ties to home country, etc.]')}</p>
+
+<p><b>Travel Itinerary:</b></p>
+<ul>
+  <li><b>Departure:</b> ${escHtml(ctx.departureRoute)} — <b>${ctx.departureDate}</b></li>
+  <li><b>Return:</b> ${escHtml(ctx.returnRoute)} — <b>${ctx.returnDate}</b></li>
+</ul>
+
+${flightRows || returnRows ? `<p><b>Flight Bookings:</b></p>
+<table>
+<thead><tr>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Leg</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Date</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Route</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Airline</th>
+</tr></thead>
+<tbody>${flightRows}${returnRows}</tbody>
+</table>` : ''}
+
+${hotelRows ? `<p><b>Hotel Bookings:</b></p>
+<table>
+<thead><tr>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Hotel</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">City</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Check-in</th>
+  <th style="padding:4px 8px;border:1px solid #ccc;background:#f0f5fd">Check-out</th>
+</tr></thead>
+<tbody>${hotelRows}</tbody>
+</table>` : ''}
+
+<p><b>Financial Sponsorship:</b> The entire cost of my visit — including airfare, accommodation, travel insurance, local transportation and all other travel-related expenses — will be ${highlight('[FULLY SELF-FUNDED / FULLY SPONSORED BY MY PARENTS / SPONSORED BY MY EMPLOYER — CHOOSE ONE]')}.</p>
+
+<p>${highlight('[SPONSOR DETAILS — Name, relationship, occupation, and passport / ID number of the sponsor(s). Attach signed sponsor letter and their financial documents.]')}</p>
+
+<p>I am fully aware that my future ${highlight('[EDUCATION / CAREER / BUSINESS]')} is based in India, and I have every intention of returning to India immediately after completing my holiday. ${highlight('[ADDITIONAL RETURN-INTENT CONTEXT — property owned, family, ongoing job/course, etc.]')}</p>
+
+<p>I am enclosing all the required supporting documents, including:</p>
+<ul>
+${docsList.map((d) => `<li>${d}</li>`).join('')}
+</ul>
+
+<p>I respectfully request you to kindly consider my application and grant me a <b>${meta.visaType}</b> for the above-mentioned travel. I assure you that I shall fully comply with the immigration laws of ${meta.country} and return to India within the validity of my visa.</p>
+
+<p>Should you require any further information or documentation, I would be happy to provide the same.</p>
+
+<p>Thank you for your time and kind consideration.</p>
+
+<p>Yours faithfully,</p>
+
+<br><br>
+
+<p><b>${escHtml(ctx.fullName)}</b><br>
+Passport No.: <b>${escHtml(ctx.passportNo)}</b><br>
+${highlight('[CONTACT NUMBER]')}<br>
+${highlight('[EMAIL ADDRESS]')}</p>
+
+<hr style="margin-top:20pt">
+<p style="font-size:9pt;color:#666;font-style:italic">
+Yellow-highlighted text = <b>please replace before printing</b>. Occupation, sponsor, purpose context, contact and return-intent details are client-specific and must be filled in Word. Everything else has been auto-populated from the Voyage-Ed CRM (deal ${escHtml(deal.dealNumber || '')}).
+</p>
+
+</body>
+</html>`;
+}
+
+// Trigger a .doc file download for the given deal.
+function downloadVisaCoverLetter(deal, opts) {
+  const html = buildVisaCoverLetterHTML(deal, opts);
+  const blob = new Blob([html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const key = (opts && opts.templateKey) || pickCoverLetterKey(deal);
+  const meta = VISA_COVER_LETTER_META[key] || VISA_COVER_LETTER_META.generic;
+  const clientLast = ((deal.travellers && deal.travellers[0] && deal.travellers[0].lastName) || deal.clientName || 'Applicant').replace(/[^a-zA-Z0-9]/g, '');
+  a.download = `Visa-Cover-Letter-${clientLast}-${meta.label.replace(/\s+/g, '-')}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+}
+
+const DEFAULT_OPS_CHECKLIST = [
+  { id: 'passport_received', label: '📄 Passport received from client', category: 'visa' },
+  { id: 'visa_form_filled', label: '📝 Visa application filled', category: 'visa' },
+  { id: 'cover_letter_drafted', label: '✉️ Cover letter drafted', category: 'visa' },
+  { id: 'sponsor_letter_signed', label: '💰 Sponsor letter signed', category: 'visa' },
+  { id: 'financial_docs_collected', label: '🏦 Financial docs collected', category: 'visa' },
+  { id: 'visa_appointment_booked', label: '📅 Visa appointment booked', category: 'visa' },
+  { id: 'visa_submitted', label: '🛂 Visa submitted', category: 'visa' },
+  { id: 'visa_approved', label: '✅ Visa approved', category: 'visa' },
+  { id: 'flight_booked', label: '✈️ Flight tickets booked', category: 'travel' },
+  { id: 'flight_shared', label: '📤 Flight PNR shared with client', category: 'travel' },
+  { id: 'hotel_voucher_issued', label: '🏨 Hotel voucher issued', category: 'travel' },
+  { id: 'hotel_voucher_shared', label: '📤 Hotel voucher shared with client', category: 'travel' },
+  { id: 'insurance_issued', label: '🛡 Travel insurance issued', category: 'travel' },
+  { id: 'insurance_shared', label: '📤 Insurance policy shared with client', category: 'travel' },
+  { id: 'transfers_arranged', label: '🚗 Local transfers arranged', category: 'onground' },
+  { id: 'trip_manager_assigned', label: '👤 Trip manager assigned + on WhatsApp', category: 'onground' },
+  { id: 'briefing_done', label: '📣 Pre-departure briefing done', category: 'onground' },
+];
+
+// Merge default items with any custom items and any saved 'done' state.
+// Preserves order of the default list, then appends custom items at end.
+const opsChecklistForDeal = (deal) => {
+  const saved = Array.isArray(deal.opsChecklist) ? deal.opsChecklist : [];
+  const savedById = new Map(saved.map((s) => [s.id, s]));
+  const merged = DEFAULT_OPS_CHECKLIST.map((def) => {
+    const s = savedById.get(def.id) || {};
+    return { ...def, done: !!s.done, doneAt: s.doneAt || '', doneBy: s.doneBy || '' };
+  });
+  // Append custom items (items in saved that aren't in DEFAULT_OPS_CHECKLIST)
+  const defaultIds = new Set(DEFAULT_OPS_CHECKLIST.map((d) => d.id));
+  saved.filter((s) => !defaultIds.has(s.id)).forEach((s) => {
+    merged.push({
+      id: s.id, label: s.label || 'Custom task', category: s.category || 'custom',
+      done: !!s.done, doneAt: s.doneAt || '', doneBy: s.doneBy || '',
+      custom: true,
+    });
+  });
+  return merged;
+};
+
 function buildVouchersHTMLV2(deal, opts) {
   const o = { hotel: true, land: true, flight: true, ...(opts || {}) };
   const hotels = o.hotel ? (deal.hotelVendors || []).filter((h) => h.hotelName) : [];
@@ -8066,6 +8493,183 @@ function ScanTravellerModal({ deal, onClose, onSaved }) {
 // kis reference se), matching V1's flight/hotel/land vendor cards. Rendered
 // below the progress bar inside each vendor card. Delete works via a single
 // patchDeal that rewrites the vendor's payments array.
+// ─── Ops Checklist Panel ───────────────────────────────────────────
+// Pre-departure task tracking. Grouped by category (Visa / Travel /
+// On-ground / Custom). Cover letter button lives here too since it's the
+// one task the CRM can do automatically — clicking it downloads the Word
+// doc AND auto-ticks the 'Cover letter drafted' item.
+function OpsChecklistPanel({ deal, onDealUpdated }) {
+  const [busy, setBusy] = React.useState(false);
+  const [customText, setCustomText] = React.useState('');
+  const [expanded, setExpanded] = React.useState(true);
+  const items = opsChecklistForDeal(deal);
+  const doneCount = items.filter((i) => i.done).length;
+  const pct = items.length > 0 ? Math.round(doneCount / items.length * 100) : 0;
+
+  const persist = async (nextItems) => {
+    setBusy(true);
+    try {
+      // Save minimal shape — id, done, doneAt, doneBy, plus label+category for custom items
+      const persist = nextItems.map((i) => {
+        const base = { id: i.id, done: !!i.done, doneAt: i.doneAt || '', doneBy: i.doneBy || '' };
+        if (i.custom) { base.label = i.label; base.category = i.category; base.custom = true; }
+        return base;
+      });
+      const updated = await patchDeal(deal._id, { opsChecklist: persist });
+      onDealUpdated && onDealUpdated(updated);
+    } catch (e) {
+      window.veToast && window.veToast('Could not save checklist', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = async (id) => {
+    const nextItems = items.map((i) => {
+      if (i.id !== id) return i;
+      const nowDone = !i.done;
+      return { ...i, done: nowDone, doneAt: nowDone ? new Date().toISOString() : '', doneBy: nowDone ? ((typeof window !== 'undefined' && window.__veUserName) || '') : '' };
+    });
+    await persist(nextItems);
+  };
+
+  const addCustom = async () => {
+    const label = customText.trim();
+    if (!label) return;
+    const id = 'custom_' + Date.now();
+    const next = [...items, { id, label, category: 'custom', done: false, doneAt: '', doneBy: '', custom: true }];
+    setCustomText('');
+    await persist(next);
+  };
+
+  const removeCustom = async (id) => {
+    if (!window.confirm('Remove this checklist item?')) return;
+    const next = items.filter((i) => i.id !== id);
+    await persist(next);
+  };
+
+  // Cover letter click: download + auto-tick 'Cover letter drafted'
+  const generateCoverLetter = async (templateKey) => {
+    downloadVisaCoverLetter(deal, { templateKey });
+    // Auto-tick the checklist item
+    const already = items.find((i) => i.id === 'cover_letter_drafted');
+    if (already && !already.done) await toggle('cover_letter_drafted');
+    window.veToast && window.veToast('Cover letter downloaded ✓', 'success');
+  };
+
+  // Group items by category for cleaner display
+  const groups = [
+    { key: 'visa', label: '🛂 Visa', color: '#334e82' },
+    { key: 'travel', label: '✈️ Travel', color: '#0d4f8b' },
+    { key: 'onground', label: '🌍 On-ground', color: '#059669' },
+    { key: 'custom', label: '📌 Custom', color: '#c9961a' },
+  ];
+
+  const templateKey = pickCoverLetterKey(deal);
+  const templateMeta = VISA_COVER_LETTER_META[templateKey] || VISA_COVER_LETTER_META.generic;
+
+  return (
+    <div>
+      <div className="v2-side-panel-head" style={{ cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
+        <span className="v2-side-panel-title">
+          🗒 Ops Checklist <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, marginLeft: 4 }}>({doneCount}/{items.length})</span>
+        </span>
+        <span style={{ color: '#94a3b8', fontSize: 12 }}>{expanded ? '▾' : '▸'}</span>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ height: 6, background: '#f4f7fc', borderRadius: 3, overflow: 'hidden', marginBottom: 10 }}>
+        <div style={{ height: '100%', width: pct + '%', background: pct === 100 ? '#10b981' : pct >= 50 ? '#c9961a' : '#334e82', transition: 'width 200ms' }} />
+      </div>
+      <div style={{ fontSize: 10, color: '#6b7a99', marginBottom: 12, textAlign: 'center' }}>
+        {pct}% complete {pct === 100 && '🎉'}
+      </div>
+
+      {expanded && (
+        <>
+          {/* Cover letter quick action */}
+          <div style={{ background: '#f0f5fd', border: '1px solid #c2d2ee', borderRadius: 8, padding: 10, marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#334e82', letterSpacing: 1, marginBottom: 6 }}>✉️ VISA COVER LETTER</div>
+            <div style={{ fontSize: 10.5, color: '#6b7a99', marginBottom: 8 }}>
+              Auto-detected: <b>{templateMeta.label}</b>. Client name, passport, itinerary, flights, hotels auto-filled. Yellow highlights = fill in Word.
+            </div>
+            <button
+              onClick={() => generateCoverLetter(templateKey)}
+              disabled={busy}
+              style={{ width: '100%', background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}
+            >⬇ Download Word Doc</button>
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ fontSize: 10, color: '#334e82', cursor: 'pointer', fontWeight: 600 }}>Change country template</summary>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 6 }}>
+                {Object.entries(VISA_COVER_LETTER_META).map(([k, m]) => (
+                  <button
+                    key={k}
+                    onClick={() => generateCoverLetter(k)}
+                    disabled={busy}
+                    style={{ background: k === templateKey ? '#334e82' : '#fff', color: k === templateKey ? '#fff' : '#334e82', border: '1px solid #c2d2ee', borderRadius: 4, padding: '4px 6px', fontSize: 9.5, fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                  >{m.label}</button>
+                ))}
+              </div>
+            </details>
+          </div>
+
+          {/* Grouped items */}
+          {groups.map((g) => {
+            const groupItems = items.filter((i) => i.category === g.key);
+            if (groupItems.length === 0) return null;
+            return (
+              <div key={g.key} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 800, color: g.color, letterSpacing: 1.5, marginBottom: 4 }}>{g.label}</div>
+                {groupItems.map((i) => (
+                  <label
+                    key={i.id}
+                    style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '4px 0', cursor: busy ? 'wait' : 'pointer', fontSize: 11.5, color: i.done ? '#94a3b8' : '#0d1b3e', textDecoration: i.done ? 'line-through' : 'none' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={i.done}
+                      onChange={() => toggle(i.id)}
+                      disabled={busy}
+                      style={{ marginTop: 2, cursor: busy ? 'wait' : 'pointer', accentColor: '#10b981' }}
+                    />
+                    <span style={{ flex: 1, lineHeight: 1.4 }}>{i.label}</span>
+                    {i.custom && (
+                      <button
+                        onClick={(e) => { e.preventDefault(); removeCustom(i.id); }}
+                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                        title="Remove"
+                      >✕</button>
+                    )}
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+
+          {/* Add custom item */}
+          <div style={{ borderTop: '1px dashed #d4e0f5', paddingTop: 8, marginTop: 10 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.5, marginBottom: 4 }}>+ ADD CUSTOM TASK</div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+                placeholder="e.g. Meet & greet at Delhi airport"
+                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11, flex: 1 }}
+              />
+              <button
+                onClick={addCustom}
+                disabled={busy || !customText.trim()}
+                style={{ background: '#0d1b3e', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}
+              >+</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
   // Hooks must run unconditionally — no early returns before this. React
   // enforces hook order per component render; a bail-out earlier would make
@@ -10036,6 +10640,11 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             <button className="v2-ai-cta" onClick={askAI} disabled={aiLoading}>
               {aiLoading ? '⏳ Thinking…' : '+ Ask AI about this deal'}
             </button>
+          </div>
+
+          {/* Ops Checklist — pre-departure task tracking */}
+          <div className="v2-side-card">
+            <OpsChecklistPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
           </div>
 
           {(deal.cancellations || []).length > 0 && (
