@@ -13310,6 +13310,82 @@ function ReportsV2({ leads }) {
 
   // ─── Cancellations analytics ──────────────────────────────────────
   const [cxRange, setCxRange] = useState('all'); // all | month | quarter | ytd
+
+  // ─── Booking Calendar ─────────────────────────────────────────────
+  // Extract trip departure + return dates from every active deal. Feeds
+  // a scrollable month calendar so ops team can see 'kaunsa client kab
+  // ja raha hai' at a glance — visa deadlines, hotel checkins, flight
+  // departures all in one view. Departure priority: first flight sector
+  // date, then first hotel checkIn, then travelDates parse fallback.
+  const [calMonth, setCalMonth] = useState(() => {
+    const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const parseFirstDate = (text) => {
+    if (!text) return null;
+    const s = String(text).toLowerCase()
+      .replace(/(\d+)(st|nd|rd|th)\b/g, '$1')
+      .replace(/[''`]/g, ' ').replace(/[,·•]/g, ' ').replace(/\s+/g, ' ').trim();
+    const M = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12 };
+    const patterns = [
+      /(\d{4})-(\d{1,2})-(\d{1,2})/, /(\d{1,2})[\s/-]([a-z]{3,9})[\s/-](\d{4})/,
+      /([a-z]{3,9})[\s/-](\d{1,2})[\s/-](\d{4})/, /(\d{1,2})[/-](\d{1,2})[/-](\d{4})/,
+    ];
+    for (const p of patterns) {
+      const m = s.match(p);
+      if (!m) continue;
+      let y, mo, day;
+      if (p === patterns[0]) { y = +m[1]; mo = +m[2]; day = +m[3]; }
+      else if (p === patterns[1]) { y = +m[3]; mo = M[m[2]]; day = +m[1]; }
+      else if (p === patterns[2]) { y = +m[3]; mo = M[m[1]]; day = +m[2]; }
+      else { y = +m[3]; mo = +m[2]; day = +m[1]; }
+      if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31 && y >= 2000 && y <= 2100) return new Date(y, mo - 1, day);
+    }
+    return null;
+  };
+  const calendarEvents = useMemo(() => {
+    const events = [];
+    leads.filter((d) => !isCancelledStage(d)).forEach((d) => {
+      // Find primary departure date
+      let dep = null;
+      (d.flightVendors || []).forEach((f) => {
+        (f.sectors || []).forEach((s) => {
+          if (s.date) {
+            const parsed = new Date(s.date);
+            if (!isNaN(parsed) && (!dep || parsed < dep)) dep = parsed;
+          }
+        });
+      });
+      if (!dep) (d.hotelVendors || []).forEach((h) => {
+        if (h.checkIn) {
+          const parsed = new Date(h.checkIn);
+          if (!isNaN(parsed) && (!dep || parsed < dep)) dep = parsed;
+        }
+      });
+      if (!dep && d.travelDates) dep = parseFirstDate(d.travelDates);
+      if (!dep) return;
+
+      // Find return date (last flight return or last hotel checkout)
+      let ret = null;
+      (d.flightVendors || []).forEach((f) => {
+        (f.returnSectors || []).forEach((s) => {
+          if (s.date) {
+            const parsed = new Date(s.date);
+            if (!isNaN(parsed) && (!ret || parsed > ret)) ret = parsed;
+          }
+        });
+      });
+      if (!ret) (d.hotelVendors || []).forEach((h) => {
+        if (h.checkOut) {
+          const parsed = new Date(h.checkOut);
+          if (!isNaN(parsed) && (!ret || parsed > ret)) ret = parsed;
+        }
+      });
+
+      events.push({ deal: d, departure: dep, return: ret, stage: stageOf(d) });
+    });
+    return events.sort((a, b) => a.departure - b.departure);
+  }, [leads]);
+
   const cancellations = useMemo(() => {
     // Only fully-cancelled deals with a cancellation record. Deals that
     // just got moved to stage 'Cancelled' without going through the modal
@@ -13562,6 +13638,115 @@ function ReportsV2({ leads }) {
             </table>
           </>
         )}
+      </div>
+
+      {/* Booking Calendar — monthly grid of all upcoming trip departures */}
+      <div className="v2-panel" style={{ marginBottom: 24 }}>
+        <div className="v2-panel-header">
+          <h3 className="v2-panel-title">📅 Booking Calendar</h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              onClick={() => setCalMonth((m) => {
+                const d = new Date(m.year, m.month - 1, 1); return { year: d.getFullYear(), month: d.getMonth() };
+              })}
+              style={{ background: '#f4f7fc', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, color: '#334e82', cursor: 'pointer' }}
+            >‹ Prev</button>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#0d1b3e', minWidth: 130, textAlign: 'center' }}>
+              {new Date(calMonth.year, calMonth.month, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+            </div>
+            <button
+              onClick={() => setCalMonth((m) => {
+                const d = new Date(m.year, m.month + 1, 1); return { year: d.getFullYear(), month: d.getMonth() };
+              })}
+              style={{ background: '#f4f7fc', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, color: '#334e82', cursor: 'pointer' }}
+            >Next ›</button>
+            <button
+              onClick={() => setCalMonth(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })}
+              style={{ background: '#0d1b3e', color: '#c9961a', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+            >Today</button>
+          </div>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7a99', marginTop: -12, marginBottom: 16 }}>
+          Sabhi upcoming trips ek monthly view mein — kaunsa client kab jaa raha hai. Dots stage se colored (booked green, quoted blue, etc.).
+        </p>
+        {(() => {
+          const firstDay = new Date(calMonth.year, calMonth.month, 1);
+          const startDayOfWeek = firstDay.getDay();
+          const daysInMonth = new Date(calMonth.year, calMonth.month + 1, 0).getDate();
+          const today = new Date(); today.setHours(0, 0, 0, 0);
+
+          // Group departures by day of this month
+          const byDay = {};
+          calendarEvents.forEach((ev) => {
+            const dep = ev.departure;
+            if (dep.getFullYear() === calMonth.year && dep.getMonth() === calMonth.month) {
+              const d = dep.getDate();
+              if (!byDay[d]) byDay[d] = [];
+              byDay[d].push(ev);
+            }
+          });
+
+          const stageColor = (stage) => {
+            const s = String(stage || '').toLowerCase();
+            if (/booked|completed/.test(s)) return '#10b981';
+            if (/quoted|negotiat/.test(s)) return '#3b82f6';
+            if (/contact/.test(s)) return '#c9961a';
+            return '#94a3b8';
+          };
+
+          const cells = [];
+          // Leading blanks for start-day-of-week offset (Sunday=0)
+          for (let i = 0; i < startDayOfWeek; i++) {
+            cells.push(<div key={`blank-${i}`} style={{ background: '#f8fafd', borderRadius: 6, minHeight: 72 }} />);
+          }
+          for (let d = 1; d <= daysInMonth; d++) {
+            const dayDate = new Date(calMonth.year, calMonth.month, d);
+            const isToday = dayDate.getTime() === today.getTime();
+            const evs = byDay[d] || [];
+            cells.push(
+              <div key={d} style={{
+                background: isToday ? '#fef3c7' : '#fff',
+                border: `1px solid ${isToday ? '#fbbf24' : '#e3eaf7'}`,
+                borderRadius: 6, padding: 6, minHeight: 72, display: 'flex', flexDirection: 'column', gap: 3,
+                position: 'relative',
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: isToday ? '#92400e' : '#94a3b8', textAlign: 'right' }}>{d}</div>
+                {evs.slice(0, 3).map((ev, i) => (
+                  <div
+                    key={i}
+                    title={`${ev.deal.clientName || 'Client'} → ${ev.deal.destination || 'trip'}`}
+                    style={{ background: stageColor(ev.stage), color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 4px', borderRadius: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}
+                    onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('deals')}
+                  >
+                    {ev.deal.clientName || 'Client'} · {ev.deal.destination || '—'}
+                  </div>
+                ))}
+                {evs.length > 3 && (
+                  <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 600 }}>+{evs.length - 3} more</div>
+                )}
+              </div>
+            );
+          }
+          return (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+                  <div key={d} style={{ fontSize: 10, fontWeight: 800, color: '#334e82', textAlign: 'center', padding: '4px 0', letterSpacing: 1 }}>{d}</div>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>{cells}</div>
+              <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 12, fontSize: 10.5, color: '#6b7a99', flexWrap: 'wrap' }}>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#10b981', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Booked/Completed</span>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#3b82f6', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Quoted/Negotiation</span>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#c9961a', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Contacted</span>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#94a3b8', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />Other</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 10, textAlign: 'center' }}>
+                {calendarEvents.filter((ev) => ev.departure.getFullYear() === calMonth.year && ev.departure.getMonth() === calMonth.month).length} departures this month
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <div className="v2-panel" style={{ marginBottom: 24 }}>
