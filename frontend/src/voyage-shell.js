@@ -30,8 +30,8 @@ const NAV_SECTIONS = [
   {
     title: 'Sales',
     items: [
-      { key: 'leads', label: 'Leads', icon: '◐', match: /lead|enquir/i },
-      { key: 'deals', label: 'Deals', icon: '◈', match: /deal/i },
+      { key: 'leads', label: 'Queries', icon: '◐', match: /lead|enquir|quer/i },
+      { key: 'deals', label: 'Bookings', icon: '◈', match: /deal|booking/i },
       { key: 'clients', label: 'Clients', icon: '◑', match: /client/i },
       { key: 'proposals', label: 'Proposals', icon: '◒', match: /proposal|quote|quotation/i },
     ],

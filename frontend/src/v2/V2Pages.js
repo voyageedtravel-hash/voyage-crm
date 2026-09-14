@@ -912,7 +912,7 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
         </div>
         <div className="v2-header-actions">
           <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
-          <button className="v2-cta" onClick={() => setShowNewLead(true)} style={{ fontSize: 12, background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', fontWeight: 800 }} title="Naye client ki enquiry banao — turant deal detail me jump kar jaoge">✨ New Deal</button>
+          <button className="v2-cta" onClick={() => setShowNewLead(true)} style={{ fontSize: 12, background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', fontWeight: 800 }} title="Naye client ki query banao — turant booking detail me jump kar jaoge">✨ New Query</button>
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
           <button className="v2-cta" onClick={() => setShowDues(true)} style={{ fontSize: 12, background: '#b91c1c' }} title="Vendor dues jinke liye paisa dena baaki hai">💸 Dues</button>
           <button className="v2-cta" onClick={() => window.__voyagePagesNav && window.__voyagePagesNav('reports')} style={{ fontSize: 12, background: '#334e82' }}>📊 Reports</button>
@@ -1309,7 +1309,7 @@ function NewLeadModal({ onClose, onCreated, allLeads }) {
     >
       <div style={{ background: '#fff', borderRadius: 18, width: 480, maxWidth: '100%', maxHeight: '90vh', overflow: 'auto', boxShadow: '0 24px 64px rgba(15,35,80,.35)' }}>
         <div style={{ padding: '22px 26px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>+ New Lead</h3>
+          <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>+ New Query</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
         </div>
         <div style={{ padding: '22px 26px', display: 'grid', gap: 14 }}>
@@ -1606,14 +1606,14 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
 
       <div className="v2-page-header">
         <div>
-          <h1 className="v2-page-title">{isDealsMode ? 'Deals' : 'Leads'}</h1>
+          <h1 className="v2-page-title">{isDealsMode ? 'Bookings' : 'Queries'}</h1>
           <p className="v2-page-sub">
             {isDealsMode ? 'Every confirmed booking — past and upcoming' : 'Manage every enquiry from first contact to booking'}
           </p>
         </div>
         {!isDealsMode && (
           <div className="v2-header-actions">
-            <button className="v2-cta" onClick={() => setShowNewLead(true)}>+ New Lead</button>
+            <button className="v2-cta" onClick={() => setShowNewLead(true)}>+ New Query</button>
           </div>
         )}
       </div>
@@ -7400,8 +7400,22 @@ function AddPaymentModal({ deal, editing, onClose, onSaved }) {
         updated = await patchDeal(deal._id, { clientPayments: next });
         window.veToast && window.veToast('Payment updated ✓', 'success');
       } else {
-        updated = await patchDeal(deal._id, { clientPayments: [...(deal.clientPayments || []), pmt] });
-        window.veToast && window.veToast('Payment recorded ✓', 'success');
+        // Auto-convert Query → Booking on first payment recorded. Payment =
+        // commitment = booked. Only trigger for early-stage deals; if agent
+        // has already moved to Booked/Completed/Cancelled manually, leave
+        // the stage alone (respects intent — e.g. someone recording a late
+        // top-up payment on an already-completed trip shouldn't get bumped
+        // back to Booked).
+        const earlyStage = /^(new lead|contacted|quoted|negotiation)$/i.test(String(deal.stage || ''));
+        const patch = { clientPayments: [...(deal.clientPayments || []), pmt] };
+        let autoBookedMsg = '';
+        if (earlyStage) {
+          patch.stage = 'Booked';
+          patch.auditLog = [...(deal.auditLog || []), logEntryStatic(`Auto-booked on first payment recorded (was: ${deal.stage})`)];
+          autoBookedMsg = ' · moved to Booked';
+        }
+        updated = await patchDeal(deal._id, patch);
+        window.veToast && window.veToast('Payment recorded ✓' + autoBookedMsg, 'success');
       }
       onSaved(updated);
     } catch (e) {
@@ -10769,7 +10783,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
                   <>
                     {!isBookedStage(deal) && (
                       <button className="v2-acc-btn-sm" disabled={busy} onClick={() => changeStage('Booked', `Mark ${clientName(deal)}'s deal as Booked?`)}>
-                        ◆ Convert to Deal
+                        ◆ Convert to Booking
                       </button>
                     )}
                     {stageOf(deal) !== 'Cancelled' && (
