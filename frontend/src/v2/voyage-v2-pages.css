@@ -2198,3 +2198,34 @@
   background: linear-gradient(135deg, #b78d38 0%, #a37d2f 100%);
   color: #fff;
 }
+
+/* ─── Payments tab full-width mode ─────────────────────────────────
+   When Payments tab is active on a deal, the v2-deal-layout grid
+   collapses to single column and the payment cards span full width.
+   These rules make the internal spacing and typography scale up so it
+   doesn't feel like a compressed sidebar card blown up to full width. */
+.v2-deal-layout[style*="1fr"] > div:last-child > .v2-side-card {
+  padding: 28px 32px;
+  margin-bottom: 20px;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-side-panel-title {
+  font-size: 14px;
+  letter-spacing: 1.5px;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-schedule-row {
+  padding: 16px 0;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-schedule-milestone {
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-schedule-date {
+  font-size: 12.5px;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-schedule-amount-val {
+  font-size: 18px;
+}
+.v2-deal-layout[style*="1fr"] > div:last-child .v2-schedule-status {
+  font-size: 10.5px;
+  padding: 3px 10px;
+}
