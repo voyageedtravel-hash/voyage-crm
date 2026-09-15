@@ -9643,6 +9643,64 @@ function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
 
   useEffect(() => { setDeal(initialDeal); }, [initialDeal]);
 
+  // Sidebar visibility control — when a deal is open, hide the sidebar
+  // to give the deal full width (especially valuable on Fold5's cover
+  // screen). Restore on unmount so navigating back to Dashboard/Queries/
+  // Reports sees the sidebar again as normal.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'hide' } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'show' } }));
+    };
+  }, []);
+
+  // Swipe-from-left-edge gesture — opens sidebar as drawer overlay. Only
+  // fires when the touch STARTS in the leftmost 20px and moves right by
+  // at least 40px. Backdrop tap closes it. Fold5 users are already used
+  // to this Samsung native gesture, so it fits muscle memory.
+  useEffect(() => {
+    let startX = null;
+    let startY = null;
+    const onStart = (e) => {
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      if (t.clientX < 20) { startX = t.clientX; startY = t.clientY; }
+      else { startX = null; }
+    };
+    const onMove = (e) => {
+      if (startX == null) return;
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - startX;
+      const dy = Math.abs(t.clientY - startY);
+      if (dx > 40 && dy < 60) {
+        window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'drawer' } }));
+        startX = null;
+      }
+    };
+    const onEnd = () => { startX = null; };
+    // Also close drawer when the backdrop (::before pseudo-element) is
+    // tapped. The backdrop is a body pseudo-element so we listen for taps
+    // above the body but outside the sidebar itself.
+    const onBackdropClick = (e) => {
+      if (!document.body.classList.contains('ve-sidebar-drawer')) return;
+      const sidebar = document.getElementById('ve-sidebar');
+      if (sidebar && !sidebar.contains(e.target)) {
+        window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'close' } }));
+      }
+    };
+    document.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('touchmove', onMove, { passive: true });
+    document.addEventListener('touchend', onEnd, { passive: true });
+    document.addEventListener('click', onBackdropClick, true);
+    return () => {
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('click', onBackdropClick, true);
+    };
+  }, []);
+
   const handleSaved = (updated) => {
     // Modals each save their own specific field (flightVendors, clientPayments,
     // etc) via patchDeal before calling this — figure out a human label from
@@ -10316,7 +10374,20 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
 
   return (
     <main className="v2-page">
-      <div className="v2-crumb">
+      <div className="v2-crumb" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'drawer' } }))}
+          title="Menu — full navigation drawer"
+          aria-label="Open navigation menu"
+          style={{ background: '#0d1b3e', color: '#c9961a', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 16, fontWeight: 800, cursor: 'pointer', lineHeight: 1 }}
+        >☰</button>
+        <button
+          type="button"
+          onClick={() => { window.dispatchEvent(new CustomEvent('ve-sidebar-toggle', { detail: { mode: 'show' } })); if (window.__voyagePagesNav) window.__voyagePagesNav('dashboard'); }}
+          title="Back to Dashboard"
+          style={{ background: '#f4f7fc', color: '#0d1b3e', border: '1px solid #c2d2ee', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+        >← Dashboard</button>
         <button
           type="button"
           className="v2-crumb-link"

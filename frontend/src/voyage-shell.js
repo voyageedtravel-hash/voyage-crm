@@ -197,8 +197,36 @@ function Sidebar() {
     if (action) action();
   }, []);
 
+  // Listen for V2's request to hide/show/toggle the sidebar. When a deal
+  // opens in V2 we want the deal to take the full screen (especially on
+  // Fold5's cover screen — the sidebar was eating ~200px of the tiny
+  // viewport). V2 dispatches ve-sidebar-toggle events with mode:
+  //   'hide'    → collapse the sidebar entirely (deal is open)
+  //   'show'    → restore normal state (deal closed / back to dashboard)
+  //   'drawer'  → temporarily overlay it over the deal (hamburger tap)
+  //   'close'   → close the drawer (tap outside / after nav click)
+  useEffect(() => {
+    const handler = (e) => {
+      const mode = e.detail && e.detail.mode;
+      if (mode === 'hide') document.body.classList.add('ve-sidebar-hidden');
+      if (mode === 'show') { document.body.classList.remove('ve-sidebar-hidden'); document.body.classList.remove('ve-sidebar-drawer'); }
+      if (mode === 'drawer') document.body.classList.add('ve-sidebar-drawer');
+      if (mode === 'close') document.body.classList.remove('ve-sidebar-drawer');
+    };
+    window.addEventListener('ve-sidebar-toggle', handler);
+    return () => window.removeEventListener('ve-sidebar-toggle', handler);
+  }, []);
+
   return (
-    <aside className="v-sidebar" role="navigation" aria-label="Main navigation">
+    <aside id="ve-sidebar" className="v-sidebar" role="navigation" aria-label="Main navigation" onClick={(e) => {
+      // If sidebar is in drawer-overlay mode, tapping any nav item should
+      // close the drawer. Detect nav clicks by looking for the button
+      // ancestor with a data-key attribute.
+      if (document.body.classList.contains('ve-sidebar-drawer')) {
+        const btn = e.target.closest('button[data-nav-key]');
+        if (btn) document.body.classList.remove('ve-sidebar-drawer');
+      }
+    }}>
       <div className="v-sb-brand">
         <div className="v-sb-brand-mark">V</div>
         <div className="v-sb-brand-text">
@@ -217,6 +245,7 @@ function Sidebar() {
                 className={`v-sb-item ${activeKey === item.key ? 'active' : ''}`}
                 onClick={() => handleNavClick(item.key)}
                 type="button"
+                data-nav-key={item.key}
               >
                 <span className="v-sb-item-icon">{item.icon}</span>
                 <span className="v-sb-item-label">{item.label}</span>

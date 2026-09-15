@@ -288,3 +288,44 @@ body.v-has-sidebar .body {
     padding-left: 0;
   }
 }
+
+/* ─── V2 deal-open sidebar behaviour ─────────────────────────────────
+   When V2 dispatches ve-sidebar-toggle {mode:'hide'} (deal opens), the
+   sidebar collapses out of view and the main content reclaims full width.
+   Fold5 cover screen benefits most — extra 200px for the deal content.
+   {mode:'drawer'} temporarily overlays the sidebar back for the hamburger
+   / swipe-from-edge open, with a backdrop so tap-outside closes it. */
+
+body.ve-sidebar-hidden .v-sidebar {
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+}
+body.ve-sidebar-hidden.v-has-sidebar,
+body.ve-sidebar-hidden .voyage-shell-main {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+body.ve-sidebar-hidden #root > .voyage-shell,
+body.ve-sidebar-hidden .voyage-shell {
+  grid-template-columns: 0 1fr !important;
+}
+
+/* Drawer mode: sidebar overlays the deal like a mobile drawer */
+body.ve-sidebar-drawer .v-sidebar {
+  position: fixed !important;
+  top: 0; left: 0; bottom: 0;
+  width: 280px;
+  z-index: 9998;
+  transform: translateX(0) !important;
+  box-shadow: 6px 0 24px rgba(0,0,0,0.35);
+  transition: transform 200ms ease;
+}
+body.ve-sidebar-drawer::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 27, 62, 0.55);
+  z-index: 9997;
+  animation: veSidebarBackdropIn 200ms ease;
+}
+@keyframes veSidebarBackdropIn { from { opacity: 0; } to { opacity: 1; } }
