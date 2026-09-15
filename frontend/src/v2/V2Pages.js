@@ -10928,10 +10928,11 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           )}
 
           {/* Vendors — Flights, Trains, Hotels, Visas, Land, Cruise,
-              Insurance, Custom Services all live in Operations tab.
-              Per user request, vendor sections themselves stay as-is,
-              only their tab home changes. */}
-          {dealTab === 'operations' && (<>
+              Insurance sections. These are the deal's core sold-content
+              ('kya sell ho raha hai') so they belong on the Sales front
+              page alongside travellers and stay options — not in Ops
+              which is meant for internal task/checklist workflow. */}
+          {dealTab === 'sales' && (<>
           {/* Flights */}
           <div className="v2-acc">
             <div className="v2-acc-head">
