@@ -2229,3 +2229,53 @@
   font-size: 10.5px;
   padding: 3px 10px;
 }
+
+/* ─── Payment rows in one line on full-width mode ─────────────────
+   Current row structure is nested: left div has (description above
+   date), right div has (amount above status) + 3 action buttons. On
+   full-width the empty vertical space makes it look 'distorted' as
+   Vishal called it. These rules flatten each nested block into an
+   inline row so the whole thing reads as a single line:
+     [Description  •  Date]  [Amount  PAID]  [✏️ 🧾 ✕]  */
+
+@media (min-width: 700px) {
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row {
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  /* Left block — put description and date on one line, separated by dot */
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row > div:first-child {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row > div:first-child .v2-schedule-date {
+    position: relative;
+    padding-left: 16px;
+  }
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row > div:first-child .v2-schedule-date::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #cbd5e1;
+    font-weight: 700;
+  }
+
+  /* Right block — amount + status pill side by side */
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row .v2-schedule-amount {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    text-align: left;
+  }
+
+  /* Prevent action buttons from wrapping */
+  .v2-deal-layout[style*="1fr"] .v2-schedule-row > div:last-child {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
