@@ -9620,6 +9620,14 @@ function VendorPaymentHistory({ vendor, arrayKey, deal, onDealUpdated }) {
 function DealDetailV2({ deal: initialDeal, allLeads, onBack, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [modal, setModal] = useState(null); // null | 'flight' | 'hotel' | 'visa' | 'payment' | 'refund' | ...
+  // Deal detail is split into three tabs to keep it scannable — the old
+  // single-page scroll got very long once Ops Checklist / Communications /
+  // Team panels were added. Sales tab is the default (financials +
+  // travellers + itinerary + communications), Payments is client-side
+  // money (log + refunds + dues), Operations is everything the ops team
+  // touches (checklist + cover letter + document alerts + vendors + team
+  // notes/tasks + cancellation panel).
+  const [dealTab, setDealTab] = useState('sales'); // 'sales' | 'payments' | 'operations'
   const [editingRefund, setEditingRefund] = useState(null);
   const [editingVendor, setEditingVendor] = useState(null); // vendor object being edited, if any
   const [editingPayment, setEditingPayment] = useState(null); // client-payment object being edited
@@ -10315,7 +10323,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           onClick={onBack}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit', color: 'inherit' }}
         >
-          ← Deals
+          ← Bookings
         </button>{' '}
         &rsaquo; <span className="v2-crumb-current">{deal.dealNumber || 'DEAL'}</span> · {clientName(deal)} · {destination(deal)}
       </div>
@@ -10504,7 +10512,43 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
         );
       })()}
 
+      {/* Tab bar — Sales / Payments / Operations. Everything below toggles
+          based on this state. Financial stats + cancellation summary
+          above stay visible on every tab (they're deal-status context, not
+          content). */}
+      <div style={{ display: 'flex', gap: 8, background: '#f4f7fc', borderRadius: 12, padding: 6, marginBottom: 20 }}>
+        {[
+          { key: 'sales', label: '📋 Sales', desc: 'Client, travellers, itinerary, chats' },
+          { key: 'payments', label: '💰 Payments', desc: 'Client money in, refunds out' },
+          { key: 'operations', label: '⚙ Operations', desc: 'Vendors, checklist, docs, team' },
+        ].map((t) => {
+          const active = dealTab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setDealTab(t.key)}
+              style={{
+                flex: 1,
+                background: active ? '#0d1b3e' : 'transparent',
+                color: active ? '#c9961a' : '#334e82',
+                border: 'none',
+                borderRadius: 8,
+                padding: '10px 12px',
+                fontSize: 13,
+                fontWeight: 800,
+                cursor: 'pointer',
+                textAlign: 'center',
+                transition: 'all 150ms',
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Stay Options (Tiered Pricing) */}
+      {dealTab === 'sales' && (
       <div className="v2-acc" style={{ marginBottom: 24 }}>
         <div className="v2-acc-head">
           <div className="v2-acc-icon">🏆</div>
@@ -10597,10 +10641,12 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           </div>
         )}
       </div>
+      )}
 
       <div className="v2-deal-layout">
         <div>
           {/* Client accordion */}
+          {dealTab === 'sales' && (
           <div className="v2-acc">
             <div className="v2-acc-head">
               <div className="v2-acc-icon navy">▸</div>
@@ -10808,7 +10854,13 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               </div>
             </div>
           </div>
+          )}
 
+          {/* Vendors — Flights, Trains, Hotels, Visas, Land, Cruise,
+              Insurance, Custom Services all live in Operations tab.
+              Per user request, vendor sections themselves stay as-is,
+              only their tab home changes. */}
+          {dealTab === 'operations' && (<>
           {/* Flights */}
           <div className="v2-acc">
             <div className="v2-acc-head">
@@ -11366,6 +11418,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               </div>
             )}
           </div>
+          </>)}
 
           {modal === 'flight' && (
             <AddFlightModal
@@ -11491,6 +11544,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
 
         {/* Right sidebar */}
         <div>
+          {dealTab === 'sales' && (
           <div className="v2-side-card ai">
             <div className="v2-side-title-row">
               <div className="v2-side-icon">✦</div>
@@ -11515,28 +11569,40 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               {aiLoading ? '⏳ Thinking…' : '+ Ask AI about this deal'}
             </button>
           </div>
+          )}
 
           {/* Ops Checklist — pre-departure task tracking */}
+          {dealTab === 'operations' && (
           <div className="v2-side-card">
             <OpsChecklistPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
           </div>
+          )}
 
           {/* Feature 7: Document alerts — missing passports, expiring visas */}
+          {dealTab === 'operations' && (
           <div className="v2-side-card">
             <DocumentAlertsPanel deal={deal} />
           </div>
+          )}
 
-          {/* Feature 8: Communications log — WhatsApp/email/phone conversations */}
+          {/* Feature 8: Communications log — WhatsApp/email/phone conversations.
+              Per user request, this lives in the Sales tab (front page of deal) —
+              it's the primary client-interaction record, most relevant when
+              reviewing where the deal stands, not when doing ops. */}
+          {dealTab === 'sales' && (
           <div className="v2-side-card">
             <CommunicationsPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
           </div>
+          )}
 
           {/* Feature 9: Team notes + tasks */}
+          {dealTab === 'operations' && (
           <div className="v2-side-card">
             <TeamCollabPanel deal={deal} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />
           </div>
+          )}
 
-          {(deal.cancellations || []).length > 0 && (
+          {(deal.cancellations || []).length > 0 && dealTab === 'operations' && (
             <div className="v2-side-card">
               <div className="v2-side-panel-head">
                 <span className="v2-side-panel-title">Cancellations</span>
@@ -11572,7 +11638,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               })}
             </div>
           )}
-          {(deal.cancellations || []).length === 0 && (
+          {(deal.cancellations || []).length === 0 && dealTab === 'operations' && (
             <div className="v2-side-card">
               <div className="v2-side-panel-head">
                 <span className="v2-side-panel-title">Cancellations</span>
@@ -11585,6 +11651,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             </div>
           )}
 
+          {dealTab === 'payments' && (<>
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
               <span className="v2-side-panel-title">Payment Schedule</span>
@@ -11755,7 +11822,9 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               );
             })}
           </div>
+          </>)}
 
+          {dealTab === 'operations' && (<>
           <div className="v2-side-card">
             <div className="v2-side-panel-head">
               <span className="v2-side-panel-title">Documents</span>
@@ -11845,6 +11914,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
               })
             )}
           </div>
+          </>)}
         </div>
       </div>
     </main>
