@@ -10716,7 +10716,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
 
       <div
         className="v2-deal-layout"
-        style={dealTab === 'payments' ? { gridTemplateColumns: '1fr' } : undefined}
+        style={(dealTab === 'payments' || dealTab === 'operations') ? { gridTemplateColumns: '1fr' } : undefined}
       >
         <div>
           {/* Client accordion */}
