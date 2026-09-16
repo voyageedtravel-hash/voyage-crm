@@ -129,6 +129,7 @@ function Sidebar() {
     if (v2PagesOn) {
       const v2Routable = {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
+        live: 'live', travelled: 'travelled',
         clients: 'clients', proposals: 'proposals', vendors: 'vendors',
         visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', users: 'users',
       };
