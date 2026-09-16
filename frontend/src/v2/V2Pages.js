@@ -9217,20 +9217,20 @@ function OpsChecklistPanel({ deal, onDealUpdated }) {
                 {groupItems.map((i) => (
                   <label
                     key={i.id}
-                    style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '4px 0', cursor: busy ? 'wait' : 'pointer', fontSize: 11.5, color: i.done ? '#94a3b8' : '#0d1b3e', textDecoration: i.done ? 'line-through' : 'none' }}
+                    style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-start', gap: 10, padding: '6px 0', cursor: busy ? 'wait' : 'pointer', fontSize: 13, color: i.done ? '#94a3b8' : '#0d1b3e', textDecoration: i.done ? 'line-through' : 'none' }}
                   >
                     <input
                       type="checkbox"
                       checked={i.done}
                       onChange={() => toggle(i.id)}
                       disabled={busy}
-                      style={{ marginTop: 2, cursor: busy ? 'wait' : 'pointer', accentColor: '#10b981' }}
+                      style={{ marginTop: 3, cursor: busy ? 'wait' : 'pointer', accentColor: '#10b981', flexShrink: 0, width: 16, height: 16 }}
                     />
-                    <span style={{ flex: 1, lineHeight: 1.4 }}>{i.label}</span>
+                    <span style={{ flex: '1 1 auto', lineHeight: 1.4, minWidth: 0 }}>{i.label}</span>
                     {i.custom && (
                       <button
                         onClick={(e) => { e.preventDefault(); removeCustom(i.id); }}
-                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                        style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12, padding: 0, flexShrink: 0 }}
                         title="Remove"
                       >✕</button>
                     )}

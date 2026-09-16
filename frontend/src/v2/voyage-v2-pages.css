@@ -2279,3 +2279,21 @@
     white-space: nowrap;
   }
 }
+
+/* ─── Full-width mode: constrain side-card panels ────────────────
+   When Ops / Payments tab collapses layout to single column, the
+   .v2-side-card stretches to the full viewport width. Some panels
+   (OpsChecklistPanel, TeamCollabPanel) render form elements with
+   flex: 1 spans that end up hundreds of pixels wide, and browser
+   default label styles kick in weirdly. These rules force the panel
+   contents into a max-width readable column and reset any residual
+   flex space-between behaviour on labels. */
+
+.v2-deal-layout[style*="1fr"] > div:last-child > .v2-side-card > div {
+  max-width: 900px;
+}
+
+/* Ensure labels stay left-aligned as intended, no matter what */
+.v2-deal-layout[style*="1fr"] .v2-side-card label {
+  justify-content: flex-start !important;
+}
