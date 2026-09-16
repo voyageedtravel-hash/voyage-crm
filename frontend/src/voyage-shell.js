@@ -31,7 +31,9 @@ const NAV_SECTIONS = [
     title: 'Sales',
     items: [
       { key: 'leads', label: 'Queries', icon: '◐', match: /lead|enquir|quer/i },
-      { key: 'deals', label: 'Bookings', icon: '◈', match: /deal|booking/i },
+      { key: 'deals', label: 'Bookings', icon: '◈', match: /^bookings?$|deal(?!.*live)/i },
+      { key: 'live', label: 'Live Bookings', icon: '✈', match: /live/i },
+      { key: 'travelled', label: 'Travelled', icon: '✓', match: /travelled|past trip/i },
       { key: 'clients', label: 'Clients', icon: '◑', match: /client/i },
       { key: 'proposals', label: 'Proposals', icon: '◒', match: /proposal|quote|quotation/i },
     ],

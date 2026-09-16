@@ -1506,6 +1506,11 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
   const [showNewLead, setShowNewLead] = useState(false);
   const [selectedBulk, setSelectedBulk] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Date range filter — applies to the booking anchor date (bookedAt from
+  // audit log, else first payment date, else createdAt). Empty strings
+  // mean 'no bound' on that side.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const toggleBulk = (id) => {
     setSelectedBulk((prev) => {
@@ -1547,17 +1552,73 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
     }
   };
 
-  const isDealsMode = mode === 'booked';
+  const isDealsMode = mode === 'booked' || mode === 'travelled' || mode === 'live';
+  const isTravelledMode = mode === 'travelled';
+  const isLiveMode = mode === 'live';
+
+  // Trip departure/return date extraction — same logic as calendarEvents.
+  // Priority: first flight sector → first hotel checkIn → travelDates parse.
+  const tripDatesOf = React.useCallback((d) => {
+    const parseSafe = (s) => {
+      if (!s) return null;
+      const dt = new Date(s);
+      return isNaN(dt.getTime()) ? null : dt;
+    };
+    let dep = null, ret = null;
+    (d.flightVendors || []).forEach((f) => {
+      (f.sectors || []).forEach((s) => {
+        const p = parseSafe(s.date);
+        if (p && (!dep || p < dep)) dep = p;
+      });
+      (f.returnSectors || []).forEach((s) => {
+        const p = parseSafe(s.date);
+        if (p && (!ret || p > ret)) ret = p;
+      });
+    });
+    if (!dep) (d.hotelVendors || []).forEach((h) => {
+      const p = parseSafe(h.checkIn);
+      if (p && (!dep || p < dep)) dep = p;
+    });
+    if (!ret) (d.hotelVendors || []).forEach((h) => {
+      const p = parseSafe(h.checkOut);
+      if (p && (!ret || p > ret)) ret = p;
+    });
+    return { dep, ret };
+  }, []);
 
   // Active mode: hot/warm/cold enquiries not yet converted.
   // Deals mode: everything already Booked/Completed — the "old/past deals" view.
+  // Travelled mode: booked deals whose return date is in the past.
+  // Live mode: booked deals whose trip is upcoming OR currently in progress.
   const scopedLeads = useMemo(() => {
-    if (isDealsMode) return leads.filter((l) => isBookedStage(l));
+    if (isDealsMode) {
+      let list = leads.filter((l) => isBookedStage(l));
+      if (isTravelledMode || isLiveMode) {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        list = list.filter((l) => {
+          const { dep, ret } = tripDatesOf(l);
+          const effReturn = ret || dep; // if no return, treat departure as trip point
+          if (isTravelledMode) {
+            // Trip has ended (return < today)
+            return effReturn && effReturn < today;
+          }
+          if (isLiveMode) {
+            // Trip is upcoming (departure > today) OR currently in progress
+            // (departure <= today <= return). Trips with no date info fall
+            // in Live since we can't confirm they've ended.
+            if (!dep && !ret) return true;
+            return effReturn && effReturn >= today;
+          }
+          return true;
+        });
+      }
+      return list;
+    }
     return leads.filter((l) => {
       const c = categorize(l);
       return c === 'hot' || c === 'warm' || c === 'cold';
     });
-  }, [leads, isDealsMode]);
+  }, [leads, isDealsMode, isTravelledMode, isLiveMode, tripDatesOf]);
 
   const counts = useMemo(() => {
     const c = { hot: 0, warm: 0, cold: 0, converted: 0 };
@@ -1590,6 +1651,25 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
     } else if (filter !== 'all') {
       list = list.filter((l) => categorize(l) === filter);
     }
+    // Custom date range — filters by the booking anchor date (bookedAt
+    // audit entry, else first payment date, else createdAt). Applies to
+    // isDealsMode views only (Bookings / Travelled / Live).
+    if (isDealsMode && (dateFrom || dateTo)) {
+      list = list.filter((l) => {
+        const bookedLog = (l.auditLog || []).find((e) => /booked|booking/i.test(e.title || ''));
+        const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
+        const fp = firstPaymentDateOf(l);
+        const created = l.createdAt ? String(l.createdAt).slice(0, 10) : null;
+        // Use the earliest signal (same rule as dashboard cycleBucketing)
+        let anchor;
+        if (bookedAt && fp) anchor = fp <= bookedAt ? fp : bookedAt;
+        else anchor = bookedAt || fp || created;
+        if (!anchor) return false;
+        if (dateFrom && anchor < dateFrom) return false;
+        if (dateTo && anchor > dateTo) return false;
+        return true;
+      });
+    }
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((l) =>
@@ -1599,7 +1679,7 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
       );
     }
     return list;
-  }, [scopedLeads, filter, search, isDealsMode]);
+  }, [scopedLeads, filter, search, isDealsMode, dateFrom, dateTo]);
 
   const selected = filtered.find((l) => l._id === selectedId) || filtered[0] || null;
 
@@ -1619,9 +1699,14 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
 
       <div className="v2-page-header">
         <div>
-          <h1 className="v2-page-title">{isDealsMode ? 'Bookings' : 'Queries'}</h1>
+          <h1 className="v2-page-title">
+            {isTravelledMode ? 'Travelled' : isLiveMode ? 'Live Bookings' : isDealsMode ? 'Bookings' : 'Queries'}
+          </h1>
           <p className="v2-page-sub">
-            {isDealsMode ? 'Every confirmed booking — past and upcoming' : 'Manage every enquiry from first contact to booking'}
+            {isTravelledMode ? 'Past trips — clients whose travel has ended'
+              : isLiveMode ? 'Upcoming or currently ongoing trips'
+              : isDealsMode ? 'Every confirmed booking — past and upcoming'
+              : 'Manage every enquiry from first contact to booking'}
           </p>
         </div>
         {!isDealsMode && (
@@ -1723,6 +1808,70 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
           </>
         )}
       </div>
+
+      {/* Date range filter — bookings only. Anchors on the booking date
+          (first-payment / booked-log — same rule as dashboard cycle). */}
+      {isDealsMode && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: '1px solid #e3eaf7', borderRadius: 12, padding: '10px 14px', marginTop: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: '#334e82', letterSpacing: 1.5 }}>📅 DATE RANGE</span>
+          <label style={{ fontSize: 11, color: '#6b7a99', display: 'flex', alignItems: 'center', gap: 6 }}>
+            From
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={{ padding: '4px 8px', fontSize: 12, border: '1px solid #c2d2ee', borderRadius: 6, color: '#0d1b3e' }}
+            />
+          </label>
+          <label style={{ fontSize: 11, color: '#6b7a99', display: 'flex', alignItems: 'center', gap: 6 }}>
+            To
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={{ padding: '4px 8px', fontSize: 12, border: '1px solid #c2d2ee', borderRadius: 6, color: '#0d1b3e' }}
+            />
+          </label>
+          {/* Quick presets */}
+          <button
+            onClick={() => {
+              const now = new Date();
+              const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+              const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+              setDateFrom(first); setDateTo(last);
+            }}
+            style={{ background: '#f4f7fc', color: '#334e82', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+          >This Month</button>
+          <button
+            onClick={() => {
+              // 16→15 billing cycle
+              const c = cycleFor(new Date().toISOString().slice(0, 10));
+              if (c) { setDateFrom(c.start); setDateTo(c.end); }
+            }}
+            style={{ background: '#f4f7fc', color: '#334e82', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+          >Current Cycle</button>
+          <button
+            onClick={() => {
+              const now = new Date();
+              const first = new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);
+              const last = new Date(now.getFullYear(), 11, 31).toISOString().slice(0, 10);
+              setDateFrom(first); setDateTo(last);
+            }}
+            style={{ background: '#f4f7fc', color: '#334e82', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+          >This Year</button>
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => { setDateFrom(''); setDateTo(''); }}
+              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer', marginLeft: 'auto' }}
+            >✕ Clear</button>
+          )}
+          {(dateFrom || dateTo) && (
+            <span style={{ fontSize: 11, color: '#059669', fontWeight: 700 }}>
+              {filtered.length} match{filtered.length === 1 ? '' : 'es'}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Two column layout */}
       <div className="v2-leads-layout">
@@ -14328,7 +14477,7 @@ function UsersV2() {
 
 /* ─── ROUTER ─────────────────────────────────────────── */
 
-const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'users'];
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'live', 'travelled', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'users'];
 
 // ── Floating AI Assistant ────────────────────────────────────────────────
 // Ports V1's bottom-right chat widget: natural-language commands that either
@@ -14617,6 +14766,8 @@ export default function V2Pages() {
     );
   }
   if (route === 'deals') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="booked" onLeadCreated={refetch} />);
+  if (route === 'live') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="live" onLeadCreated={refetch} />);
+  if (route === 'travelled') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="travelled" onLeadCreated={refetch} />);
   if (route === 'leads') return wrap(<LeadsV2 leads={items} onDealClick={openDeal} mode="active" onLeadCreated={refetch} />);
   if (route === 'clients') return wrap(<ClientsV2 leads={items} onDealClick={openDeal} />);
   if (route === 'proposals') return wrap(<ProposalsV2 leads={items} onDealClick={openDeal} />);
