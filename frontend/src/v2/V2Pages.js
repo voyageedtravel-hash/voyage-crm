@@ -704,8 +704,21 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
       const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
       const fp = firstPaymentDateOf(d);
       const created = d.createdAt ? String(d.createdAt).slice(0, 10) : null;
-      const anchor = bookedAt || fp || created;
-      const source = bookedAt ? 'Booked-log' : fp ? 'First-payment' : created ? 'Created' : 'NONE';
+      // Pick the earliest of (bookedAt, fp) so retroactive payments land in
+      // the correct cycle even if the audit-log 'at' timestamp was set to
+      // 'now' at record-time. Concrete case: user records a payment today
+      // (Sep 16) but backdates it to yesterday (Sep 15). Auto-book audit
+      // entry gets stamped Sep 16 by default, but the client actually paid
+      // on Sep 15 — the booking belongs in the Sep 15 cycle. Fall back to
+      // created only when neither of the money-signals exists.
+      let anchor, source;
+      if (bookedAt && fp) {
+        if (fp <= bookedAt) { anchor = fp; source = 'First-payment (earlier than booked-log)'; }
+        else { anchor = bookedAt; source = 'Booked-log'; }
+      } else if (bookedAt) { anchor = bookedAt; source = 'Booked-log'; }
+      else if (fp) { anchor = fp; source = 'First-payment'; }
+      else if (created) { anchor = created; source = 'Created'; }
+      else { anchor = null; source = 'NONE'; }
       const inCycle = cycle && anchor && anchor >= cycle.start && anchor <= cycle.end;
       return { d, bookedAt, fp, created, anchor, source, inCycle };
     });
@@ -7411,7 +7424,17 @@ function AddPaymentModal({ deal, editing, onClose, onSaved }) {
         let autoBookedMsg = '';
         if (earlyStage) {
           patch.stage = 'Booked';
-          patch.auditLog = [...(deal.auditLog || []), logEntryStatic(`Auto-booked on first payment recorded (was: ${deal.stage})`)];
+          // Anchor the audit entry to the PAYMENT date, not today. Dashboard
+          // cycle bucketing (see cycleBucketing useMemo) reads this entry's
+          // 'at' field as the deal's booking timestamp. If the user records
+          // a payment retroactively (paisa kal aaya, entry aaj kar rahe ho),
+          // 'at' must reflect the actual payment date so the deal lands in
+          // yesterday's cycle rather than today's.
+          const paymentAtISO = new Date(dateStr + 'T00:00:00').toISOString();
+          patch.auditLog = [
+            ...(deal.auditLog || []),
+            { title: `Auto-booked on first payment recorded (was: ${deal.stage})`, at: paymentAtISO, by: (typeof window !== 'undefined' && window.__veUserName) || 'You' },
+          ];
           autoBookedMsg = ' · moved to Booked';
         }
         updated = await patchDeal(deal._id, patch);
