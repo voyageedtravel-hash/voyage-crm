@@ -6797,10 +6797,17 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
   const [segments, setSegments] = useState(editing && editing.segments && editing.segments.length ? editing.segments : [emptySeg()]);
   const [returnSegments, setReturnSegments] = useState(editing && editing.returnSegments && editing.returnSegments.length ? editing.returnSegments : [emptySeg()]);
 
+  const [attachments, setAttachments] = useState(editing ? (editing.attachments || []) : []);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const handleAttachUpload = async (e) => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    setAttachments((arr) => [...arr, { id: 'att_' + Date.now(), name: file.name, dataUrl, addedAt: new Date().toISOString() }]);
+    e.target.value = '';
+  };
 
   const updSeg = (list, setList, i, patch) => setList((arr) => arr.map((s, idx) => idx === i ? { ...s, ...patch } : s));
   const addSeg = (setList) => setList((arr) => [...arr, emptySeg()]);
@@ -6883,6 +6890,7 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         segments: validSegs,
         returnSegments: tripType === 'return' ? returnSegments.filter((s) => s.from || s.to || s.trainName) : [],
         paxPricing, paxRates: paxPricing ? paxRates : {},
+        attachments,
       };
       if (editing) {
         const updatedList = (deal.trainVendors || []).map((t) => t.id === editing.id ? { ...t, ...vendorFields } : t);
@@ -6963,6 +6971,23 @@ function AddTrainModal({ deal, editing, onClose, onSaved }) {
         if (next.costPrice !== undefined) setCostPrice(next.costPrice);
         if (next.sellingPrice !== undefined) setSellingPrice(next.sellingPrice);
       }} />
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="v2-detail-field-label">📎 Attachments</div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#c9a84c', cursor: 'pointer' }}>
+            + Upload
+            <input type="file" accept="image/*,.pdf" onChange={handleAttachUpload} style={{ display: 'none' }} />
+          </label>
+        </div>
+        {attachments.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#6b7a99' }}>No documents attached yet.</div>
+        ) : attachments.map((a, i) => (
+          <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < attachments.length - 1 ? '1px solid #f4f7fc' : 'none' }}>
+            <a href={a.dataUrl} download={a.name} style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 500, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>📎 {a.name}</a>
+            <button type="button" onClick={() => setAttachments((arr) => arr.filter((x) => x.id !== a.id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        ))}
+      </div>
     </ModalShell>
   );
 }
@@ -7229,11 +7254,18 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
     name: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     confirmationNo: '', itinerary: '', paxPricing: false, paxRates: {},
   });
+  const [attachments, setAttachments] = useState(editing ? (editing.attachments || []) : []);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const handleAttachUpload = async (e) => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    setAttachments((arr) => [...arr, { id: 'att_' + Date.now(), name: file.name, dataUrl, addedAt: new Date().toISOString() }]);
+    e.target.value = '';
+  };
 
   const processFiles = async (files) => {
     if (!files.length) return;
@@ -7295,6 +7327,7 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
         itinerary: form.itinerary,
         confirmationNo: form.confirmationNo,
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        attachments,
       };
 
       if (editing) {
@@ -7338,6 +7371,23 @@ function AddLandModal({ deal, editing, onClose, onSaved }) {
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
       <PaxRatesFields form={form} setForm={setForm} deal={deal} />
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="v2-detail-field-label">📎 Attachments</div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#c9a84c', cursor: 'pointer' }}>
+            + Upload
+            <input type="file" accept="image/*,.pdf" onChange={handleAttachUpload} style={{ display: 'none' }} />
+          </label>
+        </div>
+        {attachments.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#6b7a99' }}>No documents attached yet.</div>
+        ) : attachments.map((a, i) => (
+          <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < attachments.length - 1 ? '1px solid #f4f7fc' : 'none' }}>
+            <a href={a.dataUrl} download={a.name} style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 500, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>📎 {a.name}</a>
+            <button type="button" onClick={() => setAttachments((arr) => arr.filter((x) => x.id !== a.id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        ))}
+      </div>
     </ModalShell>
   );
 }
@@ -7647,11 +7697,18 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
     checkIn: '', checkOut: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     itinerary: '', photoUrl: '', mapUrl: '', paxPricing: false, paxRates: {},
   });
+  const [attachments, setAttachments] = useState(editing ? (editing.attachments || []) : []);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const handleAttachUpload = async (e) => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    setAttachments((arr) => [...arr, { id: 'att_' + Date.now(), name: file.name, dataUrl, addedAt: new Date().toISOString() }]);
+    e.target.value = '';
+  };
 
   const processFiles = async (files) => {
     if (!files.length) return;
@@ -7701,6 +7758,7 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
         currency: form.currency, costPrice: Number(form.costPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        attachments,
       };
       if (editing) {
         const updatedList = (deal.cruiseVendors || []).map((c) => c.id === editing.id ? { ...c, ...vendorFields } : c);
@@ -7773,6 +7831,23 @@ function AddCruiseModal({ deal, editing, onClose, onSaved }) {
       <div>
         <div className="v2-detail-field-label" style={{ marginBottom: 6 }}>Port-by-Port Itinerary</div>
         <textarea value={form.itinerary} onChange={set('itinerary')} rows={4} placeholder="Day 1: Embarkation at Barcelona&#10;Day 2: At Sea&#10;Day 3: Marseille, France" style={{ ...inputStyle, resize: 'vertical' }} />
+      </div>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="v2-detail-field-label">📎 Attachments</div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#c9a84c', cursor: 'pointer' }}>
+            + Upload
+            <input type="file" accept="image/*,.pdf" onChange={handleAttachUpload} style={{ display: 'none' }} />
+          </label>
+        </div>
+        {attachments.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#6b7a99' }}>No documents attached yet.</div>
+        ) : attachments.map((a, i) => (
+          <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < attachments.length - 1 ? '1px solid #f4f7fc' : 'none' }}>
+            <a href={a.dataUrl} download={a.name} style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 500, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>📎 {a.name}</a>
+            <button type="button" onClick={() => setAttachments((arr) => arr.filter((x) => x.id !== a.id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
@@ -7873,11 +7948,18 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
     coveredTravellers: '', currency: 'INR', costPrice: '', sellingPrice: '', exchangeRate: '',
     paxPricing: false, paxRates: {},
   });
+  const [attachments, setAttachments] = useState(editing ? (editing.attachments || []) : []);
   const [aiSummary, setAiSummary] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const handleAttachUpload = async (e) => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    setAttachments((arr) => [...arr, { id: 'att_' + Date.now(), name: file.name, dataUrl, addedAt: new Date().toISOString() }]);
+    e.target.value = '';
+  };
 
   const processFiles = async (files) => {
     if (!files.length) return;
@@ -7915,6 +7997,7 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
         currency: form.currency, costPrice: Number(form.costPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
         exchangeRate: form.currency === 'INR' ? 1 : (Number(form.exchangeRate) || 0),
         paxPricing: form.paxPricing, paxRates: form.paxPricing ? form.paxRates : {},
+        attachments,
       };
       if (editing) {
         const updatedList = (deal.insuranceVendors || []).map((i) => i.id === editing.id ? { ...i, ...vendorFields } : i);
@@ -7976,6 +8059,23 @@ function AddInsuranceModal({ deal, editing, onClose, onSaved }) {
       </div>
       <CurrencyCostRow form={form} setForm={setForm} />
       <PaxRatesFields form={form} setForm={setForm} deal={deal} />
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div className="v2-detail-field-label">📎 Attachments</div>
+          <label style={{ fontSize: 11, fontWeight: 700, color: '#c9a84c', cursor: 'pointer' }}>
+            + Upload
+            <input type="file" accept="image/*,.pdf" onChange={handleAttachUpload} style={{ display: 'none' }} />
+          </label>
+        </div>
+        {attachments.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#6b7a99' }}>No documents attached yet.</div>
+        ) : attachments.map((a, i) => (
+          <div key={a.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < attachments.length - 1 ? '1px solid #f4f7fc' : 'none' }}>
+            <a href={a.dataUrl} download={a.name} style={{ fontSize: 12, color: '#0d1b3e', fontWeight: 500, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>📎 {a.name}</a>
+            <button type="button" onClick={() => setAttachments((arr) => arr.filter((x) => x.id !== a.id))} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        ))}
+      </div>
     </ModalShell>
   );
 }
