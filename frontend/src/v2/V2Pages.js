@@ -858,13 +858,12 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
       dates.sort();
       return { start: dates[0], end: dates[dates.length - 1] };
     };
-    // Today at 00:00 in the user's local timezone — compare against END date
-    // so an in-progress trip (departed but not yet returned) still shows in
-    // "Upcoming Departures" as "currently traveling". Only fully-past trips
-    // (end date before today) get hidden.
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayISO = today.toISOString().slice(0, 10);
+    // Use LOCAL date parts (not toISOString which converts to UTC).
+    // Bug: IST is UTC+5:30, so midnight IST = 18:30 prev-day UTC —
+    // toISOString() was returning yesterday's date, keeping just-ended
+    // trips visible for the entire next calendar day.
+    const _tn = new Date();
+    const todayISO = `${_tn.getFullYear()}-${String(_tn.getMonth()+1).padStart(2,'0')}-${String(_tn.getDate()).padStart(2,'0')}`;
 
     return leads
       .filter((l) => isBookedStage(l))
