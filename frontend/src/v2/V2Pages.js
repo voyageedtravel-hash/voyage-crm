@@ -4683,6 +4683,127 @@ function openCombinedProposalV2(deals) {
   }
 }
 
+function buildMultiCityProposalHTMLV2(deal, cityStops) {
+  const ref = deal.dealNumber || ('VE-MC-' + String(Date.now()).slice(-6));
+  const sell = sellINR(deal);
+  const totalPax = (Number(deal.adults) || 0) + (Number(deal.children) || 0);
+  const paxStr = `${deal.adults || 0} Adults${Number(deal.children) > 0 ? `, ${deal.children} Children` : ''}`;
+  const cover = pickFallbackCoverV2(deal);
+  const destinations = cityStops.map((c) => c.name).join(' → ');
+  const totalNights = cityStops.reduce((s, c) => s + (Number(c.nights) || 0), 0);
+  const acceptMsg = 'I, ' + (deal.clientName || 'the Client') + ', have read and ACCEPT the Booking Policy, Cancellation Policy and Terms & Conditions of Voyage-Ed proposal Ref: ' + ref + '.';
+  const acceptWA = 'https://wa.me/917009659048?text=' + encodeURIComponent(acceptMsg);
+
+  const citySections = cityStops.map((stop, idx) => {
+    const hotelCards = (stop.hotels || []).map((h) => {
+      const nights = Number(h.nights) || '';
+      const stars = h.starRating ? '★'.repeat(Math.min(Number(h.starRating) || 0, 5)) : '';
+      return `<div style="display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #f0f2f7">
+        ${h.photoUrl ? `<img src="${escHtml(h.photoUrl)}" style="width:80px;height:60px;object-fit:cover;border-radius:8px;flex-shrink:0" onerror="this.style.display='none'"/>` : `<div style="width:80px;height:60px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">🏨</div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:700;color:#0d1b3e">${escHtml(h.hotelName || 'Hotel')} ${stars}</div>
+          <div style="font-size:11.5px;color:#5a6b8c;margin-top:2px">${escHtml(h.roomCategory || '')}${h.mealPlan ? ' · ' + escHtml(h.mealPlan.toUpperCase()) : ''}</div>
+          <div style="font-size:11px;color:#7d8bab;margin-top:2px">${escHtml(h.checkIn || '')} → ${escHtml(h.checkOut || '')}${nights ? ' · ' + nights + ' night' + (nights > 1 ? 's' : '') : ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const flightRows = (stop.flights || []).map((s) =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;background:#f4f7fc;border-radius:8px;margin-bottom:5px;font-size:12px">
+        <div><b style="color:#0d1b3e">${escHtml((s.from||'').toUpperCase())}</b> <span style="color:#c9961a;font-weight:700">→</span> <b style="color:#0d1b3e">${escHtml((s.to||'').toUpperCase())}</b>${s.airlineName ? ' <span style="color:#6b7a99;margin-left:8px">' + escHtml(s.airlineName) + '</span>' : ''}</div>
+        <div style="color:#5a6b8c">${escHtml(s.date||'')}${s.depTime ? ' · ' + escHtml(s.depTime) + '–' + escHtml(s.arrTime||'') : ''}</div>
+      </div>`
+    ).join('');
+    const landNotes = stop.notes ? `<div style="background:#f9fafc;border:1px solid #e3eaf7;border-radius:10px;padding:12px 14px;margin-top:10px;font-size:12px;line-height:1.8;color:#33415e;white-space:pre-line">${escHtml(stop.notes)}</div>` : '';
+    return `<div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex-shrink:0">${idx + 1}</div>
+        <div>
+          <div style="font-family:Georgia,serif;font-size:19px;font-weight:700;color:#0d1b3e">${escHtml(stop.name)}</div>
+          ${stop.nights ? `<div style="font-size:10px;color:#c9961a;font-weight:800;letter-spacing:1px">${stop.nights} NIGHT${Number(stop.nights) > 1 ? 'S' : ''}</div>` : ''}
+        </div>
+      </div>
+      ${flightRows ? `<div style="margin-bottom:8px">${flightRows}</div>` : ''}
+      ${hotelCards ? `<div style="border:1px solid #e3eaf7;border-radius:12px;padding:0 14px;background:#fff">${hotelCards}</div>` : ''}
+      ${landNotes}
+    </div>`;
+  }).join('<div style="text-align:center;margin:12px 0;color:#c9961a;font-size:16px;font-weight:700">✈</div>');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Voyage-Ed Multi-City — ${escHtml(destinations)}</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6fb;color:#33415e}@media print{.noprint{display:none}.ve-interactive{display:none}.ve-printsign{display:block!important}}@page{margin:14mm 12mm}</style>
+</head><body>
+<div style="max-width:820px;margin:0 auto;background:#fff">
+  <div style="position:relative;height:240px;overflow:hidden">
+    ${cover ? `<img src="${escHtml(cover)}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'"/>` : ''}
+    <div style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(8,17,40,.3) 0%,rgba(8,17,40,.85) 100%)"></div>
+    <div style="position:absolute;bottom:0;left:0;right:0;padding:24px 34px">
+      <div style="font-size:9px;letter-spacing:3.5px;color:#f0c842;font-weight:800;margin-bottom:5px">VOYAGE-ED TRAVELS · MULTI-CITY PROPOSAL</div>
+      <div style="font-family:Georgia,serif;font-size:26px;font-weight:700;color:#fff;line-height:1.2">${escHtml(destinations)}</div>
+      <div style="font-size:11.5px;color:rgba(255,255,255,.8);margin-top:5px">${escHtml(deal.travelDates || '')} · ${escHtml(paxStr)} · Ref: ${escHtml(ref)}</div>
+    </div>
+  </div>
+  <div style="background:rgba(10,21,48,.92);padding:9px 34px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+    <div style="color:#fff;font-size:11px">For <b style="color:#f0c842">${escHtml(clientName(deal))}</b></div>
+    <div style="color:#f0c842;font-size:11px;font-weight:700">📞 +91 70096 59048</div>
+  </div>
+  <div style="padding:26px 34px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+      <div style="flex:1;min-width:90px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:12px 10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#0d1b3e">${cityStops.length}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">CITIES</div></div>
+      ${totalNights ? `<div style="flex:1;min-width:90px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:12px 10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#0d1b3e">${totalNights}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">NIGHTS</div></div>` : ''}
+      <div style="flex:1;min-width:90px;background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:12px 10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#0d1b3e">${totalPax || '–'}</div><div style="font-size:9px;letter-spacing:1.5px;color:#c9961a;font-weight:800">TRAVELLERS</div></div>
+      ${sell > 0 ? `<div style="flex:2;min-width:160px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:14px;padding:12px 18px;display:flex;align-items:center"><div><div style="font-size:9px;letter-spacing:2px;color:#f0c842;font-weight:800">PACKAGE PRICE</div><div style="font-size:22px;font-weight:800;color:#fff">₹${sell.toLocaleString('en-IN')}</div>${totalPax > 0 ? `<div style="font-size:10px;color:rgba(255,255,255,.7)">₹${Math.round(sell / totalPax).toLocaleString('en-IN')} / person</div>` : ''}</div></div>` : ''}
+    </div>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:22px">
+      ${cityStops.map((c, i) => `<div style="background:#fff;border:1px solid #e3eaf7;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;color:#0d1b3e">${escHtml(c.name)}</div>${i < cityStops.length - 1 ? '<div style="color:#c9961a;font-size:14px;font-weight:800">→</div>' : ''}`).join('')}
+    </div>
+    <h2 style="font-size:14px;font-weight:800;color:#0d1b3e;letter-spacing:.5px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #f0c842">🗺️ YOUR JOURNEY</h2>
+    ${citySections}
+    ${sell > 0 ? `<div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:14px;padding:18px 22px;color:#fff;margin:18px 0">
+      <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800">TOTAL PACKAGE PRICE</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px">₹${sell.toLocaleString('en-IN')}</div>
+      ${totalPax > 0 ? `<div style="font-size:11px;opacity:.75;margin-top:2px">₹${Math.round(sell / totalPax).toLocaleString('en-IN')} per person · ${escHtml(paxStr)}</div>` : ''}
+      <div style="font-size:10px;opacity:.6;margin-top:4px">Valid 7 days · Subject to availability at time of booking</div>
+    </div>` : ''}
+    <h2 style="font-size:14px;font-weight:800;color:#0d1b3e;margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid #f0c842">📋 Booking &amp; Cancellation Policy</h2>
+    <div style="background:#fff;border:1px solid #e3eaf7;border-radius:14px;padding:14px 18px;font-size:11.5px;line-height:1.9;color:#4a5772;margin-bottom:18px">
+      • Non-refundable deposit of <b style="color:#0d1b3e">₹20,000 per person</b> to initiate booking.<br>
+      • Full payment required prior to departure from India.<br>
+      <table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:11px">
+        <tr><th style="background:#0d1b3e;color:#fff;padding:6px 10px;text-align:left;border-radius:6px 0 0 0">Days Before Departure</th><th style="background:#0d1b3e;color:#fff;padding:6px 10px;text-align:left;border-radius:0 6px 0 0">Charge</th></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #e3eaf7">30 – 16 days</td><td style="padding:6px 10px;border:1px solid #e3eaf7;font-weight:700;color:#0d1b3e">50%</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #e3eaf7;background:#f8fafd">15 – 8 days</td><td style="padding:6px 10px;border:1px solid #e3eaf7;background:#f8fafd;font-weight:700;color:#0d1b3e">75%</td></tr>
+        <tr><td style="padding:6px 10px;border:1px solid #e3eaf7">7 – 0 days</td><td style="padding:6px 10px;border:1px solid #e3eaf7;font-weight:700;color:#b91c1c">100% (no refund)</td></tr>
+      </table>
+      • Visa fees &amp; service charges are <b style="color:#0d1b3e">non-refundable</b>. GST applicable as per norms.
+    </div>
+    <div id="ve-accept" style="background:linear-gradient(135deg,#fdf9ee,#fff);border:2px solid #c9961a;border-radius:14px;padding:16px 20px">
+      <div style="font-size:10px;letter-spacing:2px;color:#c9961a;font-weight:800;margin-bottom:8px">✍️ CLIENT ACCEPTANCE</div>
+      <div class="ve-interactive">
+        <label style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:#33415e;cursor:pointer;line-height:1.6">
+          <input type="checkbox" id="veAgree" style="width:16px;height:16px;margin-top:2px;accent-color:#c9961a"/>
+          <span>I, <b style="color:#0d1b3e">${escHtml(deal.clientName || 'the Client')}</b>, have read, understood and unconditionally accept the Booking &amp; Payment Policy and Cancellation Policy of this proposal (Ref: <b>${escHtml(ref)}</b>).</span>
+        </label>
+        <button id="veAccBtn" style="margin-top:10px;background:linear-gradient(135deg,#0d1b3e,#1a3060);color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:12px;font-weight:800;cursor:pointer">✅ Accept &amp; Submit</button>
+        <div id="veAccMsg" style="font-size:12px;margin-top:8px;font-weight:700"></div>
+        <div style="font-size:10px;color:#7d8bab;margin-top:6px">Ya: <a href="${acceptWA}" style="color:#15803d;font-weight:700">WhatsApp par accept karein →</a></div>
+      </div>
+      <div class="ve-printsign" style="display:none">
+        <a href="${acceptWA}" style="display:block;text-decoration:none;background:linear-gradient(135deg,#15803d,#22a04e);border-radius:12px;padding:14px 18px;text-align:center;margin:4px 0 10px">
+          <span style="color:#fff;font-size:15px;font-weight:800">✅ TAP HERE TO ACCEPT THIS PROPOSAL</span>
+        </a>
+      </div>
+    </div>
+    <script>(function(){var btn=document.getElementById("veAccBtn");if(!btn)return;btn.addEventListener("click",function(){var chk=document.getElementById("veAgree"),msg=document.getElementById("veAccMsg");if(!chk.checked){msg.style.color="#b91c1c";msg.textContent="⚠️ Please tick the checkbox first.";return;}btn.disabled=true;btn.textContent="Submitting...";fetch("https://formspree.io/f/xbdwrzaq",{method:"POST",headers:{"Accept":"application/json","Content-Type":"application/json"},body:JSON.stringify({_subject:"PROPOSAL ACCEPTED - ${escHtml(ref)} - ${escHtml(deal.clientName||'')}",type:"Multi-City Proposal Acceptance",reference:"${escHtml(ref)}",client:"${escHtml(deal.clientName||'')}",destination:"${escHtml(destinations)}",acceptedAtISO:new Date().toISOString()})}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}).then(function(){msg.style.color="#15803d";msg.textContent="✅ Accepted! (Ref: ${escHtml(ref)})";btn.textContent="✅ Accepted";}).catch(function(){msg.style.color="#b91c1c";msg.textContent="Failed — WhatsApp us to confirm.";btn.disabled=false;btn.textContent="Retry";});});}());<\/script>
+    <div style="margin-top:20px;background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:14px;padding:16px 20px;color:#fff;text-align:center">
+      <div style="font-size:10px;color:#f0c842;font-weight:800;letter-spacing:2px;margin-bottom:4px">VOYAGE-ED TRAVELS</div>
+      <div style="font-size:12px;opacity:.9">📞 +91 70096 59048 · ✉️ enquiry@voyage-ed.com · 🌐 voyage-ed.com</div>
+      <div style="font-size:10px;opacity:.55;margin-top:3px">GMADA Aerocity, Mohali, Punjab · GST: 04ABBFV6015A1ZT</div>
+    </div>
+  </div>
+</div>
+<div class="noprint" style="position:fixed;bottom:18px;right:18px"><button onclick="window.print()" style="background:linear-gradient(135deg,#f0c842,#c9961a);border:none;color:#0d1b3e;font-weight:800;padding:12px 20px;border-radius:12px;cursor:pointer;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25)">🖨 Save as PDF</button></div>
+</body></html>`;
+}
+
 function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
   const [selectedIds, setSelectedIds] = useState(() => new Set((allLeads || []).filter((l) => l.enquiryId && l.enquiryId === deal.enquiryId && l._id !== deal._id).map((l) => l._id)));
   const [saving, setSaving] = useState(false);
@@ -5833,6 +5954,97 @@ function VouchersModal({ deal: initialDeal, onClose, onDealUpdated }) {
 // Step 2 is the actual proposal options (mirrors V1's Generate Proposal
 // panel) — both write to the SAME deal.aiItinerary* / generate options so
 // the intro tone and the itinerary the client sees are never out of sync. ──
+function MultiCityProposalModal({ deal, onClose }) {
+  const autoStops = React.useMemo(() => {
+    const cityMap = new Map();
+    (deal.hotelVendors || []).filter((h) => h.hotelName || h.city).forEach((h) => {
+      const city = (h.city || h.hotelName || 'Unknown').trim();
+      if (!cityMap.has(city)) cityMap.set(city, { name: city, nights: 0, hotels: [], flights: [], notes: '' });
+      const stop = cityMap.get(city);
+      stop.hotels.push(h);
+      stop.nights = stop.hotels.reduce((s, x) => s + (Number(x.nights) || 0), 0);
+    });
+    return [...cityMap.values()].sort((a, b) => {
+      const da = Math.min(...a.hotels.map((h) => h.checkIn || '9999'));
+      const db = Math.min(...b.hotels.map((h) => h.checkIn || '9999'));
+      return String(da).localeCompare(String(db));
+    });
+  }, [deal]);
+
+  const allSectors = React.useMemo(() => {
+    return (deal.flightVendors || []).flatMap((f) => [
+      ...(f.sectors || []).map((s) => ({ ...s, airlineName: s.airlineName || f.airlineName || f.name })),
+      ...(f.returnSectors || []).map((s) => ({ ...s, airlineName: s.airlineName || f.airlineName || f.name })),
+    ]).filter((s) => s.from || s.to).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  }, [deal]);
+
+  const [stops, setStops] = useState(() =>
+    autoStops.length > 0 ? autoStops : [{ name: '', nights: '', hotels: [], flights: [], notes: '' }]
+  );
+
+  const stopsWithFlights = React.useMemo(() => stops.map((stop) => {
+    const cname = (stop.name || '').toLowerCase().trim();
+    if (!cname) return { ...stop, flights: [] };
+    const flights = allSectors.filter((s) => {
+      const to = ((s.toName || s.to || '')).toLowerCase();
+      return cname.length >= 3 && (to.includes(cname) || cname.includes((s.to || '').toLowerCase()));
+    });
+    return { ...stop, flights };
+  }), [stops, allSectors]);
+
+  const set = (i, k) => (e) => setStops((arr) => arr.map((s, idx) => idx === i ? { ...s, [k]: e.target.value } : s));
+  const addStop = () => setStops((arr) => [...arr, { name: '', nights: '', hotels: [], flights: [], notes: '' }]);
+  const removeStop = (i) => setStops((arr) => arr.filter((_, idx) => idx !== i));
+  const move = (i, dir) => setStops((arr) => {
+    const j = i + dir; if (j < 0 || j >= arr.length) return arr;
+    const next = [...arr]; [next[i], next[j]] = [next[j], next[i]]; return next;
+  });
+
+  const generate = () => {
+    const valid = stopsWithFlights.filter((s) => s.name.trim());
+    if (!valid.length) { window.veToast && window.veToast('At least one city required', 'warning'); return; }
+    const w = window.open('', '_blank');
+    if (!w) { window.veToast && window.veToast('Popup blocked — allow popups', 'warning'); return; }
+    try {
+      w.document.write(buildMultiCityProposalHTMLV2(deal, valid));
+      w.document.close();
+      onClose();
+    } catch (err) {
+      w.document.write('<h2 style="color:red;padding:40px">Error: ' + String(err) + '</h2>');
+      w.document.close();
+      console.error('buildMultiCityProposalHTMLV2:', err);
+    }
+  };
+
+  return (
+    <ModalShell title="🗺️ Multi-City Proposal" onClose={onClose} onSubmit={generate} saving={false} err="" submitLabel="✈ Generate PDF">
+      <div style={{ fontSize: 12, color: '#6b7a99', marginBottom: 14, lineHeight: 1.6 }}>
+        Cities auto-filled from your hotels. Reorder, rename, or add stops as needed. Flights are matched to cities automatically by destination name.
+      </div>
+      {stops.map((stop, i) => (
+        <div key={i} style={{ border: '1px solid #e3eaf7', borderRadius: 12, padding: '12px 14px', marginBottom: 10, background: '#f9fafc' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{i + 1}</div>
+            <input value={stop.name} onChange={set(i, 'name')} placeholder="City name (e.g. Bangkok)" style={{ ...inputStyle, flex: 1, fontWeight: 700 }} />
+            <input type="number" value={stop.nights} onChange={set(i, 'nights')} placeholder="Nights" style={{ ...inputStyle, width: 72 }} />
+            <button type="button" onClick={() => move(i, -1)} disabled={i === 0} style={{ background: 'none', border: '1px solid #c2d2ee', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: '#5a6b8c' }}>↑</button>
+            <button type="button" onClick={() => move(i, 1)} disabled={i === stops.length - 1} style={{ background: 'none', border: '1px solid #c2d2ee', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 13, color: '#5a6b8c' }}>↓</button>
+            {stops.length > 1 && <button type="button" onClick={() => removeStop(i)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>✕</button>}
+          </div>
+          {(stop.hotels || []).length > 0 && (
+            <div style={{ fontSize: 11, color: '#5a6b8c', marginBottom: 3 }}>🏨 {stop.hotels.map((h) => h.hotelName || h.city).join(', ')}</div>
+          )}
+          {(stopsWithFlights[i]?.flights || []).length > 0 && (
+            <div style={{ fontSize: 11, color: '#059669', marginBottom: 3 }}>✈ {stopsWithFlights[i].flights.map((s) => `${s.from || ''}→${s.to || ''} ${s.date || ''}`).join(' · ')}</div>
+          )}
+          <textarea value={stop.notes} onChange={set(i, 'notes')} placeholder="Optional: highlights or day-wise notes for this city…" rows={2} style={{ ...inputStyle, resize: 'vertical', fontSize: 11.5, marginTop: 6 }} />
+        </div>
+      ))}
+      <button type="button" onClick={addStop} style={{ width: '100%', background: '#f4f7fc', border: '1px dashed #c2d2ee', borderRadius: 8, padding: 10, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#334e82', marginTop: 2 }}>+ Add City Stop</button>
+    </ModalShell>
+  );
+}
+
 function ProposalBuilderModal({ deal: initialDeal, allLeads, onClose, onDealUpdated }) {
   const [deal, setDeal] = useState(initialDeal);
   const [step, setStep] = useState('options'); // AI vibe/generation step removed — always start at options
@@ -10693,6 +10905,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             ) : (
               <button className="v2-hero-btn" onClick={() => window.veToast && window.veToast('No email on file', 'warning')}>✉ Email</button>
             )}
+            <button className="v2-hero-btn" onClick={() => setModal('multiCityProposal')}>🗺️ Multi-City Proposal</button>
             <button className="v2-hero-btn" onClick={() => setModal('link')}>🔗 Link Destinations</button>
             {linkedDeals.length > 1 && (
               <button className="v2-hero-btn" onClick={() => openCombinedProposalV2(linkedDeals)}>📚 Combined Proposal ({linkedDeals.length})</button>
@@ -11854,6 +12067,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           )}
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'dealCancellation' && <DealCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'multiCityProposal' && <MultiCityProposalModal deal={deal} onClose={() => setModal(null)} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {callScriptOpen && (
