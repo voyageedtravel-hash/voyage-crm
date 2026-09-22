@@ -3179,12 +3179,14 @@ function pickFallbackCoverV2(deal) {
     vietnam:   origin + '/hero/vietnam.jpg',
     thailand:  origin + '/hero/thailand.jpg',
     singapore: origin + '/hero/singapore.jpg',
+    dubai:     origin + '/hero/dubai.jpg',
   };
   // Destination-specific — checked first
   if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
   if (/\bvietnam\b|hanoi|ho chi minh|saigon|da nang|hoi an|halong|ha long|phu quoc|sapa|nha trang/.test(_d)) return HERO.vietnam;
   if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai/.test(_d)) return HERO.thailand;
   if (/\bsingapore\b|sentosa|marina bay/.test(_d)) return HERO.singapore;
+  if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa/.test(_d)) return HERO.dubai;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -3198,7 +3200,7 @@ function pickFallbackCoverV2(deal) {
   if (/kashmir|himachal|spiti|manali|shimla|leh|ladakh|nepal|bhutan|uttarakhand|mussoorie|nainital|darjeeling|gangtok|sikkim|swiss|alps/.test(_d)) return F.mountain;
   if (/norway|finland|sweden|denmark|iceland|scandinavia|lofoten|fjord/.test(_d)) return F.nordic;
   if (/paris|france|italy|europe|london|spain|portugal|amsterdam|prague|vienna|rome/.test(_d)) return F.europe;
-  if (/dubai|city|kuala|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
+  if (/city|kuala|hong kong|tokyo|delhi|mumbai/.test(_d)) return F.city;
   if (/goa|andaman/.test(_d)) return F.tropicboat;
   return F.beach;
 }
