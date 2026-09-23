@@ -13804,44 +13804,186 @@ const AIRLINE_ACCENT = {
 };
 const airlineAccent = (name) => AIRLINE_ACCENT[String(name || '').toLowerCase().trim()] || '#c9961a';
 
+// Country flag by IATA airport code / city name (subset covering common
+// India-outbound routes we see in flyers). Falls back to no flag.
+const _FLAG_BY_CODE = {
+  DEL: '🇮🇳', BOM: '🇮🇳', ATQ: '🇮🇳', BLR: '🇮🇳', HYD: '🇮🇳', CCU: '🇮🇳', MAA: '🇮🇳', AMD: '🇮🇳', GOI: '🇮🇳', PNQ: '🇮🇳', COK: '🇮🇳', IXC: '🇮🇳', LKO: '🇮🇳', JAI: '🇮🇳',
+  DXB: '🇦🇪', AUH: '🇦🇪', SHJ: '🇦🇪',
+  SIN: '🇸🇬',
+  BKK: '🇹🇭', HKT: '🇹🇭', KBV: '🇹🇭', CNX: '🇹🇭', DMK: '🇹🇭',
+  HAN: '🇻🇳', SGN: '🇻🇳', DAD: '🇻🇳', PQC: '🇻🇳',
+  DPS: '🇮🇩', CGK: '🇮🇩',
+  KUL: '🇲🇾', PEN: '🇲🇾',
+  MEL: '🇦🇺', SYD: '🇦🇺', BNE: '🇦🇺', PER: '🇦🇺',
+  FCO: '🇮🇹', MXP: '🇮🇹', VCE: '🇮🇹',
+  LHR: '🇬🇧', LGW: '🇬🇧', MAN: '🇬🇧',
+  CDG: '🇫🇷', ORY: '🇫🇷',
+  FRA: '🇩🇪', MUC: '🇩🇪',
+  AMS: '🇳🇱',
+  MAD: '🇪🇸', BCN: '🇪🇸',
+  YYZ: '🇨🇦', YVR: '🇨🇦', YYC: '🇨🇦', YUL: '🇨🇦',
+  JFK: '🇺🇸', LAX: '🇺🇸', EWR: '🇺🇸', SFO: '🇺🇸', ORD: '🇺🇸',
+  DOH: '🇶🇦',
+  IST: '🇹🇷',
+  HKG: '🇭🇰',
+  NRT: '🇯🇵', HND: '🇯🇵',
+  ICN: '🇰🇷',
+  MUC: '🇩🇪',
+  ZRH: '🇨🇭', GVA: '🇨🇭',
+  WAW: '🇵🇱',
+  HEL: '🇫🇮',
+  CMB: '🇱🇰',
+  KTM: '🇳🇵',
+  MLE: '🇲🇻',
+  JED: '🇸🇦', RUH: '🇸🇦',
+};
+const _CITY_FLAG_HINTS = [
+  [/dubai|abu dhabi|sharjah|uae/i, '🇦🇪'],
+  [/singapore/i, '🇸🇬'],
+  [/thailand|bangkok|phuket|krabi|pattaya/i, '🇹🇭'],
+  [/vietnam|hanoi|saigon|ho chi minh|da nang|halong|phu quoc/i, '🇻🇳'],
+  [/bali|denpasar|jakarta|indonesia/i, '🇮🇩'],
+  [/malaysia|kuala/i, '🇲🇾'],
+  [/melbourne|sydney|australia|brisbane/i, '🇦🇺'],
+  [/italy|rome|milan|venice|florence/i, '🇮🇹'],
+  [/paris|france|nice|lyon/i, '🇫🇷'],
+  [/london|uk|england|manchester/i, '🇬🇧'],
+  [/canada|toronto|vancouver|calgary|montreal/i, '🇨🇦'],
+  [/usa|america|new york|los angeles|san francisco/i, '🇺🇸'],
+  [/germany|frankfurt|munich|berlin/i, '🇩🇪'],
+  [/spain|madrid|barcelona/i, '🇪🇸'],
+  [/qatar|doha/i, '🇶🇦'],
+  [/saudi|jeddah|riyadh/i, '🇸🇦'],
+  [/turkey|istanbul/i, '🇹🇷'],
+  [/hong kong/i, '🇭🇰'],
+  [/japan|tokyo|osaka/i, '🇯🇵'],
+  [/korea|seoul/i, '🇰🇷'],
+  [/switzerland|zurich|geneva/i, '🇨🇭'],
+  [/poland|warsaw/i, '🇵🇱'],
+  [/finland|helsinki/i, '🇫🇮'],
+  [/sri lanka|colombo/i, '🇱🇰'],
+  [/nepal|kathmandu/i, '🇳🇵'],
+  [/maldives|male/i, '🇲🇻'],
+  [/india|delhi|mumbai|bangalore|chennai|kolkata|amritsar/i, '🇮🇳'],
+];
+function flagsForRoute(route, codes) {
+  const src = (String(route || '') + ' ' + String(codes || '')).toUpperCase();
+  const found = [];
+  const codeMatches = src.match(/\b[A-Z]{3}\b/g) || [];
+  codeMatches.forEach((cd) => { if (_FLAG_BY_CODE[cd] && !found.includes(_FLAG_BY_CODE[cd])) found.push(_FLAG_BY_CODE[cd]); });
+  if (found.length === 0) {
+    const s = String(route || '') + ' ' + String(codes || '');
+    for (const [rx, fg] of _CITY_FLAG_HINTS) if (rx.test(s) && !found.includes(fg)) found.push(fg);
+  }
+  return found.slice(0, 3);
+}
+
+// Pick a hero cover image based on the flyer's dominant destination.
+// Only uses locally-hosted heroes to keep JPEG export CORS-clean.
+function pickFlyerHero(sections) {
+  const all = (sections || []).map((s) => `${s.route || ''} ${s.routeCodes || ''}`).join(' ').toLowerCase();
+  const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : '';
+  if (/\bdubai\b|\buae\b|abu dhabi|sharjah|\bdxb\b|\bauh\b|\bshj\b/.test(all)) return origin + '/hero/dubai.jpg';
+  if (/\bbali\b|denpasar|\bdps\b/.test(all)) return origin + '/hero/bali.jpg';
+  if (/vietnam|hanoi|saigon|ho chi minh|\bhan\b|\bsgn\b|da nang|halong|\bdad\b/.test(all)) return origin + '/hero/vietnam.jpg';
+  if (/thailand|bangkok|phuket|krabi|pattaya|\bbkk\b|\bhkt\b/.test(all)) return origin + '/hero/thailand.jpg';
+  if (/\bsingapore\b|\bsin\b|sentosa|marina bay/.test(all)) return origin + '/hero/singapore.jpg';
+  return null;
+}
+
 function FlyerSection({ section }) {
   const accent = airlineAccent(section.airlineName);
+  const flags = flagsForRoute(section.route, section.routeCodes);
+  const fares = section.fares || [];
+  const minPrice = fares.filter((f) => f.price != null).reduce((m, f) => Math.min(m, Number(f.price) || Infinity), Infinity);
+  const showFrom = Number.isFinite(minPrice) && fares.length > 1;
   return (
-    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, padding: '18px 20px', boxShadow: '0 3px 10px rgba(15,35,80,.05)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <div style={{ width: 10, height: 10, borderRadius: '50%', background: accent }} />
-        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.2, color: accent, textTransform: 'uppercase' }}>
-          {section.airlineName || 'Airline'}{section.airlineCode ? ` · ${section.airlineCode}` : ''}
-        </div>
-      </div>
-      <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.15 }}>
-        {section.route || '—'}
-      </div>
-      {section.flightNumber && (
-        <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Flight: {section.flightNumber}</div>
-      )}
-      {(section.timing1 || section.timing2) && (
-        <div style={{ marginTop: 10, background: '#f4f7fc', borderRadius: 8, padding: '8px 12px', fontSize: 11.5, color: '#334e82', lineHeight: 1.7 }}>
-          {section.timing1 && <div>🕐 {section.timing1}</div>}
-          {section.timing2 && <div>🕐 {section.timing2}</div>}
-        </div>
-      )}
-      {(section.fares || []).length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          {(section.fares || []).map((f, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < section.fares.length - 1 ? '1px dashed #e3eaf7' : 'none' }}>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0d1b3e' }}>{f.date}</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: f.price != null ? '#c9961a' : '#a02a3a' }}>
-                {f.price != null ? `₹${Number(f.price).toLocaleString('en-IN')}` : (f.note || 'FARE ON CALL')}
-                {section.allInclusiveNote ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 4 }}>({section.allInclusiveNote})</span> : ''}
-              </span>
+    <div style={{
+      background: 'linear-gradient(180deg,#fff 0%,#fafcff 100%)',
+      border: '1px solid #e3eaf7',
+      borderRadius: 18,
+      overflow: 'hidden',
+      boxShadow: '0 6px 22px rgba(15,35,80,.08), 0 1px 3px rgba(15,35,80,.05)',
+      position: 'relative',
+    }}>
+      {/* Left accent stripe */}
+      <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: `linear-gradient(180deg,${accent} 0%,#c9961a 100%)` }} />
+
+      <div style={{ padding: '20px 22px 4px 26px' }}>
+        {/* Airline pill */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: `linear-gradient(135deg,${accent}18,${accent}08)`,
+            border: `1px solid ${accent}40`,
+            borderRadius: 999, padding: '5px 12px',
+          }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: accent, boxShadow: `0 0 0 3px ${accent}22` }} />
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.3, color: accent, textTransform: 'uppercase' }}>
+              {section.airlineName || 'Airline'}{section.airlineCode ? ` · ${section.airlineCode}` : ''}
             </div>
-          ))}
+          </div>
+          {showFrom && (
+            <div style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '4px 10px', borderRadius: 999, letterSpacing: 1 }}>
+              FROM ₹{Number(minPrice).toLocaleString('en-IN')}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Route + flags */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 26, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.5 }}>
+            {section.route || '—'}
+          </div>
+          {flags.length > 0 && (
+            <div style={{ fontSize: 16, letterSpacing: 2 }}>{flags.join(' ')}</div>
+          )}
+        </div>
+        {section.flightNumber && (
+          <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4, fontWeight: 600 }}>
+            ✈ Flight {section.flightNumber}
+          </div>
+        )}
+
+        {/* Timings */}
+        {(section.timing1 || section.timing2) && (
+          <div style={{ marginTop: 12, background: 'linear-gradient(135deg,#f4f7fc,#eef2f9)', border: '1px solid #e3eaf7', borderRadius: 10, padding: '10px 12px', fontSize: 11.5, color: '#334e82', lineHeight: 1.75, fontWeight: 600 }}>
+            {section.timing1 && <div>🕐 {section.timing1}</div>}
+            {section.timing2 && <div>🕐 {section.timing2}</div>}
+          </div>
+        )}
+
+        {/* Fares */}
+        {fares.length > 0 && (
+          <div style={{ marginTop: 14, background: '#fff', border: '1px solid #f0f2f7', borderRadius: 10, overflow: 'hidden' }}>
+            {fares.map((f, i) => (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '9px 14px',
+                background: i % 2 === 0 ? '#fff' : '#fafcff',
+                borderBottom: i < fares.length - 1 ? '1px solid #f4f7fc' : 'none',
+              }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .2 }}>{f.date}</span>
+                {f.price != null ? (
+                  <span style={{ fontSize: 14, fontWeight: 800, color: '#c9961a' }}>
+                    ₹{Number(f.price).toLocaleString('en-IN')}
+                    {section.allInclusiveNote ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg,#a02a3a,#c8102e)', padding: '3px 10px', borderRadius: 999, letterSpacing: 1 }}>
+                    {f.note || 'FARE ON CALL'}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Baggage */}
       {section.baggage && (
-        <div style={{ marginTop: 12, background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', textAlign: 'center', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
-          🧳 BAGGAGE: {section.baggage}
+        <div style={{ margin: '14px 22px 18px 26px', background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', textAlign: 'center', padding: '8px 12px', borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1.5 }}>
+          🧳 BAGGAGE · {section.baggage}
         </div>
       )}
     </div>
@@ -13851,68 +13993,131 @@ function FlyerSection({ section }) {
 function FlyerTemplateV1({ data, innerRef }) {
   const sections = data.sections || [];
   const cols = sections.length <= 1 ? 1 : sections.length === 2 ? 2 : sections.length <= 4 ? 2 : 3;
+  const heroImg = pickFlyerHero(sections);
+
+  // Faint decorative dot-grid SVG (my own drawing) used when no hero image
+  const dotPattern = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='2' cy='2' r='1' fill='%23f0c842' opacity='0.18'/></svg>`;
+
   return (
-    <div ref={innerRef} style={{ width: 900, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", Arial, sans-serif', color: '#33415e' }}>
-      {/* Header */}
-      <div style={{ background: 'linear-gradient(135deg,#0a1530,#0d1b3e 45%,#1a3060)', padding: '30px 40px 26px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: -60, right: -60, width: 220, height: 220, background: 'radial-gradient(circle,#c9961a33,transparent 65%)' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-          <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 56, borderRadius: 8, background: '#fff', padding: 6 }} />
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: .3 }}>VOYAGE-ED TRAVELS</div>
-            <div style={{ fontSize: 11, color: '#f0c842', letterSpacing: 3, fontWeight: 700 }}>YOUR JOURNEY · OUR PRIORITY</div>
-          </div>
-        </div>
-        <div style={{ fontFamily: 'Georgia, serif', fontSize: 34, fontWeight: 700, color: '#fff', lineHeight: 1.15, letterSpacing: .5 }}>
-          {data.title || 'EXCLUSIVE FLIGHT DEALS'}
-        </div>
-        {data.subtitle && (
-          <div style={{ fontSize: 13, color: '#f0c842', letterSpacing: 2.5, fontWeight: 700, marginTop: 6 }}>
-            {data.subtitle}
+    <div ref={innerRef} style={{ width: 900, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', color: '#33415e' }}>
+      {/* HERO */}
+      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 280 : 240 }}>
+        {heroImg ? (
+          <>
+            <img src={heroImg} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.55) 0%,rgba(10,21,48,.85) 100%)' }} />
+          </>
+        ) : (
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,#0a1530 0%,#0d1b3e 45%,#1a3060 100%)' }}>
+            <div style={{ position: 'absolute', inset: 0, backgroundImage: `url("${dotPattern}")`, opacity: .9 }} />
           </div>
         )}
+        {/* Gold flare corners */}
+        <div style={{ position: 'absolute', top: -80, right: -80, width: 280, height: 280, background: 'radial-gradient(circle,#f0c84255,transparent 65%)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', bottom: -100, left: -100, width: 320, height: 320, background: 'radial-gradient(circle,#c9961a33,transparent 65%)', pointerEvents: 'none' }} />
+
+        {/* Content */}
+        <div style={{ position: 'relative', padding: '32px 44px 30px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+            <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 60, borderRadius: 10, background: '#fff', padding: 7, boxShadow: '0 6px 18px rgba(0,0,0,.35)' }} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: .4, textShadow: '0 2px 8px rgba(0,0,0,.35)' }}>VOYAGE-ED TRAVELS</div>
+              <div style={{ fontSize: 10.5, color: '#f0c842', letterSpacing: 3.5, fontWeight: 700 }}>YOUR JOURNEY · OUR PRIORITY</div>
+            </div>
+            {sections.length > 0 && (
+              <div style={{ marginLeft: 'auto', background: 'rgba(240,200,66,.15)', border: '1.5px solid #f0c842', color: '#f0c842', borderRadius: 999, padding: '6px 14px', fontSize: 11, fontWeight: 800, letterSpacing: 2 }}>
+                {sections.length} {sections.length === 1 ? 'DEAL' : 'DEALS'}
+              </div>
+            )}
+          </div>
+
+          <div style={{ maxWidth: '85%' }}>
+            <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 38, fontWeight: 700, color: '#fff', lineHeight: 1.1, letterSpacing: .3, textShadow: '0 2px 12px rgba(0,0,0,.4)' }}>
+              {data.title || 'EXCLUSIVE FLIGHT DEALS'}
+            </div>
+            {data.subtitle && (
+              <div style={{ marginTop: 10, fontSize: 13, color: '#f0c842', letterSpacing: 3, fontWeight: 700 }}>
+                ✦ {data.subtitle} ✦
+              </div>
+            )}
+          </div>
+
+          {/* Gold divider */}
+          <div style={{ marginTop: 20, height: 3, width: 120, background: 'linear-gradient(90deg,#f0c842 0%,transparent 100%)', borderRadius: 3 }} />
+        </div>
       </div>
 
-      {/* Sections grid */}
-      <div style={{ padding: '28px 36px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16 }}>
+      {/* SECTIONS */}
+      <div style={{ padding: '32px 40px 20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 18 }}>
           {sections.map((s, i) => <FlyerSection key={i} section={s} />)}
         </div>
 
         {data.footerNote && (
-          <div style={{ marginTop: 20, textAlign: 'center', fontSize: 11, color: '#6b7a99', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
-            Terms &amp; Conditions Apply: {data.footerNote}
+          <div style={{ marginTop: 22, textAlign: 'center', fontSize: 10.5, color: '#6b7a99', letterSpacing: 1.8, fontWeight: 700, textTransform: 'uppercase' }}>
+            ✱ Terms &amp; Conditions Apply · {data.footerNote} ✱
           </div>
         )}
       </div>
 
-      {/* BOOK NOW banner */}
-      <div style={{ background: 'linear-gradient(135deg,#c9961a,#f0c842)', padding: '14px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: '#0d1b3e', letterSpacing: 2 }}>BOOK NOW</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#0d1b3e' }}>🌐 www.voyage-ed.com · 📞 +91 70096 59048</div>
-      </div>
-
-      {/* Contact footer */}
-      <div style={{ background: '#0a1530', padding: '22px 36px 24px', color: '#fff' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 22, fontSize: 12 }}>
-          <div>
-            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>VISHAL SHARMA</div>
-            <div style={{ opacity: .9 }}>📞 +91 70096 59048</div>
-            <div style={{ fontSize: 10.5, opacity: .6, marginTop: 3 }}>Co-Founder</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>SAHITYA SINGH</div>
-            <div style={{ opacity: .9 }}>📞 +91 98187 94297</div>
-            <div style={{ fontSize: 10.5, opacity: .6, marginTop: 3 }}>Co-Founder</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>OFFICE</div>
-            <div style={{ opacity: .9 }}>✉ enquiry@voyage-ed.com</div>
-            <div style={{ opacity: .9 }}>📷 @voyage.ed</div>
+      {/* BOOK NOW banner — three-block */}
+      <div style={{ background: 'linear-gradient(135deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)', padding: '18px 40px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: -30, left: '30%', width: 60, height: 60, background: 'radial-gradient(circle,rgba(255,255,255,.4),transparent 65%)' }} />
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+          <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', letterSpacing: 3, fontFamily: 'Georgia, serif' }}>BOOK NOW</div>
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontSize: 13, fontWeight: 800, color: '#0d1b3e' }}>
+            <div>🌐 voyage-ed.com</div>
+            <div style={{ opacity: .35 }}>│</div>
+            <div>📞 +91 70096 59048</div>
+            <div style={{ opacity: .35 }}>│</div>
+            <div>📷 @voyage.ed</div>
           </div>
         </div>
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(240,200,66,.2)', fontSize: 10, opacity: .55, textAlign: 'center', letterSpacing: 1 }}>
-          Suite 315, Regus GMADA Aerocity, Mohali 140306 · GSTIN 04ABBFV6015A1ZT
+      </div>
+
+      {/* CONTACT FOOTER */}
+      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#050b1e 100%)', padding: '26px 40px 22px', color: '#fff', position: 'relative' }}>
+        {/* Gold accent line */}
+        <div style={{ position: 'absolute', top: 0, left: 40, right: 40, height: 1, background: 'linear-gradient(90deg,transparent 0%,#f0c842 50%,transparent 100%)' }} />
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24, fontSize: 12 }}>
+          {/* Vishal */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>
+              VS
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Vishal Sharma</div>
+              <div style={{ fontSize: 9, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>CO-FOUNDER</div>
+              <div style={{ fontSize: 12, opacity: .9, marginTop: 3 }}>+91 70096 59048</div>
+            </div>
+          </div>
+          {/* Sahitya */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>
+              SS
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Sahitya Singh</div>
+              <div style={{ fontSize: 9, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>CO-FOUNDER</div>
+              <div style={{ fontSize: 12, opacity: .9, marginTop: 3 }}>+91 98187 94297</div>
+            </div>
+          </div>
+          {/* Office */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, flexShrink: 0 }}>
+              🏢
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Office</div>
+              <div style={{ fontSize: 9, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>MOHALI, INDIA</div>
+              <div style={{ fontSize: 11, opacity: .9, marginTop: 3 }}>enquiry@voyage-ed.com</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(240,200,66,.15)', fontSize: 10, opacity: .55, textAlign: 'center', letterSpacing: 1.2 }}>
+          Suite 315, Regus GMADA Aerocity, Mohali 140306, Punjab · GSTIN 04ABBFV6015A1ZT · IATA Accredited
         </div>
       </div>
     </div>
