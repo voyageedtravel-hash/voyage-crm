@@ -3090,11 +3090,83 @@ const blockFromDataURI = (dataURI) => {
   return null;
 };
 
+// Backend caps a single image at ~500KB base64 (~375KB raw) and up to 4
+// images per call, to prevent proxy abuse. Big vendor fare-sheet
+// screenshots (esp. multi-airline Canada / GCC boards) blow past that
+// as raw file uploads. This helper resizes each image to max 1800px on
+// its longest side and re-encodes as JPEG at progressively lower
+// quality until it fits comfortably under the cap while staying legible
+// for OCR-style extraction. PDFs are passed through untouched (they
+// compress differently and the model handles them well as-is).
+const MAX_IMG_BASE64_BYTES = 480000; // ~360KB raw — safe under backend 500KB cap
+async function _compressImageForAI(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const maxDim = 1800;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        // White background so transparent PNGs don't become black in JPEG.
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        // Progressive quality: 0.88 → 0.75 → 0.6 → 0.45. Stop as soon as we fit.
+        const tryQualities = [0.88, 0.75, 0.6, 0.45];
+        let dataUrl = '';
+        for (const q of tryQualities) {
+          dataUrl = canvas.toDataURL('image/jpeg', q);
+          const b64 = dataUrl.split(',')[1] || '';
+          if (b64.length <= MAX_IMG_BASE64_BYTES) return resolve(dataUrl);
+        }
+        // If even 0.45 is too big, shrink the canvas by 25% and retry once.
+        const shrunk = document.createElement('canvas');
+        shrunk.width = Math.round(w * 0.75); shrunk.height = Math.round(h * 0.75);
+        const sctx = shrunk.getContext('2d');
+        sctx.fillStyle = '#fff'; sctx.fillRect(0, 0, shrunk.width, shrunk.height);
+        sctx.drawImage(canvas, 0, 0, shrunk.width, shrunk.height);
+        for (const q of [0.75, 0.6, 0.45]) {
+          dataUrl = shrunk.toDataURL('image/jpeg', q);
+          const b64 = dataUrl.split(',')[1] || '';
+          if (b64.length <= MAX_IMG_BASE64_BYTES) return resolve(dataUrl);
+        }
+        // Give up — return the smallest we produced.
+        resolve(dataUrl);
+      } catch (e) { URL.revokeObjectURL(url); reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
+
+async function _fileToBlockForAI(file) {
+  // PDFs pass through unchanged — the model handles them natively.
+  if (file.type === 'application/pdf') {
+    const uri = await fileToDataURI(file);
+    return blockFromDataURI(uri);
+  }
+  // Images: compress first so we don't get rejected at the API edge.
+  if (file.type && file.type.indexOf('image') === 0) {
+    const uri = await _compressImageForAI(file);
+    return blockFromDataURI(uri);
+  }
+  // Unknown type — try raw pass-through.
+  const uri = await fileToDataURI(file);
+  return blockFromDataURI(uri);
+}
+
 async function runAIExtract(kind, files) {
-  const dataURIs = await Promise.all(files.map(fileToDataURI));
-  const content = dataURIs.map(blockFromDataURI).filter(Boolean);
-  if (!content.length) throw new Error('Could not read the attached file(s)');
-  content.push({ type: 'text', text: 'Extract from the attached file(s).' });
+  const blocks = (await Promise.all(files.map(_fileToBlockForAI))).filter(Boolean);
+  if (!blocks.length) throw new Error('Could not read the attached file(s)');
+  // Backend hard-caps at 4 images per call. Big flyers with more attachments
+  // get truncated with a helpful message rather than an opaque "invalid payload".
+  if (blocks.length > 4) throw new Error('Max 4 images per extraction — try uploading in smaller batches (4 at a time)');
+  const content = [...blocks, { type: 'text', text: 'Extract from the attached file(s).' }];
 
   const res = await fetch(`${apiBase()}/api/chat`, {
     method: 'POST',

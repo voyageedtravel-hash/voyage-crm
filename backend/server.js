@@ -427,9 +427,12 @@ const start = async () => {
       const msgs = Array.isArray(req.body.messages) ? req.body.messages.slice(0, 8) : [];
       let imgCount = 0, tooBig = false;
       msgs.forEach(m => { if (Array.isArray(m.content)) m.content.forEach(c => {
-        if (c && c.type === "image") { imgCount++; if (c.source && c.source.data && c.source.data.length > 500000) tooBig = true; }
+        if (c && c.type === "image") { imgCount++; if (c.source && c.source.data && c.source.data.length > 800000) tooBig = true; }
       }); });
-      if (!msgs.length || imgCount > 4 || tooBig) return res.status(400).json({ error: "invalid payload" });
+      // Backend cap kept generous (~600KB raw / 800KB base64) for detail-heavy
+      // fare-sheet screenshots; the frontend compressor targets ~360KB so
+      // this is mostly a safety net.
+      if (!msgs.length || imgCount > 4 || tooBig) return res.status(400).json({ error: "invalid payload — file too large or too many images" });
       const model = ALLOWED_MODELS.has(req.body.model) ? req.body.model : "claude-haiku-4-5-20251001";
       // Cap exists to stop abuse of this endpoint as an open proxy, but 3000 was
       // far too low for real work — it silently truncated 7+ day AI itineraries
