@@ -14002,7 +14002,7 @@ function FlyerSection({ section, dense }) {
               <div style={{
                 background: `linear-gradient(135deg,${accent} 0%,${accent}dd 100%)`,
                 color: '#fff',
-                fontSize: dense ? 14 : 16,
+                fontSize: dense ? 16 : 18,
                 fontWeight: 900,
                 letterSpacing: 1,
                 padding: dense ? '6px 10px' : '9px 12px',
@@ -14015,7 +14015,7 @@ function FlyerSection({ section, dense }) {
             )}
             <div style={{
               padding: dense ? '5px 12px' : '8px 15px',
-              fontSize: dense ? 12 : 13.5,
+              fontSize: dense ? 13.5 : 15,
               fontWeight: 800,
               color: accent,
               letterSpacing: .3,
@@ -14027,7 +14027,7 @@ function FlyerSection({ section, dense }) {
             </div>
           </div>
           {showFrom && (
-            <div style={{ marginLeft: 'auto', fontSize: dense ? 10.5 : 11, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: dense ? '4px 10px' : '5px 12px', borderRadius: 999, letterSpacing: 1, border: '1px solid #86efac', whiteSpace: 'nowrap' }}>
+            <div style={{ marginLeft: 'auto', fontSize: dense ? 12 : 12.5, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: dense ? '4px 10px' : '5px 12px', borderRadius: 999, letterSpacing: 1, border: '1px solid #86efac', whiteSpace: 'nowrap' }}>
               FROM ₹{Number(minPrice).toLocaleString('en-IN')}
             </div>
           )}
@@ -14035,15 +14035,15 @@ function FlyerSection({ section, dense }) {
 
         {/* Route + flags */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 22 : 27, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
+          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 26 : 30, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
             {section.route || '—'}
           </div>
           {flags.length > 0 && (
-            <div style={{ fontSize: dense ? 15 : 19, letterSpacing: 2 }}>{flags.join(' ')}</div>
+            <div style={{ fontSize: dense ? 17 : 20, letterSpacing: 2 }}>{flags.join(' ')}</div>
           )}
         </div>
         {section.flightNumber && (
-          <div style={{ fontSize: dense ? 11 : 12, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
+          <div style={{ fontSize: dense ? 12 : 13, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
             ✈ Flight {section.flightNumber}
           </div>
         )}
@@ -14055,7 +14055,7 @@ function FlyerSection({ section, dense }) {
           </div>
         )}
         {(section.timing1 || section.timing2) && dense && (
-          <div style={{ marginTop: 8, fontSize: 11, color: '#6b7a99', fontWeight: 600, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 8, fontSize: 12.5, color: '#6b7a99', fontWeight: 600, lineHeight: 1.5 }}>
             {section.timing1 && <div>🕐 {section.timing1}</div>}
             {section.timing2 && <div>🕐 {section.timing2}</div>}
           </div>
@@ -14070,9 +14070,9 @@ function FlyerSection({ section, dense }) {
                 background: i % 2 === 0 ? '#fff' : 'linear-gradient(90deg,#fafcff 0%,#fff 100%)',
                 borderBottom: i < displayFares.length - 1 ? '1px solid #f4f7fc' : 'none',
               }}>
-                <span style={{ fontSize: dense ? 12 : 13.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
+                <span style={{ fontSize: dense ? 13.5 : 15, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
                 {f.price != null ? (
-                  <span style={{ fontSize: dense ? 13.5 : 16, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
+                  <span style={{ fontSize: dense ? 15 : 17, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
                     ₹{Number(f.price).toLocaleString('en-IN')}
                     {section.allInclusiveNote && !dense ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
                   </span>
@@ -14093,7 +14093,7 @@ function FlyerSection({ section, dense }) {
       </div>
 
       {section.baggage && (
-        <div style={{ margin: dense ? '10px 14px 12px' : '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: dense ? '8px 12px' : '10px 14px', borderRadius: dense ? 8 : 10, fontSize: dense ? 11 : 12, fontWeight: 800, letterSpacing: 1.3, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
+        <div style={{ margin: dense ? '10px 14px 12px' : '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: dense ? '8px 12px' : '10px 14px', borderRadius: dense ? 8 : 10, fontSize: dense ? 12.5 : 13, fontWeight: 800, letterSpacing: 1.3, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
           🧳 {section.baggage}
         </div>
       )}
@@ -14103,7 +14103,6 @@ function FlyerSection({ section, dense }) {
 
 function FlyerTemplateV1({ data, innerRef }) {
   const sections = data.sections || [];
-  // Instagram-friendly column logic — 1080px canvas, dense grid when many sections
   const n = sections.length;
   const cols = n <= 1 ? 1 : n === 2 ? 2 : n <= 6 ? 3 : n <= 9 ? 3 : 4;
   const dense = n >= 7;
@@ -14117,12 +14116,12 @@ function FlyerTemplateV1({ data, innerRef }) {
 
   return (
     <div ref={innerRef} style={{ width: 1080, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', color: '#33415e' }}>
-      {/* CINEMATIC HERO */}
-      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 440 : 320 }}>
+      {/* COMPACT HERO */}
+      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 300 : 240 }}>
         {heroImg ? (
           <>
             <img src={heroImg} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 45%' }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.3) 0%,rgba(10,21,48,.55) 40%,rgba(10,21,48,.9) 100%)' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.3) 0%,rgba(10,21,48,.5) 40%,rgba(10,21,48,.88) 100%)' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,rgba(10,21,48,.55) 0%,transparent 45%,rgba(240,200,66,.1) 100%)' }} />
           </>
         ) : (
@@ -14131,65 +14130,57 @@ function FlyerTemplateV1({ data, innerRef }) {
           </div>
         )}
 
-        {/* Flare corners */}
-        <div style={{ position: 'absolute', top: -100, right: -80, width: 400, height: 400, background: 'radial-gradient(circle,#f0c84275 0%,#f0c84220 30%,transparent 65%)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: -140, left: -120, width: 460, height: 460, background: 'radial-gradient(circle,#c9961a45 0%,transparent 65%)', pointerEvents: 'none' }} />
-
-        {/* Diagonal light rays */}
-        <div style={{ position: 'absolute', top: 0, left: '18%', width: 3, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c8422a,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', top: 0, left: '62%', width: 5, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c84220,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: -80, right: -60, width: 340, height: 340, background: 'radial-gradient(circle,#f0c84275 0%,#f0c84220 30%,transparent 65%)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', bottom: -120, left: -100, width: 380, height: 380, background: 'radial-gradient(circle,#c9961a45 0%,transparent 65%)', pointerEvents: 'none' }} />
 
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)' }} />
 
-        {/* Content */}
-        <div style={{ position: 'relative', padding: '34px 48px 30px', display: 'flex', gap: 30 }}>
+        <div style={{ position: 'relative', padding: '26px 44px 26px', display: 'flex', gap: 24 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 22 }}>
-              <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 66, borderRadius: 12, background: '#fff', padding: 8, boxShadow: '0 8px 26px rgba(0,0,0,.5)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+              <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 58, borderRadius: 12, background: '#fff', padding: 7, boxShadow: '0 8px 26px rgba(0,0,0,.5)' }} />
               <div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: .5, textShadow: '0 2px 10px rgba(0,0,0,.6)' }}>VOYAGE-ED TRAVELS</div>
                 <div style={{ fontSize: 11, color: '#f0c842', letterSpacing: 3.8, fontWeight: 700, textShadow: '0 1px 4px rgba(0,0,0,.5)' }}>YOUR JOURNEY · OUR PRIORITY</div>
               </div>
             </div>
 
-            <div style={{ background: 'linear-gradient(135deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.02) 100%)', borderLeft: '3px solid #f0c842', padding: '6px 0 6px 20px' }}>
-              <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 44, fontWeight: 700, color: '#fff', lineHeight: 1.05, letterSpacing: .3, textShadow: '0 3px 18px rgba(0,0,0,.65)' }}>
+            <div style={{ background: 'linear-gradient(135deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.02) 100%)', borderLeft: '3px solid #f0c842', padding: '4px 0 4px 18px' }}>
+              <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 36, fontWeight: 700, color: '#fff', lineHeight: 1.05, letterSpacing: .3, textShadow: '0 3px 18px rgba(0,0,0,.65)' }}>
                 {data.title || 'EXCLUSIVE FLIGHT DEALS'}
               </div>
               {data.subtitle && (
-                <div style={{ marginTop: 10, fontSize: 14, color: '#f0c842', letterSpacing: 3, fontWeight: 700, textShadow: '0 2px 6px rgba(0,0,0,.4)' }}>
+                <div style={{ marginTop: 8, fontSize: 13, color: '#f0c842', letterSpacing: 3, fontWeight: 700, textShadow: '0 2px 6px rgba(0,0,0,.4)' }}>
                   ✦ {data.subtitle} ✦
                 </div>
               )}
             </div>
-
-            <div style={{ marginTop: 22, height: 3, width: 170, background: 'linear-gradient(90deg,#f0c842 0%,transparent 100%)', borderRadius: 3, boxShadow: '0 0 12px #f0c84288' }} />
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-end', flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end', flexShrink: 0 }}>
             {n > 0 && (
-              <div style={{ background: 'rgba(240,200,66,.2)', border: '1.5px solid #f0c842', color: '#f0c842', borderRadius: 999, padding: '8px 18px', fontSize: 12, fontWeight: 800, letterSpacing: 2, textShadow: '0 1px 3px rgba(0,0,0,.4)' }}>
+              <div style={{ background: 'rgba(240,200,66,.2)', border: '1.5px solid #f0c842', color: '#f0c842', borderRadius: 999, padding: '7px 16px', fontSize: 12, fontWeight: 800, letterSpacing: 2, textShadow: '0 1px 3px rgba(0,0,0,.4)' }}>
                 {n} {n === 1 ? 'DEAL' : 'DEALS'}
               </div>
             )}
             {startingFrom != null && (
               <div style={{
                 background: 'linear-gradient(135deg,#fff 0%,#fef8e5 100%)',
-                borderRadius: 18,
-                padding: '18px 24px',
+                borderRadius: 16,
+                padding: '14px 20px',
                 textAlign: 'right',
-                boxShadow: '0 16px 46px rgba(0,0,0,.45), 0 0 0 1px #f0c84255 inset',
-                minWidth: 200,
+                boxShadow: '0 14px 40px rgba(0,0,0,.45), 0 0 0 1px #f0c84255 inset',
+                minWidth: 195,
                 position: 'relative',
                 overflow: 'hidden',
               }}>
                 <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, background: 'radial-gradient(circle,#f0c84255,transparent 65%)' }} />
                 <div style={{ fontSize: 10, color: '#8a6b1a', fontWeight: 800, letterSpacing: 2.8, position: 'relative' }}>STARTING FROM</div>
-                <div style={{ fontSize: 38, fontWeight: 800, color: '#0d1b3e', lineHeight: 1, letterSpacing: -1.2, marginTop: 4, fontFamily: 'Georgia, serif', position: 'relative' }}>
+                <div style={{ fontSize: 34, fontWeight: 800, color: '#0d1b3e', lineHeight: 1, letterSpacing: -1.2, marginTop: 4, fontFamily: 'Georgia, serif', position: 'relative' }}>
                   ₹{Number(startingFrom).toLocaleString('en-IN')}
                 </div>
                 {maxPrice && maxPrice !== startingFrom && (
-                  <div style={{ fontSize: 10, color: '#a08040', fontWeight: 700, letterSpacing: 1, marginTop: 4, position: 'relative' }}>
+                  <div style={{ fontSize: 10, color: '#a08040', fontWeight: 700, letterSpacing: 1, marginTop: 3, position: 'relative' }}>
                     upto ₹{Number(maxPrice).toLocaleString('en-IN')}
                   </div>
                 )}
@@ -14202,14 +14193,14 @@ function FlyerTemplateV1({ data, innerRef }) {
       </div>
 
       {/* Trust badges strip */}
-      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#0d1b3e 100%)', padding: '12px 48px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32, borderBottom: '1px solid rgba(240,200,66,.2)' }}>
+      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#0d1b3e 100%)', padding: '10px 48px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32, borderBottom: '1px solid rgba(240,200,66,.2)' }}>
         {[
           ['🛡', 'SECURE PAYMENT'],
           ['⚡', 'INSTANT BOOKING'],
           ['🕐', '24/7 SUPPORT'],
           ['✈', 'IATA ACCREDITED'],
         ].map(([icon, text], i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: '#c9d4e8', fontWeight: 700, letterSpacing: 1.5 }}>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#c9d4e8', fontWeight: 700, letterSpacing: 1.5 }}>
             <span style={{ color: '#f0c842', fontSize: 14 }}>{icon}</span>
             {text}
           </div>
@@ -14223,62 +14214,60 @@ function FlyerTemplateV1({ data, innerRef }) {
         </div>
 
         {data.footerNote && (
-          <div style={{ marginTop: 22, textAlign: 'center', fontSize: 11, color: '#6b7a99', letterSpacing: 1.8, fontWeight: 700, textTransform: 'uppercase' }}>
+          <div style={{ marginTop: 22, textAlign: 'center', fontSize: 11.5, color: '#6b7a99', letterSpacing: 1.8, fontWeight: 700, textTransform: 'uppercase' }}>
             ✱ Terms &amp; Conditions Apply · {data.footerNote} ✱
           </div>
         )}
       </div>
 
-      {/* BOOK NOW banner */}
-      <div style={{ background: 'linear-gradient(135deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)', padding: '22px 48px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: -40, left: '25%', width: 110, height: 110, background: 'radial-gradient(circle,rgba(255,255,255,.6),transparent 65%)' }} />
-        <div style={{ position: 'absolute', top: -30, left: '65%', width: 90, height: 90, background: 'radial-gradient(circle,rgba(255,255,255,.45),transparent 65%)' }} />
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,.45)' }} />
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+      {/* CONSOLIDATED GOLD FOOTER — BOOK NOW + all contacts in one band */}
+      <div style={{ background: 'linear-gradient(135deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)', padding: '24px 44px 20px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: -60, left: '15%', width: 160, height: 160, background: 'radial-gradient(circle,rgba(255,255,255,.55),transparent 65%)' }} />
+        <div style={{ position: 'absolute', top: -40, left: '55%', width: 130, height: 130, background: 'radial-gradient(circle,rgba(255,255,255,.4),transparent 65%)' }} />
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,.5)' }} />
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1, background: 'rgba(13,27,62,.15)' }} />
+
+        {/* Top row: BOOK NOW + web/phone/insta pills */}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, paddingBottom: 16, borderBottom: '1.5px solid rgba(13,27,62,.15)' }}>
           <div>
             <div style={{ fontSize: 32, fontWeight: 800, color: '#0d1b3e', letterSpacing: 3, fontFamily: 'Georgia, serif', lineHeight: 1 }}>BOOK NOW</div>
-            <div style={{ fontSize: 10.5, color: '#0d1b3e', letterSpacing: 2.5, fontWeight: 800, marginTop: 4, opacity: .75 }}>LIMITED SEATS · CONFIRM TODAY</div>
+            <div style={{ fontSize: 11, color: '#0d1b3e', letterSpacing: 2.5, fontWeight: 800, marginTop: 4, opacity: .75 }}>LIMITED SEATS · CONFIRM TODAY</div>
           </div>
-          <div style={{ display: 'flex', gap: 24, alignItems: 'center', fontSize: 14, fontWeight: 800, color: '#0d1b3e' }}>
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontSize: 14, fontWeight: 800, color: '#0d1b3e' }}>
             <div>🌐 voyage-ed.com</div>
-            <div style={{ opacity: .35 }}>│</div>
-            <div>📞 +91 70096 59048</div>
             <div style={{ opacity: .35 }}>│</div>
             <div>📷 @voyage.ed</div>
           </div>
         </div>
-      </div>
 
-      {/* FOOTER */}
-      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#050b1e 100%)', padding: '26px 48px 22px', color: '#fff', position: 'relative' }}>
-        <div style={{ position: 'absolute', top: 0, left: 48, right: 48, height: 1, background: 'linear-gradient(90deg,transparent 0%,#f0c842 50%,transparent 100%)' }} />
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 26, fontSize: 12 }}>
+        {/* Bottom row: Vishal + Sahitya + Office */}
+        <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, marginTop: 16 }}>
           {[
-            { label: 'VS', name: 'Vishal Sharma', role: 'CO-FOUNDER', detail: '+91 70096 59048' },
-            { label: 'SS', name: 'Sahitya Singh', role: 'CO-FOUNDER', detail: '+91 98187 94297' },
-            { label: '🏢', name: 'Office', role: 'MOHALI, INDIA', detail: 'enquiry@voyage-ed.com' },
+            { label: 'VS', name: 'Vishal Sharma', role: 'CO-FOUNDER', line1: '📞 +91 70096 59048' },
+            { label: 'SS', name: 'Sahitya Singh', role: 'CO-FOUNDER', line1: '📞 +91 98187 94297' },
+            { label: '✉', name: 'Office', role: 'MOHALI, INDIA', line1: 'enquiry@voyage-ed.com' },
           ].map((p, i) => (
-            <div key={i} style={{ display: 'flex', gap: 13, alignItems: 'center' }}>
+            <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <div style={{
-                width: 50, height: 50, borderRadius: '50%',
-                background: 'linear-gradient(135deg,#c9961a,#f0c842)',
-                color: '#0d1b3e', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: p.label.length > 2 ? 22 : 18, fontWeight: 800, flexShrink: 0,
-                boxShadow: '0 4px 14px rgba(240,200,66,.4), 0 0 0 2px rgba(240,200,66,.18)',
+                width: 46, height: 46, borderRadius: '50%',
+                background: 'linear-gradient(135deg,#0d1b3e,#1a3060)',
+                color: '#f0c842', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: p.label.length > 2 ? 20 : 16, fontWeight: 800, flexShrink: 0,
+                boxShadow: '0 4px 12px rgba(13,27,62,.35), 0 0 0 2px rgba(255,255,255,.35)',
               }}>
                 {p.label}
               </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#f0c842' }}>{p.name}</div>
-                <div style={{ fontSize: 9.5, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>{p.role}</div>
-                <div style={{ fontSize: 12, opacity: .9, marginTop: 3 }}>{p.detail}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: '#0d1b3e', lineHeight: 1.2 }}>{p.name}</div>
+                <div style={{ fontSize: 9.5, color: '#7a5a12', letterSpacing: 1.5, fontWeight: 800 }}>{p.role}</div>
+                <div style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 700, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.line1}</div>
               </div>
             </div>
           ))}
         </div>
 
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(240,200,66,.15)', fontSize: 10.5, opacity: .55, textAlign: 'center', letterSpacing: 1.2 }}>
+        {/* Address & GSTIN line */}
+        <div style={{ position: 'relative', marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(13,27,62,.15)', fontSize: 10.5, color: '#5a3f0e', textAlign: 'center', letterSpacing: 1.2, fontWeight: 700 }}>
           Suite 315, Regus GMADA Aerocity, Mohali 140306, Punjab · GSTIN 04ABBFV6015A1ZT
         </div>
       </div>
