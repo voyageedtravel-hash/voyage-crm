@@ -51,6 +51,7 @@ const NAV_SECTIONS = [
     items: [
       { key: 'accounts', label: 'Accounts', icon: '◆', match: /account|ledger/i },
       { key: 'reports', label: 'Reports', icon: '◕', match: /report|analytic/i },
+      { key: 'flyerstudio', label: 'Flyer Studio', icon: '◈', match: /flyer/i },
     ],
   },
   {

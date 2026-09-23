@@ -3046,6 +3046,7 @@ const AIX_SYS = {
   passport: 'You extract traveller identity details from passport / Aadhaar / ID images for a travel agency CRM. Multiple documents may be attached — output one entry per person. Output ONLY valid JSON, no markdown: {"travellers":[{"firstName":string,"lastName":string,"salutation":"Mr|Mrs|Ms|Mstr|Miss","gender":"Male|Female","dob":"YYYY-MM-DD","idType":"Passport|Aadhaar|Other","passportNo":string,"passportIssue":"YYYY-MM-DD","passportExpiry":"YYYY-MM-DD","nationality":string}]}. RULES: (1) firstName = given name(s) exactly as printed. (2) If the document has NO surname/last name, set lastName to "LNU" (Last Name Unknown — airline convention). (3) salutation from gender+age: adult male Mr, adult female Mrs/Ms, boy child Mstr, girl child Miss. (4) For Aadhaar cards fill passportNo with the Aadhaar number and idType "Aadhaar"; leave passport dates empty. (5) Missing fields = empty string. Read MRZ when available — it is the most reliable source.',
   land: 'You extract land package / itinerary details for a travel agency CRM. From the given image(s)/text (DMC quotes, itinerary PDFs/screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"costPrice":number|null,"itinerary":string}. itinerary must be day-wise plain text, each day starting on a new line as "Day 1: ...", "Day 2: ..." with full activity details preserved. costPrice = total land cost if visible.',
   cruise: 'You extract cruise booking details for a travel agency CRM. From the given image(s)/text (cruise line confirmations, booking screenshots, emails, quotes), output ONLY valid JSON, no markdown: {"vendorName":string,"shipName":string,"cruiseLine":string,"deckNumber":string,"cabinCategory":string,"cabinNumber":string,"portOfEmbarkation":string,"portOfDisembarkation":string,"checkIn":"YYYY-MM-DD","checkOut":"YYYY-MM-DD","costPrice":number|null,"itinerary":string}. cabinCategory must be one of: Inside Stateroom, Oceanview (Window), Oceanview (Porthole), Balcony, Veranda, Mini Suite, Suite, Grand Suite — pick the closest match. itinerary = port-by-port day-wise plan as plain text ("Day 1: Embarkation at Barcelona\\nDay 2: At Sea\\nDay 3: Marseille, France" etc). Missing fields = empty string or null.',
+  flyer: 'You extract fare-sheet data from a travel B2B/consolidator marketing image for a travel agency to build its own branded fare sheet. Output ONLY valid JSON, no markdown, no explanation: {"title":string,"subtitle":string,"footerNote":string,"sections":[{"airlineName":string,"airlineCode":string,"route":string,"routeCodes":string,"flightNumber":string,"timing1":string,"timing2":string,"fares":[{"date":string,"price":number|null,"note":string}],"baggage":string,"allInclusiveNote":string}]}. RULES: (1) title = the main headline of the sheet if any (e.g. "EXCLUSIVE GCC FIXED DEPARTURES", "FLY TO CANADA") or empty. (2) subtitle = tagline shown near the title (e.g. "COMFORT. CONNECTION. MEMORIES.") or empty. (3) One "section" per distinct route/airline block on the sheet — a flyer often has several blocks. (4) airlineName = readable name as shown ("Air India", "Singapore Airlines", "Vietnam Airlines", "Emirates"); airlineCode = 2-letter IATA ("AI", "SQ", "VN", "EK"), or empty. (5) route = human string like "DELHI-DUBAI" or "DELHI - MELBOURNE"; routeCodes = codes like "DEL-DXB" or "DEL-SIN-MEL". (6) flightNumber = the flight number if printed, else empty. (7) timing1 = the first timings line, e.g. "DEL 11:45 - DXB 14:00"; timing2 = second timings line for connecting/return direction if present. (8) fares = every date+price row in order as printed. date = string exactly as printed ("30 SEP", "01,02,03,04 OCT", "17 NOV"). price = numeric INR value (17900 not "17,900") or null if not numeric. note = "FARE ON CALL" or similar text when there is no price, else empty. (9) baggage = baggage line for that block ("30KG + 7KG", "2PC + 7KG"), or empty. (10) allInclusiveNote = "ALL INCLUSIVE" or similar tag when present, else empty. (11) footerNote = footer disclaimer like "NON REFUNDABLE & NON CHANGEABLE" or empty. Never invent data. If unclear, leave empty. Extract every fare row visible.',
   insurance: 'You extract travel insurance policy details for a travel agency CRM. From the given image(s)/text (policy documents, insurance certificates, screenshots, emails), output ONLY valid JSON, no markdown: {"vendorName":string,"policyNumber":string,"policyType":string,"coverageAmount":number|null,"premium":number|null,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","coveredTravellers":number|null,"sumInsured":string,"costPrice":number|null}. policyType examples: Comprehensive Travel, Trip Cancellation, Medical Only, Baggage Loss, Adventure Sports Cover. premium = the amount charged. costPrice = same as premium if visible. Missing fields = empty string or null.',
 };
 
@@ -13742,6 +13743,430 @@ function DetailedReport({ leads }) {
   );
 }
 
+// ═════════════════════════════════════════════════════════════════════
+//  FLYER STUDIO — extract facts from vendor B2B fare sheets, apply
+//  markup, render in ORIGINAL Voyage-Ed template, download as JPEG.
+//  Airline references are text-only (nominative fair use). Template
+//  is Voyage-Ed's own navy+gold design, not derived from any specific
+//  vendor's flyer.
+// ═════════════════════════════════════════════════════════════════════
+
+// Airline brand-color hints — used only to color a small text badge,
+// nothing else. Empty → neutral gold accent.
+const AIRLINE_ACCENT = {
+  'air india': '#c81f2b',
+  'air india express': '#e75817',
+  'indigo': '#0b298f',
+  'vistara': '#4b1a58',
+  'akasa': '#eb6a17',
+  'spicejet': '#a02a3a',
+  'emirates': '#c8102e',
+  'etihad': '#b28c4b',
+  'qatar airways': '#5c0e2d',
+  'singapore airlines': '#0d1b3e',
+  'thai airways': '#4b1a8a',
+  'thai smile': '#c81c73',
+  'malaysia airlines': '#0b467a',
+  'airasia': '#c8102e',
+  'air asia': '#c8102e',
+  'vietnam airlines': '#164a97',
+  'vietjet': '#c8102e',
+  'cathay pacific': '#004a30',
+  'oman air': '#2a4d3c',
+  'saudia': '#0b6b3a',
+  'air arabia': '#3c1a5b',
+  'flydubai': '#003f6b',
+  'lufthansa': '#0b3f7a',
+  'british airways': '#0b3f7a',
+  'air france': '#0b1f4a',
+  'klm': '#00a1de',
+  'turkish airlines': '#c8102e',
+  'ita airways': '#125a3c',
+  'ita': '#125a3c',
+  'finnair': '#0d1b8a',
+  'lot': '#0b3f7a',
+  'lot polish airlines': '#0b3f7a',
+  'ana': '#0b2c6b',
+  'jal': '#a02a3a',
+  'japan airlines': '#a02a3a',
+  'korean air': '#2a4d8a',
+  'asiana': '#c8102e',
+  'united': '#0b2c6b',
+  'american airlines': '#0b3f7a',
+  'delta': '#a02a3a',
+  'air canada': '#c8102e',
+  'westjet': '#0b3f7a',
+  'qantas': '#c8102e',
+  'virgin australia': '#c8102e',
+  'srilankan': '#5c0e2d',
+  'gulf air': '#c88a2a',
+  'kuwait airways': '#0b6b3a',
+};
+const airlineAccent = (name) => AIRLINE_ACCENT[String(name || '').toLowerCase().trim()] || '#c9961a';
+
+function FlyerSection({ section }) {
+  const accent = airlineAccent(section.airlineName);
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, padding: '18px 20px', boxShadow: '0 3px 10px rgba(15,35,80,.05)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div style={{ width: 10, height: 10, borderRadius: '50%', background: accent }} />
+        <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.2, color: accent, textTransform: 'uppercase' }}>
+          {section.airlineName || 'Airline'}{section.airlineCode ? ` · ${section.airlineCode}` : ''}
+        </div>
+      </div>
+      <div style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.15 }}>
+        {section.route || '—'}
+      </div>
+      {section.flightNumber && (
+        <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 2 }}>Flight: {section.flightNumber}</div>
+      )}
+      {(section.timing1 || section.timing2) && (
+        <div style={{ marginTop: 10, background: '#f4f7fc', borderRadius: 8, padding: '8px 12px', fontSize: 11.5, color: '#334e82', lineHeight: 1.7 }}>
+          {section.timing1 && <div>🕐 {section.timing1}</div>}
+          {section.timing2 && <div>🕐 {section.timing2}</div>}
+        </div>
+      )}
+      {(section.fares || []).length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {(section.fares || []).map((f, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: i < section.fares.length - 1 ? '1px dashed #e3eaf7' : 'none' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0d1b3e' }}>{f.date}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: f.price != null ? '#c9961a' : '#a02a3a' }}>
+                {f.price != null ? `₹${Number(f.price).toLocaleString('en-IN')}` : (f.note || 'FARE ON CALL')}
+                {section.allInclusiveNote ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 4 }}>({section.allInclusiveNote})</span> : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {section.baggage && (
+        <div style={{ marginTop: 12, background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', textAlign: 'center', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>
+          🧳 BAGGAGE: {section.baggage}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FlyerTemplateV1({ data, innerRef }) {
+  const sections = data.sections || [];
+  const cols = sections.length <= 1 ? 1 : sections.length === 2 ? 2 : sections.length <= 4 ? 2 : 3;
+  return (
+    <div ref={innerRef} style={{ width: 900, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", Arial, sans-serif', color: '#33415e' }}>
+      {/* Header */}
+      <div style={{ background: 'linear-gradient(135deg,#0a1530,#0d1b3e 45%,#1a3060)', padding: '30px 40px 26px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: -60, right: -60, width: 220, height: 220, background: 'radial-gradient(circle,#c9961a33,transparent 65%)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+          <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 56, borderRadius: 8, background: '#fff', padding: 6 }} />
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', letterSpacing: .3 }}>VOYAGE-ED TRAVELS</div>
+            <div style={{ fontSize: 11, color: '#f0c842', letterSpacing: 3, fontWeight: 700 }}>YOUR JOURNEY · OUR PRIORITY</div>
+          </div>
+        </div>
+        <div style={{ fontFamily: 'Georgia, serif', fontSize: 34, fontWeight: 700, color: '#fff', lineHeight: 1.15, letterSpacing: .5 }}>
+          {data.title || 'EXCLUSIVE FLIGHT DEALS'}
+        </div>
+        {data.subtitle && (
+          <div style={{ fontSize: 13, color: '#f0c842', letterSpacing: 2.5, fontWeight: 700, marginTop: 6 }}>
+            {data.subtitle}
+          </div>
+        )}
+      </div>
+
+      {/* Sections grid */}
+      <div style={{ padding: '28px 36px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 16 }}>
+          {sections.map((s, i) => <FlyerSection key={i} section={s} />)}
+        </div>
+
+        {data.footerNote && (
+          <div style={{ marginTop: 20, textAlign: 'center', fontSize: 11, color: '#6b7a99', letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
+            Terms &amp; Conditions Apply: {data.footerNote}
+          </div>
+        )}
+      </div>
+
+      {/* BOOK NOW banner */}
+      <div style={{ background: 'linear-gradient(135deg,#c9961a,#f0c842)', padding: '14px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ fontSize: 20, fontWeight: 800, color: '#0d1b3e', letterSpacing: 2 }}>BOOK NOW</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#0d1b3e' }}>🌐 www.voyage-ed.com · 📞 +91 70096 59048</div>
+      </div>
+
+      {/* Contact footer */}
+      <div style={{ background: '#0a1530', padding: '22px 36px 24px', color: '#fff' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 22, fontSize: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>VISHAL SHARMA</div>
+            <div style={{ opacity: .9 }}>📞 +91 70096 59048</div>
+            <div style={{ fontSize: 10.5, opacity: .6, marginTop: 3 }}>Co-Founder</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>SAHITYA SINGH</div>
+            <div style={{ opacity: .9 }}>📞 +91 98187 94297</div>
+            <div style={{ fontSize: 10.5, opacity: .6, marginTop: 3 }}>Co-Founder</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: '#f0c842', letterSpacing: 2, fontWeight: 800, marginBottom: 4 }}>OFFICE</div>
+            <div style={{ opacity: .9 }}>✉ enquiry@voyage-ed.com</div>
+            <div style={{ opacity: .9 }}>📷 @voyage.ed</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(240,200,66,.2)', fontSize: 10, opacity: .55, textAlign: 'center', letterSpacing: 1 }}>
+          Suite 315, Regus GMADA Aerocity, Mohali 140306 · GSTIN 04ABBFV6015A1ZT
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlyerStudioPage() {
+  const [step, setStep] = React.useState('upload'); // upload, preview, generated
+  const [data, setData] = React.useState(null);
+  const [markup, setMarkup] = React.useState('2000');
+  const [markupApplied, setMarkupApplied] = React.useState(false);
+  const [extracting, setExtracting] = React.useState(false);
+  const [editText, setEditText] = React.useState('');
+  const [showEdit, setShowEdit] = React.useState(false);
+  const [reviewing, setReviewing] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const flyerRef = React.useRef(null);
+
+  const processFiles = async (files) => {
+    setExtracting(true); setErr('');
+    try {
+      const j = await runAIExtract('flyer', files);
+      // Basic sanity — expect { sections: [...] }
+      if (!j || !Array.isArray(j.sections)) throw new Error('AI could not read a fare-sheet structure from this image');
+      setData(j);
+      setMarkupApplied(false);
+      setStep('preview');
+    } catch (e) {
+      setErr(e.message || 'Extraction failed');
+    }
+    setExtracting(false);
+  };
+
+  const applyMarkupAndContinue = () => {
+    const mk = Number(markup) || 0;
+    setData((d) => ({
+      ...d,
+      sections: (d.sections || []).map((s) => ({
+        ...s,
+        fares: (s.fares || []).map((f) => ({
+          ...f,
+          price: (f.price != null && !isNaN(f.price)) ? Number(f.price) + mk : f.price,
+        })),
+      })),
+    }));
+    setMarkupApplied(true);
+    setStep('generated');
+  };
+
+  const updateSection = (idx, key, val) => setData((d) => {
+    const sections = [...(d.sections || [])];
+    sections[idx] = { ...sections[idx], [key]: val };
+    return { ...d, sections };
+  });
+  const updateFarePrice = (secIdx, fareIdx, val) => setData((d) => {
+    const sections = [...(d.sections || [])];
+    sections[secIdx] = { ...sections[secIdx] };
+    sections[secIdx].fares = [...(sections[secIdx].fares || [])];
+    sections[secIdx].fares[fareIdx] = { ...sections[secIdx].fares[fareIdx], price: val === '' ? null : Number(val) };
+    return { ...d, sections };
+  });
+  const removeSection = (idx) => setData((d) => ({ ...d, sections: (d.sections || []).filter((_, i) => i !== idx) }));
+
+  const applyEdit = async () => {
+    if (!editText.trim()) return;
+    setReviewing(true); setErr('');
+    try {
+      const res = await fetch(`${apiBase()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 16000,
+          system: 'You edit a travel fare-sheet JSON per the user instruction (may be Hinglish). Output ONLY the updated JSON with the same schema — no markdown, no explanation. Keep the same top-level keys: title, subtitle, footerNote, sections. Each section keeps its keys: airlineName, airlineCode, route, routeCodes, flightNumber, timing1, timing2, fares[], baggage, allInclusiveNote. Do NOT invent data; only apply what the user asked.',
+          messages: [{
+            role: 'user',
+            content: 'Current fare-sheet JSON:\n' + JSON.stringify(data) + '\n\nUser edit instruction:\n' + editText,
+          }],
+        }),
+      });
+      const j = await res.json();
+      const txt = ((j.content || []).map((c) => c.text || '').join('') || '').replace(/```json|```/g, '').trim();
+      const m = txt.match(/\{[\s\S]*\}/);
+      const updated = JSON.parse(m ? m[0] : txt);
+      if (!updated || !Array.isArray(updated.sections)) throw new Error('AI returned an unexpected structure');
+      setData(updated);
+      setEditText('');
+      setShowEdit(false);
+      window.veToast && window.veToast('Flyer updated ✓', 'success');
+    } catch (e) {
+      setErr('Edit failed: ' + (e.message || 'unknown'));
+    }
+    setReviewing(false);
+  };
+
+  const downloadJPEG = async () => {
+    if (!flyerRef.current) return;
+    setDownloading(true); setErr('');
+    try {
+      const mod = await import('html-to-image');
+      const dataUrl = await mod.toJpeg(flyerRef.current, {
+        quality: 0.95,
+        backgroundColor: '#f4f6fb',
+        pixelRatio: 2,
+        cacheBust: true,
+      });
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      link.download = `voyage-ed-flyer-${stamp}.jpg`;
+      link.href = dataUrl;
+      link.click();
+      window.veToast && window.veToast('Flyer downloaded ✓', 'success');
+    } catch (e) {
+      setErr('Download failed: ' + (e.message || 'unknown'));
+    }
+    setDownloading(false);
+  };
+
+  const resetAll = () => { setStep('upload'); setData(null); setMarkup('2000'); setMarkupApplied(false); setErr(''); setEditText(''); setShowEdit(false); };
+
+  return (
+    <div className="v2-content-inner">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <h1 className="v2-page-title">🎨 Flyer Studio</h1>
+        {step !== 'upload' && (
+          <button className="v2-hero-btn" onClick={resetAll}>↺ Start over</button>
+        )}
+      </div>
+      <p style={{ color: '#5a6b8c', fontSize: 13, marginBottom: 20, lineHeight: 1.6 }}>
+        Vendor B2B flyer upload karo → AI prices/routes/dates extract karega → apna markup daalo → Voyage-Ed branded flyer JPEG mein download karo. Design Voyage-Ed's own original template hai — vendor ka logo/contact automatically hat jaata hai.
+      </p>
+
+      {err && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '10px 14px', borderRadius: 8, fontSize: 12, marginBottom: 14 }}>
+          ⚠️ {err}
+        </div>
+      )}
+
+      {/* STEP 1: UPLOAD */}
+      {step === 'upload' && (
+        <div style={{ background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e3eaf7' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e', marginBottom: 12 }}>1. Upload vendor flyer(s)</div>
+          <PasteZone
+            hint="Click here, then paste (Ctrl+V) the B2B flyer image(s) — one page or many, mixed sectors ok"
+            accept="image/*,.pdf"
+            multiple
+            onFiles={processFiles}
+            extracting={extracting}
+          />
+        </div>
+      )}
+
+      {/* STEP 2: PREVIEW & MARKUP */}
+      {step === 'preview' && data && (
+        <div>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e3eaf7', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e', marginBottom: 12 }}>2. Extracted data — quick review</div>
+            {(data.sections || []).map((s, si) => (
+              <div key={si} style={{ border: '1px solid #e3eaf7', borderRadius: 10, padding: 12, marginBottom: 10, background: '#f9fafc' }}>
+                <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input value={s.airlineName || ''} onChange={(e) => updateSection(si, 'airlineName', e.target.value)} placeholder="Airline" style={{ ...inputStyle, flex: '1 1 160px', fontWeight: 700 }} />
+                  <input value={s.route || ''} onChange={(e) => updateSection(si, 'route', e.target.value)} placeholder="Route" style={{ ...inputStyle, flex: '1 1 200px', fontWeight: 700 }} />
+                  <button type="button" onClick={() => removeSection(si)} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 16, cursor: 'pointer' }} title="Remove section">✕</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 6 }}>
+                  {(s.fares || []).map((f, fi) => (
+                    <div key={fi} style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#fff', border: '1px solid #e3eaf7', borderRadius: 6, padding: '4px 8px' }}>
+                      <span style={{ fontSize: 11.5, color: '#0d1b3e', fontWeight: 700, flex: 1 }}>{f.date}</span>
+                      <span style={{ fontSize: 11, color: '#6b7a99' }}>₹</span>
+                      <input
+                        type="number"
+                        value={f.price == null ? '' : f.price}
+                        onChange={(e) => updateFarePrice(si, fi, e.target.value)}
+                        placeholder="On call"
+                        style={{ width: 80, border: 'none', outline: 'none', fontSize: 12, fontWeight: 700, color: '#c9961a', textAlign: 'right' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #c9961a' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e', marginBottom: 10 }}>3. Markup — har price mein ye amount add hoga</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#c9961a' }}>+ ₹</span>
+              <input type="number" value={markup} onChange={(e) => setMarkup(e.target.value)} placeholder="e.g. 2000" style={{ ...inputStyle, width: 140, fontSize: 18, fontWeight: 800, color: '#0d1b3e' }} />
+              <span style={{ fontSize: 12, color: '#6b7a99' }}>per fare. Sab dates pe apply hoga. (0 daalo agar markup nahi chahiye.)</span>
+              <button
+                type="button"
+                onClick={applyMarkupAndContinue}
+                style={{ background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', border: 'none', borderRadius: 10, padding: '10px 22px', fontSize: 13, fontWeight: 800, cursor: 'pointer', marginLeft: 'auto' }}
+              >
+                ✨ Generate Flyer →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: RENDERED FLYER + CONFIRM/EDIT */}
+      {step === 'generated' && data && (
+        <div>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #e3eaf7', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e' }}>4. Preview — kaisi lag rahi hai?</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setShowEdit((v) => !v)} disabled={reviewing} style={{ background: '#fff', color: '#0d1b3e', border: '1.5px solid #c9961a', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+                  ✏️ Edit
+                </button>
+                <button type="button" onClick={downloadJPEG} disabled={downloading} style={{ background: 'linear-gradient(135deg,#15803d,#22a04e)', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 20px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                  {downloading ? '⏳ Making JPEG…' : '✅ Confirm & Download JPEG'}
+                </button>
+              </div>
+            </div>
+
+            {showEdit && (
+              <div style={{ background: '#fdf9ee', border: '1px solid #c9961a', borderRadius: 10, padding: 14, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: '#0d1b3e', marginBottom: 8, fontWeight: 700 }}>
+                  Kya edit karna hai? Hinglish mein likho — AI samjhega.
+                </div>
+                <textarea
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  rows={3}
+                  placeholder={'Examples:\n• "17 Nov wali row hataa do"\n• "title change karke Fly to Dubai kar do"\n• "Air India section ka baggage 40kg kar do"\n• "sab prices pe 1000 aur add kar do"'}
+                  style={{ ...inputStyle, width: '100%', resize: 'vertical', fontSize: 12.5, fontFamily: 'inherit' }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => { setShowEdit(false); setEditText(''); }} disabled={reviewing} style={{ background: 'none', border: '1px solid #c2d2ee', borderRadius: 8, padding: '7px 14px', fontSize: 12, cursor: 'pointer', color: '#5a6b8c' }}>Cancel</button>
+                  <button type="button" onClick={applyEdit} disabled={reviewing || !editText.trim()} style={{ background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+                    {reviewing ? '⏳ Applying…' : '✨ Apply edit'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rendered flyer — this element gets exported to JPEG */}
+          <div style={{ background: '#e6ecf6', padding: 14, borderRadius: 14, overflow: 'auto' }}>
+            <FlyerTemplateV1 data={data} innerRef={flyerRef} />
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 11, color: '#6b7a99', textAlign: 'center' }}>
+            💡 JPEG ~1800px wide (retina-scale) hogi — WhatsApp, Instagram, aur email attachment ke liye ready.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsV2({ leads }) {
   const bookedDeals = useMemo(() => leads.filter(isBookedStage), [leads]);
 
@@ -14704,7 +15129,7 @@ function UsersV2() {
 
 /* ─── ROUTER ─────────────────────────────────────────── */
 
-const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'live', 'travelled', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'users'];
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'live', 'travelled', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'flyerstudio', 'users'];
 
 // ── Floating AI Assistant ────────────────────────────────────────────────
 // Ports V1's bottom-right chat widget: natural-language commands that either
@@ -15003,6 +15428,7 @@ export default function V2Pages() {
   if (route === 'tasks') return wrap(<TasksV2 tasks={tasks} leads={items} refetch={refetchTasks} />);
   if (route === 'accounts') return wrap(<AccountsV2 leads={items} onDealClick={openDeal} />);
   if (route === 'reports') return wrap(<ReportsV2 leads={items} />);
+  if (route === 'flyerstudio') return wrap(<FlyerStudioPage />);
   if (route === 'users') return wrap(<UsersV2 />);
   return wrap(<DashboardV2 leads={items} onDealClick={openDeal} onLeadCreated={refetch} />);
 }
