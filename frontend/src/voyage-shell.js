@@ -132,7 +132,7 @@ function Sidebar() {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
         live: 'live', travelled: 'travelled',
         clients: 'clients', proposals: 'proposals', vendors: 'vendors',
-        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', users: 'users',
+        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', flyerstudio: 'flyerstudio', users: 'users',
       };
       if (v2Routable[key]) {
         // Primary path: direct imperative call, no event/listener race possible.
