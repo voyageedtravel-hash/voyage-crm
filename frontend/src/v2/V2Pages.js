@@ -6393,9 +6393,43 @@ function SectorRowV2FlightBase({ sector, i, onChange, onRemove, showRemove, labe
 //    actual textarea further down) got no feedback at all. When onPlainText
 //    is supplied, plain-text paste now routes straight into it.
 function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, summary }) {
+  // QUEUE MODE: pasted / dropped / picked files are collected first and only
+  // sent to AI when the user presses Enter or clicks "Read all". All queued
+  // files go to AI in ONE call (runAIExtract already supports many files),
+  // so e.g. 3 flight screenshots are read together and merged into one result.
   const fileInputRef = React.useRef(null);
   const cameraInputRef = React.useRef(null);
+  const zoneRef = React.useRef(null);
   const [dragOver, setDragOver] = React.useState(false);
+  const [queue, setQueue] = React.useState([]); // [{ id, file, url }]
+
+  const isOk = (f) => f && f.type && (f.type.indexOf('image') === 0 || f.type === 'application/pdf');
+  const addToQueue = (files) => {
+    const valid = files.filter(isOk);
+    if (!valid.length) return;
+    const items = valid.map((f, i) => ({
+      id: 'q_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2, 6),
+      file: f,
+      url: f.type.indexOf('image') === 0 ? URL.createObjectURL(f) : '',
+    }));
+    setQueue((q) => {
+      if (!multiple) { q.forEach((x) => x.url && URL.revokeObjectURL(x.url)); return items.slice(0, 1); }
+      return [...q, ...items];
+    });
+    setTimeout(() => zoneRef.current && zoneRef.current.focus(), 0);
+  };
+  const removeFromQueue = (id) => setQueue((q) => {
+    const it = q.find((x) => x.id === id); if (it && it.url) URL.revokeObjectURL(it.url);
+    return q.filter((x) => x.id !== id);
+  });
+  const clearQueue = () => setQueue((q) => { q.forEach((x) => x.url && URL.revokeObjectURL(x.url)); return []; });
+  const readAll = () => {
+    if (extracting || !queue.length) return;
+    const files = queue.map((x) => x.file);
+    clearQueue();
+    onFiles(files);
+  };
+  React.useEffect(() => () => { queue.forEach((x) => x.url && URL.revokeObjectURL(x.url)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePaste = (e) => {
     const items = Array.from(e.clipboardData.items || []);
@@ -6405,7 +6439,7 @@ function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, s
       .filter(Boolean);
     if (files.length) {
       e.preventDefault();
-      onFiles(files);
+      addToQueue(files);
       return;
     }
     if (onPlainText) {
@@ -6416,27 +6450,32 @@ function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, s
       }
     }
   };
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && queue.length) {
+      e.preventDefault(); e.stopPropagation();
+      readAll();
+    }
+  };
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files || []);
-    if (files.length) onFiles(files);
+    if (files.length) addToQueue(files);
     e.target.value = '';
   };
-  // Drag-and-drop support — a very common way to add screenshots that V2
-  // was missing. Users drag a file (or multiple files, if `multiple`) from
-  // their file manager or download bar and drop them onto this zone; same
-  // handler path as file-picker / clipboard paste.
   const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); };
   const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); };
   const handleDrop = (e) => {
     e.preventDefault(); e.stopPropagation(); setDragOver(false);
-    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type && (f.type.indexOf('image') === 0 || f.type === 'application/pdf'));
-    if (files.length) onFiles(multiple ? files : files.slice(0, 1));
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) addToQueue(multiple ? files : files.slice(0, 1));
   };
 
+  const n = queue.length;
   return (
     <div
+      ref={zoneRef}
       tabIndex={0}
       onPaste={handlePaste}
+      onKeyDown={handleKeyDown}
       onDragOver={handleDragOver}
       onDragEnter={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -6454,45 +6493,58 @@ function PasteZone({ hint, accept, multiple, onFiles, extracting, onPlainText, s
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: 20 }}>{extracting ? '⏳' : dragOver ? '📥' : '✨'}</span>
         <span style={{ fontSize: 12.5, color: '#0d1b3e', fontWeight: 600 }}>
-          {extracting ? 'Reading file…' : dragOver ? 'Drop file(s) here to extract' : hint}
+          {extracting ? 'AI saare screenshots ek saath padh raha hai…' : dragOver ? 'Drop file(s) here' : hint}
         </span>
       </div>
-      {multiple && !extracting && !dragOver && (
+      {multiple && !extracting && !dragOver && n === 0 && (
         <div style={{ fontSize: 10.5, color: '#7d8bab', marginTop: 4, marginLeft: 30 }}>
-          💡 Multiple screenshots supported — paste one after another, or drag &amp; drop several files at once
+          💡 Jitne screenshots chahiye sab paste karo (Ctrl+V baar baar) — phir <b>Enter</b> dabao ya <b>Read all</b> button. AI sab ek saath padhega.
         </div>
       )}
-      <button
-        type="button"
-        disabled={extracting}
-        onClick={() => fileInputRef.current && fileInputRef.current.click()}
-        style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: '#334e82', fontSize: 11.5, fontWeight: 700, textDecoration: 'underline', cursor: extracting ? 'wait' : 'pointer' }}
-      >
-        {multiple ? 'or choose file(s) to upload — hold Ctrl/Cmd to pick multiple' : 'or choose a file to upload'}
-      </button>
-      <input ref={fileInputRef} type="file" accept={accept} multiple={!!multiple} onChange={handleFileChange} disabled={extracting} style={{ display: 'none' }} />
 
-      {/* Camera capture — on Fold5 / any mobile this opens the native
-          camera app directly (with document scan / edge detection mode
-          when available). Desktop browsers usually treat capture as a
-          hint and just show a file picker, so we render this button
-          unconditionally — worst case it just acts as another file
-          picker on desktop, best case (mobile) it opens the camera. */}
-      {!extracting && (
-        <label style={{ display: 'inline-block', marginTop: 8, marginLeft: 12 }}>
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-          />
-          <span style={{ background: '#0d1b3e', color: '#c9961a', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', display: 'inline-block' }}>
-            📷 Scan with camera
-          </span>
-        </label>
+      {n > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {queue.map((q, i) => (
+              <div key={q.id} style={{ position: 'relative', width: 78, height: 60, borderRadius: 8, overflow: 'hidden', border: '1px solid #e3d5a8', background: '#fff' }}>
+                {q.url
+                  ? <img src={q.url} alt={'screenshot ' + (i + 1)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#5a6b8c', padding: 4, textAlign: 'center' }}><span style={{ fontSize: 18 }}>📄</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 70 }}>{q.file.name || 'PDF'}</span></div>}
+                <span style={{ position: 'absolute', left: 3, top: 3, background: 'rgba(13,27,62,.85)', color: '#f0c842', fontSize: 9.5, fontWeight: 800, borderRadius: 4, padding: '1px 5px' }}>{i + 1}</span>
+                {!extracting && (
+                  <button type="button" onClick={() => removeFromQueue(q.id)} title="Remove" style={{ position: 'absolute', right: 2, top: 2, width: 18, height: 18, borderRadius: '50%', border: 'none', background: '#dc2626', color: '#fff', fontSize: 10, lineHeight: '18px', padding: 0, cursor: 'pointer' }}>✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+          {!extracting && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+              <button type="button" onClick={readAll} style={{ background: 'linear-gradient(135deg,#0d1b3e,#1a3060)', color: '#f0c842', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+                ✨ Read all {n} {n === 1 ? 'file' : 'screenshots'} with AI
+              </button>
+              <button type="button" onClick={clearQueue} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Clear all</button>
+              <span style={{ fontSize: 10.5, color: '#7d8bab' }}>{multiple ? 'Aur paste karte raho, ya Enter dabao ↵' : 'Enter dabao ↵'}</span>
+            </div>
+          )}
+        </div>
       )}
+
+      {!extracting && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+            style={{ background: 'none', border: 'none', padding: 0, color: '#334e82', fontSize: 11.5, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}
+          >
+            {multiple ? 'or choose file(s) — hold Ctrl/Cmd to pick multiple' : 'or choose a file'}
+          </button>
+          <label style={{ display: 'inline-block', marginLeft: 12 }}>
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
+            <span style={{ background: '#0d1b3e', color: '#c9961a', borderRadius: 6, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', display: 'inline-block' }}>📷 Scan with camera</span>
+          </label>
+        </div>
+      )}
+      <input ref={fileInputRef} type="file" accept={accept} multiple={!!multiple} onChange={handleFileChange} disabled={extracting} style={{ display: 'none' }} />
 
       {summary && <div style={{ fontSize: 11, color: '#059669', marginTop: 8 }}>{summary}</div>}
     </div>
