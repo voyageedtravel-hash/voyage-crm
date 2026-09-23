@@ -14002,20 +14002,20 @@ function FlyerSection({ section, dense }) {
               <div style={{
                 background: `linear-gradient(135deg,${accent} 0%,${accent}dd 100%)`,
                 color: '#fff',
-                fontSize: dense ? 12 : 15,
+                fontSize: dense ? 14 : 16,
                 fontWeight: 900,
                 letterSpacing: 1,
-                padding: dense ? '5px 8px' : '8px 10px',
+                padding: dense ? '6px 10px' : '9px 12px',
                 fontFamily: 'Georgia, serif',
-                minWidth: dense ? 34 : 42,
+                minWidth: dense ? 38 : 46,
                 textAlign: 'center',
               }}>
                 {airlineCode}
               </div>
             )}
             <div style={{
-              padding: dense ? '4px 10px' : '7px 14px',
-              fontSize: dense ? 10.5 : 12.5,
+              padding: dense ? '5px 12px' : '8px 15px',
+              fontSize: dense ? 12 : 13.5,
               fontWeight: 800,
               color: accent,
               letterSpacing: .3,
@@ -14027,7 +14027,7 @@ function FlyerSection({ section, dense }) {
             </div>
           </div>
           {showFrom && (
-            <div style={{ marginLeft: 'auto', fontSize: dense ? 9 : 10, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: dense ? '3px 8px' : '5px 12px', borderRadius: 999, letterSpacing: 1, border: '1px solid #86efac', whiteSpace: 'nowrap' }}>
+            <div style={{ marginLeft: 'auto', fontSize: dense ? 10.5 : 11, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: dense ? '4px 10px' : '5px 12px', borderRadius: 999, letterSpacing: 1, border: '1px solid #86efac', whiteSpace: 'nowrap' }}>
               FROM ₹{Number(minPrice).toLocaleString('en-IN')}
             </div>
           )}
@@ -14035,15 +14035,15 @@ function FlyerSection({ section, dense }) {
 
         {/* Route + flags */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 18 : 26, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
+          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 22 : 27, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
             {section.route || '—'}
           </div>
           {flags.length > 0 && (
-            <div style={{ fontSize: dense ? 13 : 18, letterSpacing: 2 }}>{flags.join(' ')}</div>
+            <div style={{ fontSize: dense ? 15 : 19, letterSpacing: 2 }}>{flags.join(' ')}</div>
           )}
         </div>
         {section.flightNumber && (
-          <div style={{ fontSize: dense ? 9.5 : 11, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
+          <div style={{ fontSize: dense ? 11 : 12, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
             ✈ Flight {section.flightNumber}
           </div>
         )}
@@ -14055,7 +14055,7 @@ function FlyerSection({ section, dense }) {
           </div>
         )}
         {(section.timing1 || section.timing2) && dense && (
-          <div style={{ marginTop: 8, fontSize: 9.5, color: '#6b7a99', fontWeight: 600, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#6b7a99', fontWeight: 600, lineHeight: 1.5 }}>
             {section.timing1 && <div>🕐 {section.timing1}</div>}
             {section.timing2 && <div>🕐 {section.timing2}</div>}
           </div>
@@ -14066,25 +14066,25 @@ function FlyerSection({ section, dense }) {
             {displayFares.map((f, i) => (
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: dense ? '6px 10px' : '10px 14px',
+                padding: dense ? '8px 12px' : '11px 15px',
                 background: i % 2 === 0 ? '#fff' : 'linear-gradient(90deg,#fafcff 0%,#fff 100%)',
                 borderBottom: i < displayFares.length - 1 ? '1px solid #f4f7fc' : 'none',
               }}>
-                <span style={{ fontSize: dense ? 10.5 : 12.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
+                <span style={{ fontSize: dense ? 12 : 13.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
                 {f.price != null ? (
-                  <span style={{ fontSize: dense ? 11.5 : 15, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
+                  <span style={{ fontSize: dense ? 13.5 : 16, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
                     ₹{Number(f.price).toLocaleString('en-IN')}
                     {section.allInclusiveNote && !dense ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
                   </span>
                 ) : (
-                  <span style={{ fontSize: dense ? 9 : 11, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg,#a02a3a,#c8102e)', padding: dense ? '2px 7px' : '3px 10px', borderRadius: 999, letterSpacing: .8 }}>
+                  <span style={{ fontSize: dense ? 10.5 : 12, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg,#a02a3a,#c8102e)', padding: dense ? '3px 9px' : '4px 11px', borderRadius: 999, letterSpacing: .8 }}>
                     {f.note || 'ON CALL'}
                   </span>
                 )}
               </div>
             ))}
             {truncated > 0 && (
-              <div style={{ padding: '5px 10px', background: '#f4f7fc', textAlign: 'center', fontSize: 9.5, color: '#6b7a99', fontWeight: 700, letterSpacing: .5 }}>
+              <div style={{ padding: '6px 12px', background: '#f4f7fc', textAlign: 'center', fontSize: 11, color: '#6b7a99', fontWeight: 700, letterSpacing: .5 }}>
                 +{truncated} more dates
               </div>
             )}
@@ -14093,7 +14093,7 @@ function FlyerSection({ section, dense }) {
       </div>
 
       {section.baggage && (
-        <div style={{ margin: dense ? '10px 14px 12px' : '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: dense ? '6px 10px' : '9px 12px', borderRadius: dense ? 8 : 10, fontSize: dense ? 9.5 : 11, fontWeight: 800, letterSpacing: 1.3, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
+        <div style={{ margin: dense ? '10px 14px 12px' : '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: dense ? '8px 12px' : '10px 14px', borderRadius: dense ? 8 : 10, fontSize: dense ? 11 : 12, fontWeight: 800, letterSpacing: 1.3, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
           🧳 {section.baggage}
         </div>
       )}
@@ -14384,7 +14384,7 @@ function FlyerStudioPage() {
       const dataUrl = await mod.toJpeg(flyerRef.current, {
         quality: 0.95,
         backgroundColor: '#f4f6fb',
-        pixelRatio: 2,
+        pixelRatio: 3,
         cacheBust: true,
       });
       const link = document.createElement('a');
