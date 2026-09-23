@@ -14118,10 +14118,10 @@ function FlyerTemplateV1({ data, innerRef }) {
   return (
     <div ref={innerRef} style={{ width: 1080, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', color: '#33415e' }}>
       {/* CINEMATIC HERO */}
-      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 380 : 320 }}>
+      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 440 : 320 }}>
         {heroImg ? (
           <>
-            <img src={heroImg} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.05)' }} />
+            <img src={heroImg} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 45%' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.3) 0%,rgba(10,21,48,.55) 40%,rgba(10,21,48,.9) 100%)' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,rgba(10,21,48,.55) 0%,transparent 45%,rgba(240,200,66,.1) 100%)' }} />
           </>
