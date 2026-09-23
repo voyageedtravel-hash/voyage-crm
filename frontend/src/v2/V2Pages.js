@@ -13960,62 +13960,65 @@ function pickFlyerHero(sections) {
   if (/vietnam|hanoi|saigon|ho chi minh|\bhan\b|\bsgn\b|da nang|halong|\bdad\b/.test(all)) return origin + '/hero/vietnam.jpg';
   if (/thailand|bangkok|phuket|krabi|pattaya|\bbkk\b|\bhkt\b/.test(all)) return origin + '/hero/thailand.jpg';
   if (/\bsingapore\b|\bsin\b|sentosa|marina bay/.test(all)) return origin + '/hero/singapore.jpg';
+  if (/canada|toronto|vancouver|calgary|montreal|edmonton|ottawa|\byyz\b|\byvr\b|\byyc\b|\byul\b|\byeg\b|\byow\b/.test(all)) return origin + '/hero/canada.jpg';
   return null;
 }
 
-function FlyerSection({ section }) {
+function FlyerSection({ section, dense }) {
   const accent = airlineAccent(section.airlineName);
   const flags = flagsForRoute(section.route, section.routeCodes);
   const fares = section.fares || [];
   const minPrice = fares.filter((f) => f.price != null).reduce((m, f) => Math.min(m, Number(f.price) || Infinity), Infinity);
-  const showFrom = Number.isFinite(minPrice) && fares.length > 1;
+  const showFrom = Number.isFinite(minPrice);
   const airlineCode = (section.airlineCode || '').toUpperCase().slice(0, 3);
+  // Truncate to 8 fares max when dense (many sections) to keep card heights sane
+  const displayFares = dense ? fares.slice(0, 8) : fares;
+  const truncated = fares.length - displayFares.length;
+  const pad = dense ? '14px 14px 4px' : '18px 22px 4px';
   return (
     <div style={{
       background: 'linear-gradient(180deg,#fff 0%,#fafcff 100%)',
       border: '1px solid #e3eaf7',
-      borderRadius: 18,
+      borderRadius: dense ? 14 : 18,
       overflow: 'hidden',
-      boxShadow: '0 10px 30px rgba(15,35,80,.09), 0 2px 6px rgba(15,35,80,.06)',
+      boxShadow: '0 10px 28px rgba(15,35,80,.09), 0 2px 6px rgba(15,35,80,.06)',
       position: 'relative',
     }}>
-      {/* Top brand bar — colored strip in airline accent */}
-      <div style={{ height: 5, background: `linear-gradient(90deg,${accent} 0%,${accent} 60%,#c9961a 100%)` }} />
-      {/* Corner glow */}
-      <div style={{ position: 'absolute', top: -50, right: -50, width: 160, height: 160, background: `radial-gradient(circle,${accent}22,transparent 65%)`, pointerEvents: 'none' }} />
+      <div style={{ height: dense ? 4 : 5, background: `linear-gradient(90deg,${accent} 0%,${accent} 60%,#c9961a 100%)` }} />
+      <div style={{ position: 'absolute', top: -50, right: -50, width: 140, height: 140, background: `radial-gradient(circle,${accent}22,transparent 65%)`, pointerEvents: 'none' }} />
 
-      <div style={{ padding: '18px 22px 4px 22px' }}>
-        {/* Premium airline chip */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div style={{ padding: pad }}>
+        {/* Airline chip */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: dense ? 10 : 14, flexWrap: 'wrap' }}>
           <div style={{
-            display: 'inline-flex', alignItems: 'stretch', gap: 0,
+            display: 'inline-flex', alignItems: 'stretch',
             background: '#fff',
             border: `1.5px solid ${accent}55`,
-            borderRadius: 10,
+            borderRadius: 8,
             overflow: 'hidden',
-            boxShadow: `0 3px 10px ${accent}22`,
+            boxShadow: `0 2px 8px ${accent}22`,
           }}>
             {airlineCode && (
               <div style={{
                 background: `linear-gradient(135deg,${accent} 0%,${accent}dd 100%)`,
                 color: '#fff',
-                fontSize: 15,
+                fontSize: dense ? 12 : 15,
                 fontWeight: 900,
                 letterSpacing: 1,
-                padding: '8px 10px',
-                fontFamily: 'Georgia, "Times New Roman", serif',
-                minWidth: 42,
+                padding: dense ? '5px 8px' : '8px 10px',
+                fontFamily: 'Georgia, serif',
+                minWidth: dense ? 34 : 42,
                 textAlign: 'center',
               }}>
                 {airlineCode}
               </div>
             )}
             <div style={{
-              padding: '7px 14px',
-              fontSize: 12.5,
+              padding: dense ? '4px 10px' : '7px 14px',
+              fontSize: dense ? 10.5 : 12.5,
               fontWeight: 800,
               color: accent,
-              letterSpacing: .5,
+              letterSpacing: .3,
               display: 'flex',
               alignItems: 'center',
               background: `linear-gradient(135deg,${accent}0a 0%,#fff 100%)`,
@@ -14024,66 +14027,74 @@ function FlyerSection({ section }) {
             </div>
           </div>
           {showFrom && (
-            <div style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: '5px 12px', borderRadius: 999, letterSpacing: 1.2, border: '1px solid #86efac' }}>
+            <div style={{ marginLeft: 'auto', fontSize: dense ? 9 : 10, fontWeight: 800, color: '#15803d', background: 'linear-gradient(135deg,#dcfce7,#bbf7d0)', padding: dense ? '3px 8px' : '5px 12px', borderRadius: 999, letterSpacing: 1, border: '1px solid #86efac', whiteSpace: 'nowrap' }}>
               FROM ₹{Number(minPrice).toLocaleString('en-IN')}
             </div>
           )}
         </div>
 
         {/* Route + flags */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 26, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.5 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 18 : 26, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
             {section.route || '—'}
           </div>
           {flags.length > 0 && (
-            <div style={{ fontSize: 18, letterSpacing: 3 }}>{flags.join(' ')}</div>
+            <div style={{ fontSize: dense ? 13 : 18, letterSpacing: 2 }}>{flags.join(' ')}</div>
           )}
         </div>
         {section.flightNumber && (
-          <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4, fontWeight: 600 }}>
+          <div style={{ fontSize: dense ? 9.5 : 11, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
             ✈ Flight {section.flightNumber}
           </div>
         )}
 
-        {/* Timings */}
-        {(section.timing1 || section.timing2) && (
+        {(section.timing1 || section.timing2) && !dense && (
           <div style={{ marginTop: 12, background: 'linear-gradient(135deg,#f4f7fc,#eef2f9)', border: '1px solid #e3eaf7', borderRadius: 10, padding: '10px 12px', fontSize: 11.5, color: '#334e82', lineHeight: 1.75, fontWeight: 600 }}>
             {section.timing1 && <div>🕐 {section.timing1}</div>}
             {section.timing2 && <div>🕐 {section.timing2}</div>}
           </div>
         )}
+        {(section.timing1 || section.timing2) && dense && (
+          <div style={{ marginTop: 8, fontSize: 9.5, color: '#6b7a99', fontWeight: 600, lineHeight: 1.5 }}>
+            {section.timing1 && <div>🕐 {section.timing1}</div>}
+            {section.timing2 && <div>🕐 {section.timing2}</div>}
+          </div>
+        )}
 
-        {/* Fares */}
-        {fares.length > 0 && (
-          <div style={{ marginTop: 14, background: '#fff', border: '1px solid #f0f2f7', borderRadius: 10, overflow: 'hidden' }}>
-            {fares.map((f, i) => (
+        {displayFares.length > 0 && (
+          <div style={{ marginTop: dense ? 10 : 14, background: '#fff', border: '1px solid #f0f2f7', borderRadius: dense ? 8 : 10, overflow: 'hidden' }}>
+            {displayFares.map((f, i) => (
               <div key={i} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 14px',
+                padding: dense ? '6px 10px' : '10px 14px',
                 background: i % 2 === 0 ? '#fff' : 'linear-gradient(90deg,#fafcff 0%,#fff 100%)',
-                borderBottom: i < fares.length - 1 ? '1px solid #f4f7fc' : 'none',
+                borderBottom: i < displayFares.length - 1 ? '1px solid #f4f7fc' : 'none',
               }}>
-                <span style={{ fontSize: 12.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .2 }}>{f.date}</span>
+                <span style={{ fontSize: dense ? 10.5 : 12.5, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
                 {f.price != null ? (
-                  <span style={{ fontSize: 15, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
+                  <span style={{ fontSize: dense ? 11.5 : 15, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
                     ₹{Number(f.price).toLocaleString('en-IN')}
-                    {section.allInclusiveNote ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
+                    {section.allInclusiveNote && !dense ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
                   </span>
                 ) : (
-                  <span style={{ fontSize: 11, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg,#a02a3a,#c8102e)', padding: '3px 10px', borderRadius: 999, letterSpacing: 1 }}>
-                    {f.note || 'FARE ON CALL'}
+                  <span style={{ fontSize: dense ? 9 : 11, fontWeight: 800, color: '#fff', background: 'linear-gradient(135deg,#a02a3a,#c8102e)', padding: dense ? '2px 7px' : '3px 10px', borderRadius: 999, letterSpacing: .8 }}>
+                    {f.note || 'ON CALL'}
                   </span>
                 )}
               </div>
             ))}
+            {truncated > 0 && (
+              <div style={{ padding: '5px 10px', background: '#f4f7fc', textAlign: 'center', fontSize: 9.5, color: '#6b7a99', fontWeight: 700, letterSpacing: .5 }}>
+                +{truncated} more dates
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Baggage */}
       {section.baggage && (
-        <div style={{ margin: '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: '9px 12px', borderRadius: 10, fontSize: 11, fontWeight: 800, letterSpacing: 1.5, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
-          🧳 BAGGAGE · {section.baggage}
+        <div style={{ margin: dense ? '10px 14px 12px' : '14px 22px 18px', background: 'linear-gradient(135deg,#0d1b3e 0%,#1a3060 60%,#0d1b3e 100%)', color: '#f0c842', textAlign: 'center', padding: dense ? '6px 10px' : '9px 12px', borderRadius: dense ? 8 : 10, fontSize: dense ? 9.5 : 11, fontWeight: 800, letterSpacing: 1.3, boxShadow: 'inset 0 1px 0 rgba(240,200,66,.2)' }}>
+          🧳 {section.baggage}
         </div>
       )}
     </div>
@@ -14092,28 +14103,27 @@ function FlyerSection({ section }) {
 
 function FlyerTemplateV1({ data, innerRef }) {
   const sections = data.sections || [];
-  const cols = sections.length <= 1 ? 1 : sections.length === 2 ? 2 : sections.length <= 4 ? 2 : 3;
+  // Instagram-friendly column logic — 1080px canvas, dense grid when many sections
+  const n = sections.length;
+  const cols = n <= 1 ? 1 : n === 2 ? 2 : n <= 6 ? 3 : n <= 9 ? 3 : 4;
+  const dense = n >= 7;
   const heroImg = pickFlyerHero(sections);
 
-  // Compute the "starting from" price across the whole flyer — big
-  // eye-catcher above the fold.
   const allPrices = sections.flatMap((s) => (s.fares || [])).map((f) => Number(f.price)).filter((p) => p > 0 && Number.isFinite(p));
   const startingFrom = allPrices.length ? Math.min(...allPrices) : null;
   const maxPrice = allPrices.length ? Math.max(...allPrices) : null;
 
-  // Faint decorative dot-grid SVG (my own drawing) used when no hero image
   const dotPattern = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><circle cx='2' cy='2' r='1' fill='%23f0c842' opacity='0.18'/></svg>`;
 
   return (
-    <div ref={innerRef} style={{ width: 900, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', color: '#33415e' }}>
+    <div ref={innerRef} style={{ width: 1080, background: 'linear-gradient(180deg,#f4f6fb 0%,#e6ecf6 100%)', fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif', color: '#33415e' }}>
       {/* CINEMATIC HERO */}
-      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 400 : 340 }}>
+      <div style={{ position: 'relative', overflow: 'hidden', minHeight: heroImg ? 380 : 320 }}>
         {heroImg ? (
           <>
             <img src={heroImg} alt="" crossOrigin="anonymous" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.05)' }} />
-            {/* Multi-layer cinematic overlay */}
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.35) 0%,rgba(10,21,48,.55) 40%,rgba(10,21,48,.92) 100%)' }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,rgba(10,21,48,.6) 0%,transparent 45%,rgba(240,200,66,.08) 100%)' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,rgba(10,21,48,.3) 0%,rgba(10,21,48,.55) 40%,rgba(10,21,48,.9) 100%)' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,rgba(10,21,48,.55) 0%,transparent 45%,rgba(240,200,66,.1) 100%)' }} />
           </>
         ) : (
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg,#0a1530 0%,#0d1b3e 45%,#1a3060 100%)' }}>
@@ -14121,69 +14131,65 @@ function FlyerTemplateV1({ data, innerRef }) {
           </div>
         )}
 
-        {/* Cinematic flare corners */}
-        <div style={{ position: 'absolute', top: -100, right: -80, width: 380, height: 380, background: 'radial-gradient(circle,#f0c84270 0%,#f0c84220 30%,transparent 65%)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: -120, left: -100, width: 420, height: 420, background: 'radial-gradient(circle,#c9961a40 0%,transparent 65%)', pointerEvents: 'none' }} />
+        {/* Flare corners */}
+        <div style={{ position: 'absolute', top: -100, right: -80, width: 400, height: 400, background: 'radial-gradient(circle,#f0c84275 0%,#f0c84220 30%,transparent 65%)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', bottom: -140, left: -120, width: 460, height: 460, background: 'radial-gradient(circle,#c9961a45 0%,transparent 65%)', pointerEvents: 'none' }} />
 
         {/* Diagonal light rays */}
-        <div style={{ position: 'absolute', top: 0, left: '18%', width: 3, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c84228,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', top: 0, left: '62%', width: 5, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c8421f,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: 0, left: '18%', width: 3, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c8422a,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: 0, left: '62%', width: 5, height: '100%', background: 'linear-gradient(180deg,transparent,#f0c84220,transparent)', transform: 'skewX(-18deg)', pointerEvents: 'none' }} />
 
-        {/* Top gold hairline */}
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)' }} />
 
         {/* Content */}
-        <div style={{ position: 'relative', padding: '38px 44px 34px', display: 'flex', gap: 28 }}>
+        <div style={{ position: 'relative', padding: '34px 48px 30px', display: 'flex', gap: 30 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-              <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 62, borderRadius: 12, background: '#fff', padding: 8, boxShadow: '0 8px 24px rgba(0,0,0,.45)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 15, marginBottom: 22 }}>
+              <img src={VE_LOGO} alt="Voyage-Ed" style={{ height: 66, borderRadius: 12, background: '#fff', padding: 8, boxShadow: '0 8px 26px rgba(0,0,0,.5)' }} />
               <div>
-                <div style={{ fontSize: 21, fontWeight: 800, color: '#fff', letterSpacing: .4, textShadow: '0 2px 8px rgba(0,0,0,.55)' }}>VOYAGE-ED TRAVELS</div>
-                <div style={{ fontSize: 10.5, color: '#f0c842', letterSpacing: 3.5, fontWeight: 700, textShadow: '0 1px 3px rgba(0,0,0,.5)' }}>YOUR JOURNEY · OUR PRIORITY</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: .5, textShadow: '0 2px 10px rgba(0,0,0,.6)' }}>VOYAGE-ED TRAVELS</div>
+                <div style={{ fontSize: 11, color: '#f0c842', letterSpacing: 3.8, fontWeight: 700, textShadow: '0 1px 4px rgba(0,0,0,.5)' }}>YOUR JOURNEY · OUR PRIORITY</div>
               </div>
             </div>
 
-            {/* Title in glass panel */}
-            <div style={{ background: 'linear-gradient(135deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.02) 100%)', borderLeft: '3px solid #f0c842', padding: '4px 0 4px 18px', backdropFilter: 'blur(4px)' }}>
-              <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 42, fontWeight: 700, color: '#fff', lineHeight: 1.05, letterSpacing: .3, textShadow: '0 3px 16px rgba(0,0,0,.6)' }}>
+            <div style={{ background: 'linear-gradient(135deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.02) 100%)', borderLeft: '3px solid #f0c842', padding: '6px 0 6px 20px' }}>
+              <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 44, fontWeight: 700, color: '#fff', lineHeight: 1.05, letterSpacing: .3, textShadow: '0 3px 18px rgba(0,0,0,.65)' }}>
                 {data.title || 'EXCLUSIVE FLIGHT DEALS'}
               </div>
               {data.subtitle && (
-                <div style={{ marginTop: 10, fontSize: 13, color: '#f0c842', letterSpacing: 3, fontWeight: 700, textShadow: '0 2px 6px rgba(0,0,0,.4)' }}>
+                <div style={{ marginTop: 10, fontSize: 14, color: '#f0c842', letterSpacing: 3, fontWeight: 700, textShadow: '0 2px 6px rgba(0,0,0,.4)' }}>
                   ✦ {data.subtitle} ✦
                 </div>
               )}
             </div>
 
-            {/* Gold divider */}
-            <div style={{ marginTop: 22, height: 3, width: 160, background: 'linear-gradient(90deg,#f0c842 0%,transparent 100%)', borderRadius: 3, boxShadow: '0 0 12px #f0c84288' }} />
+            <div style={{ marginTop: 22, height: 3, width: 170, background: 'linear-gradient(90deg,#f0c842 0%,transparent 100%)', borderRadius: 3, boxShadow: '0 0 12px #f0c84288' }} />
           </div>
 
-          {/* Right rail */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-end', flexShrink: 0 }}>
-            {sections.length > 0 && (
-              <div style={{ background: 'rgba(240,200,66,.18)', border: '1.5px solid #f0c842', color: '#f0c842', borderRadius: 999, padding: '7px 16px', fontSize: 11, fontWeight: 800, letterSpacing: 2, textShadow: '0 1px 3px rgba(0,0,0,.4)' }}>
-                {sections.length} {sections.length === 1 ? 'DEAL' : 'DEALS'}
+            {n > 0 && (
+              <div style={{ background: 'rgba(240,200,66,.2)', border: '1.5px solid #f0c842', color: '#f0c842', borderRadius: 999, padding: '8px 18px', fontSize: 12, fontWeight: 800, letterSpacing: 2, textShadow: '0 1px 3px rgba(0,0,0,.4)' }}>
+                {n} {n === 1 ? 'DEAL' : 'DEALS'}
               </div>
             )}
             {startingFrom != null && (
               <div style={{
                 background: 'linear-gradient(135deg,#fff 0%,#fef8e5 100%)',
-                borderRadius: 16,
-                padding: '16px 22px',
+                borderRadius: 18,
+                padding: '18px 24px',
                 textAlign: 'right',
-                boxShadow: '0 14px 40px rgba(0,0,0,.4), 0 0 0 1px #f0c84250 inset',
-                minWidth: 185,
+                boxShadow: '0 16px 46px rgba(0,0,0,.45), 0 0 0 1px #f0c84255 inset',
+                minWidth: 200,
                 position: 'relative',
                 overflow: 'hidden',
               }}>
-                <div style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, background: 'radial-gradient(circle,#f0c84240,transparent 65%)' }} />
-                <div style={{ fontSize: 9.5, color: '#8a6b1a', fontWeight: 800, letterSpacing: 2.5, position: 'relative' }}>STARTING FROM</div>
-                <div style={{ fontSize: 34, fontWeight: 800, color: '#0d1b3e', lineHeight: 1, letterSpacing: -1, marginTop: 4, fontFamily: 'Georgia, serif', position: 'relative' }}>
+                <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, background: 'radial-gradient(circle,#f0c84255,transparent 65%)' }} />
+                <div style={{ fontSize: 10, color: '#8a6b1a', fontWeight: 800, letterSpacing: 2.8, position: 'relative' }}>STARTING FROM</div>
+                <div style={{ fontSize: 38, fontWeight: 800, color: '#0d1b3e', lineHeight: 1, letterSpacing: -1.2, marginTop: 4, fontFamily: 'Georgia, serif', position: 'relative' }}>
                   ₹{Number(startingFrom).toLocaleString('en-IN')}
                 </div>
                 {maxPrice && maxPrice !== startingFrom && (
-                  <div style={{ fontSize: 9.5, color: '#a08040', fontWeight: 700, letterSpacing: 1, marginTop: 4, position: 'relative' }}>
+                  <div style={{ fontSize: 10, color: '#a08040', fontWeight: 700, letterSpacing: 1, marginTop: 4, position: 'relative' }}>
                     upto ₹{Number(maxPrice).toLocaleString('en-IN')}
                   </div>
                 )}
@@ -14192,49 +14198,48 @@ function FlyerTemplateV1({ data, innerRef }) {
           </div>
         </div>
 
-        {/* Bottom gold hairline */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg,transparent 0%,#f0c842 50%,transparent 100%)' }} />
       </div>
 
       {/* Trust badges strip */}
-      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#0d1b3e 100%)', padding: '11px 44px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 30, borderBottom: '1px solid rgba(240,200,66,.2)' }}>
+      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#0d1b3e 100%)', padding: '12px 48px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32, borderBottom: '1px solid rgba(240,200,66,.2)' }}>
         {[
           ['🛡', 'SECURE PAYMENT'],
           ['⚡', 'INSTANT BOOKING'],
           ['🕐', '24/7 SUPPORT'],
           ['✈', 'IATA ACCREDITED'],
         ].map(([icon, text], i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#c9d4e8', fontWeight: 700, letterSpacing: 1.5 }}>
-            <span style={{ color: '#f0c842', fontSize: 13 }}>{icon}</span>
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: '#c9d4e8', fontWeight: 700, letterSpacing: 1.5 }}>
+            <span style={{ color: '#f0c842', fontSize: 14 }}>{icon}</span>
             {text}
           </div>
         ))}
       </div>
 
       {/* SECTIONS */}
-      <div style={{ padding: '34px 40px 22px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 18 }}>
-          {sections.map((s, i) => <FlyerSection key={i} section={s} />)}
+      <div style={{ padding: '30px 40px 22px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: dense ? 12 : 16 }}>
+          {sections.map((s, i) => <FlyerSection key={i} section={s} dense={dense} />)}
         </div>
 
         {data.footerNote && (
-          <div style={{ marginTop: 24, textAlign: 'center', fontSize: 10.5, color: '#6b7a99', letterSpacing: 1.8, fontWeight: 700, textTransform: 'uppercase' }}>
+          <div style={{ marginTop: 22, textAlign: 'center', fontSize: 11, color: '#6b7a99', letterSpacing: 1.8, fontWeight: 700, textTransform: 'uppercase' }}>
             ✱ Terms &amp; Conditions Apply · {data.footerNote} ✱
           </div>
         )}
       </div>
 
       {/* BOOK NOW banner */}
-      <div style={{ background: 'linear-gradient(135deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)', padding: '22px 40px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: -40, left: '25%', width: 100, height: 100, background: 'radial-gradient(circle,rgba(255,255,255,.55),transparent 65%)' }} />
-        <div style={{ position: 'absolute', top: -30, left: '65%', width: 80, height: 80, background: 'radial-gradient(circle,rgba(255,255,255,.4),transparent 65%)' }} />
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,.4)' }} />
+      <div style={{ background: 'linear-gradient(135deg,#c9961a 0%,#f0c842 50%,#c9961a 100%)', padding: '22px 48px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: -40, left: '25%', width: 110, height: 110, background: 'radial-gradient(circle,rgba(255,255,255,.6),transparent 65%)' }} />
+        <div style={{ position: 'absolute', top: -30, left: '65%', width: 90, height: 90, background: 'radial-gradient(circle,rgba(255,255,255,.45),transparent 65%)' }} />
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,.45)' }} />
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
           <div>
-            <div style={{ fontSize: 30, fontWeight: 800, color: '#0d1b3e', letterSpacing: 3, fontFamily: 'Georgia, serif', lineHeight: 1 }}>BOOK NOW</div>
-            <div style={{ fontSize: 10, color: '#0d1b3e', letterSpacing: 2.5, fontWeight: 800, marginTop: 4, opacity: .75 }}>LIMITED SEATS · CONFIRM TODAY</div>
+            <div style={{ fontSize: 32, fontWeight: 800, color: '#0d1b3e', letterSpacing: 3, fontFamily: 'Georgia, serif', lineHeight: 1 }}>BOOK NOW</div>
+            <div style={{ fontSize: 10.5, color: '#0d1b3e', letterSpacing: 2.5, fontWeight: 800, marginTop: 4, opacity: .75 }}>LIMITED SEATS · CONFIRM TODAY</div>
           </div>
-          <div style={{ display: 'flex', gap: 22, alignItems: 'center', fontSize: 13, fontWeight: 800, color: '#0d1b3e' }}>
+          <div style={{ display: 'flex', gap: 24, alignItems: 'center', fontSize: 14, fontWeight: 800, color: '#0d1b3e' }}>
             <div>🌐 voyage-ed.com</div>
             <div style={{ opacity: .35 }}>│</div>
             <div>📞 +91 70096 59048</div>
@@ -14244,36 +14249,36 @@ function FlyerTemplateV1({ data, innerRef }) {
         </div>
       </div>
 
-      {/* CONTACT FOOTER */}
-      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#050b1e 100%)', padding: '28px 40px 22px', color: '#fff', position: 'relative' }}>
-        <div style={{ position: 'absolute', top: 0, left: 40, right: 40, height: 1, background: 'linear-gradient(90deg,transparent 0%,#f0c842 50%,transparent 100%)' }} />
+      {/* FOOTER */}
+      <div style={{ background: 'linear-gradient(180deg,#0a1530 0%,#050b1e 100%)', padding: '26px 48px 22px', color: '#fff', position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 0, left: 48, right: 48, height: 1, background: 'linear-gradient(90deg,transparent 0%,#f0c842 50%,transparent 100%)' }} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24, fontSize: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 26, fontSize: 12 }}>
           {[
             { label: 'VS', name: 'Vishal Sharma', role: 'CO-FOUNDER', detail: '+91 70096 59048' },
             { label: 'SS', name: 'Sahitya Singh', role: 'CO-FOUNDER', detail: '+91 98187 94297' },
             { label: '🏢', name: 'Office', role: 'MOHALI, INDIA', detail: 'enquiry@voyage-ed.com' },
           ].map((p, i) => (
-            <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div key={i} style={{ display: 'flex', gap: 13, alignItems: 'center' }}>
               <div style={{
-                width: 48, height: 48, borderRadius: '50%',
+                width: 50, height: 50, borderRadius: '50%',
                 background: 'linear-gradient(135deg,#c9961a,#f0c842)',
                 color: '#0d1b3e', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: p.label.length > 2 ? 20 : 17, fontWeight: 800, flexShrink: 0,
-                boxShadow: '0 4px 14px rgba(240,200,66,.35), 0 0 0 2px rgba(240,200,66,.15)',
+                fontSize: p.label.length > 2 ? 22 : 18, fontWeight: 800, flexShrink: 0,
+                boxShadow: '0 4px 14px rgba(240,200,66,.4), 0 0 0 2px rgba(240,200,66,.18)',
               }}>
                 {p.label}
               </div>
               <div>
-                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#f0c842' }}>{p.name}</div>
-                <div style={{ fontSize: 9, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>{p.role}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#f0c842' }}>{p.name}</div>
+                <div style={{ fontSize: 9.5, color: '#8fa3c0', letterSpacing: 1.5, fontWeight: 700 }}>{p.role}</div>
                 <div style={{ fontSize: 12, opacity: .9, marginTop: 3 }}>{p.detail}</div>
               </div>
             </div>
           ))}
         </div>
 
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(240,200,66,.15)', fontSize: 10, opacity: .55, textAlign: 'center', letterSpacing: 1.2 }}>
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(240,200,66,.15)', fontSize: 10.5, opacity: .55, textAlign: 'center', letterSpacing: 1.2 }}>
           Suite 315, Regus GMADA Aerocity, Mohali 140306, Punjab · GSTIN 04ABBFV6015A1ZT
         </div>
       </div>
