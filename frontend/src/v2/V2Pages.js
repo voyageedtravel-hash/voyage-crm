@@ -13981,7 +13981,7 @@ function FlyerSection({ section, dense }) {
       border: '1px solid #e3eaf7',
       borderRadius: dense ? 14 : 18,
       overflow: 'hidden',
-      boxShadow: '0 10px 28px rgba(15,35,80,.09), 0 2px 6px rgba(15,35,80,.06)',
+      boxShadow: '0 20px 40px rgba(15,35,80,.09), 0 4px 12px rgba(15,35,80,.06), inset 0 1px 0 rgba(255,255,255,.6)',
       position: 'relative',
     }}>
       <div style={{ height: dense ? 4 : 5, background: `linear-gradient(90deg,${accent} 0%,${accent} 60%,#c9961a 100%)` }} />
@@ -14035,13 +14035,15 @@ function FlyerSection({ section, dense }) {
 
         {/* Route + flags */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 26 : 30, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
+          <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: dense ? 22 : 28, fontWeight: 700, color: '#0d1b3e', lineHeight: 1.05, letterSpacing: -.4 }}>
             {section.route || '—'}
           </div>
           {flags.length > 0 && (
             <div style={{ fontSize: dense ? 17 : 20, letterSpacing: 2 }}>{flags.join(' ')}</div>
           )}
         </div>
+        {/* Gold accent underline */}
+        <div style={{ marginTop: 6, height: 2, width: 44, background: `linear-gradient(90deg,${accent} 0%,#f0c842 100%)`, borderRadius: 2 }} />
         {section.flightNumber && (
           <div style={{ fontSize: dense ? 12 : 13, color: '#6b7a99', marginTop: 3, fontWeight: 600 }}>
             ✈ Flight {section.flightNumber}
@@ -14070,9 +14072,12 @@ function FlyerSection({ section, dense }) {
                 background: i % 2 === 0 ? '#fff' : 'linear-gradient(90deg,#fafcff 0%,#fff 100%)',
                 borderBottom: i < displayFares.length - 1 ? '1px solid #f4f7fc' : 'none',
               }}>
-                <span style={{ fontSize: dense ? 13.5 : 15, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>{f.date}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: dense ? 16 : 17, fontWeight: 700, color: '#0d1b3e', letterSpacing: .1 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: `linear-gradient(135deg,${accent},#c9961a)`, flexShrink: 0 }} />
+                  {f.date}
+                </span>
                 {f.price != null ? (
-                  <span style={{ fontSize: dense ? 15 : 17, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
+                  <span style={{ fontSize: dense ? 16 : 18, fontWeight: 800, color: '#c9961a', fontFamily: 'Georgia, serif' }}>
                     ₹{Number(f.price).toLocaleString('en-IN')}
                     {section.allInclusiveNote && !dense ? <span style={{ fontSize: 9, color: '#6b7a99', marginLeft: 5, fontWeight: 700 }}>· {section.allInclusiveNote.toUpperCase()}</span> : ''}
                   </span>
@@ -14209,7 +14214,7 @@ function FlyerTemplateV1({ data, innerRef }) {
 
       {/* SECTIONS */}
       <div style={{ padding: '30px 40px 22px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: dense ? 12 : 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: dense ? 14 : 18 }}>
           {sections.map((s, i) => <FlyerSection key={i} section={s} dense={dense} />)}
         </div>
 
