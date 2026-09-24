@@ -13955,12 +13955,16 @@ function flagsForRoute(route, codes) {
 function pickFlyerHero(sections) {
   const all = (sections || []).map((s) => `${s.route || ''} ${s.routeCodes || ''}`).join(' ').toLowerCase();
   const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : '';
+  // Order matters — destinations that route via Singapore/Dubai as a stopover
+  // must be matched BEFORE the stopover city, otherwise a DEL-SIN-MEL flyer
+  // picks up singapore.jpg instead of australia.jpg.
+  if (/australia|melbourne|sydney|brisbane|perth|adelaide|canberra|gold coast|\bmel\b|\bsyd\b|\bbne\b|\bper\b|\badl\b|\bcbr\b|\bool\b/.test(all)) return origin + '/hero/australia.jpg';
+  if (/canada|toronto|vancouver|calgary|montreal|edmonton|ottawa|\byyz\b|\byvr\b|\byyc\b|\byul\b|\byeg\b|\byow\b/.test(all)) return origin + '/hero/canada.jpg';
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|\bdxb\b|\bauh\b|\bshj\b/.test(all)) return origin + '/hero/dubai.jpg';
   if (/\bbali\b|denpasar|\bdps\b/.test(all)) return origin + '/hero/bali.jpg';
   if (/vietnam|hanoi|saigon|ho chi minh|\bhan\b|\bsgn\b|da nang|halong|\bdad\b/.test(all)) return origin + '/hero/vietnam.jpg';
   if (/thailand|bangkok|phuket|krabi|pattaya|\bbkk\b|\bhkt\b/.test(all)) return origin + '/hero/thailand.jpg';
   if (/\bsingapore\b|\bsin\b|sentosa|marina bay/.test(all)) return origin + '/hero/singapore.jpg';
-  if (/canada|toronto|vancouver|calgary|montreal|edmonton|ottawa|\byyz\b|\byvr\b|\byyc\b|\byul\b|\byeg\b|\byow\b/.test(all)) return origin + '/hero/canada.jpg';
   return null;
 }
 
