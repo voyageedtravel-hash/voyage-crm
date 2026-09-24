@@ -15764,7 +15764,6 @@ export default function V2Pages() {
     <>
       {staleBanner}
       {child}
-      <FloatingAIAssistant leads={items} currentDeal={selectedDeal} />
     </>
   );
 

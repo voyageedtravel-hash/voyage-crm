@@ -1337,48 +1337,11 @@ Be concise. If asked to do something you have no action for, explain politely in
     }catch(e){ console.warn("AI action failed:",e?.message); }
   };
 
-  // ─── AI ASSISTANT OVERLAY (renders on every screen) ───────────────────────
-  const aiWidgetEl=(
-    <>
-      {/* Floating button */}
-      <button onClick={()=>setAiOpen(o=>!o)} aria-label="AI Assistant"
-        style={{position:"fixed",bottom:20,right:20,zIndex:9998,width:60,height:60,borderRadius:"50%",border:"none",cursor:"pointer",
-          background:"linear-gradient(135deg,#4169E1,#5b7fff)",boxShadow:"0 10px 30px -6px rgba(124,58,237,.6)",fontSize:26}}>
-        {aiOpen?"✕":"🤖"}
-      </button>
-      {/* Panel */}
-      {aiOpen&&(
-        <div style={{position:"fixed",bottom:90,right:16,left:16,maxWidth:420,marginLeft:"auto",zIndex:9998,
-          background:"#f4f7fc",border:"1px solid #4169E1",borderRadius:16,boxShadow:"0 24px 60px -12px rgba(0,0,0,.7)",
-          display:"flex",flexDirection:"column",maxHeight:"min(560px,75vh)",overflow:"hidden"}}>
-          <div style={{background:"linear-gradient(135deg,#e8efff,#dfe8ff)",padding:"14px 18px",borderBottom:"1px solid #4169E1"}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#1a2c52"}}>🤖 Voyage-Ed AI Assistant</div>
-            <div style={{fontSize:11,color:"#5b7fff"}}>Tell me what to do — I'll handle it</div>
-          </div>
-          <div style={{flex:1,overflowY:"auto",padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
-            {aiChat.map((m,i)=>(
-              <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
-                background:m.role==="user"?"#4169E1":"#eef3fc",color:m.role==="user"?"#fff":"#1a2c52",
-                padding:"10px 14px",borderRadius:12,fontSize:13,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{m.text}</div>
-            ))}
-            {aiThinking&&<div style={{alignSelf:"flex-start",color:"#5b7fff",fontSize:13,padding:"6px 10px"}}>thinking…</div>}
-          </div>
-          <div style={{padding:"12px",borderTop:"1px solid #d4e0f5",display:"flex",gap:8}}>
-            <input value={aiInput} onChange={e=>setAiInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")runAI();}}
-              placeholder="e.g. create a deal for Rahul to Dubai"
-              style={{flex:1,background:"#eef3fc",border:"1px solid #4169E1",borderRadius:9,color:"#1a2c52",padding:"11px 13px",fontSize:14,outline:"none"}}/>
-            <button onClick={runAI} disabled={aiThinking} style={{background:"linear-gradient(135deg,#4169E1,#5b7fff)",border:"none",borderRadius:9,color:"#fff",padding:"0 16px",fontWeight:800,cursor:"pointer",fontSize:14}}>➤</button>
-          </div>
-          {/* Quick suggestion chips */}
-          <div style={{padding:"0 12px 12px",display:"flex",gap:6,flexWrap:"wrap"}}>
-            {["Show hot leads","How much to collect?","Today's follow-ups","Draft a quote"].map(s=>(
-              <span key={s} onClick={()=>{setAiInput(s);}} style={{fontSize:11,background:"#eef3fc",border:"1px solid #4169E1",color:"#4169E1",padding:"5px 10px",borderRadius:20,cursor:"pointer"}}>{s}</span>
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
+  // ─── AI ASSISTANT OVERLAY — disabled per user request (button was
+  // stacking on top of other floating CRM controls). Leave the state
+  // and panel plumbing in place in case we re-enable via a menu later,
+  // but do not render the floating button/panel anywhere.
+  const aiWidgetEl=null;
 
   // ─── AI DAILY BUSINESS BRIEF (the CRM briefs YOU every morning) ────────────
   const generateDailyBrief=async()=>{
