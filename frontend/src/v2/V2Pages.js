@@ -3253,6 +3253,7 @@ function pickFallbackCoverV2(deal) {
     thailand:  origin + '/hero/thailand.jpg',
     singapore: origin + '/hero/singapore.jpg',
     dubai:     origin + '/hero/dubai.jpg',
+    almaty:    origin + '/hero/almaty.jpg',
   };
   // Destination-specific — checked first
   if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
@@ -3260,6 +3261,7 @@ function pickFallbackCoverV2(deal) {
   if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai/.test(_d)) return HERO.thailand;
   if (/\bsingapore\b|sentosa|marina bay/.test(_d)) return HERO.singapore;
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa/.test(_d)) return HERO.dubai;
+  if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(_d)) return HERO.almaty;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -13959,6 +13961,7 @@ function pickFlyerHero(sections) {
   // must be matched BEFORE the stopover city, otherwise a DEL-SIN-MEL flyer
   // picks up singapore.jpg instead of australia.jpg.
   if (/australia|melbourne|sydney|brisbane|perth|adelaide|canberra|gold coast|\bmel\b|\bsyd\b|\bbne\b|\bper\b|\badl\b|\bcbr\b|\bool\b/.test(all)) return origin + '/hero/australia.jpg';
+  if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(all)) return origin + '/hero/almaty.jpg';
   if (/canada|toronto|vancouver|calgary|montreal|edmonton|ottawa|\byyz\b|\byvr\b|\byyc\b|\byul\b|\byeg\b|\byow\b/.test(all)) return origin + '/hero/canada.jpg';
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|\bdxb\b|\bauh\b|\bshj\b/.test(all)) return origin + '/hero/dubai.jpg';
   if (/\bbali\b|denpasar|\bdps\b/.test(all)) return origin + '/hero/bali.jpg';
