@@ -14297,6 +14297,7 @@ function FlyerStudioPage() {
   const [showEdit, setShowEdit] = React.useState(false);
   const [reviewing, setReviewing] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
+  const [outputSize, setOutputSize] = React.useState('post'); // post | story | square | native
   const [err, setErr] = React.useState('');
   const flyerRef = React.useRef(null);
 
@@ -14377,21 +14378,71 @@ function FlyerStudioPage() {
     setReviewing(false);
   };
 
+  // Instagram-compatible output sizes. Feed post is 1080x1350 (4:5), Story
+  // is 1080x1920 (9:16), Square is 1080x1080. 'native' keeps the natural
+  // DOM height so nothing is scaled. All sizes use 3x pixel ratio for
+  // crisp text after WhatsApp/Instagram re-compression.
+  const OUTPUT_SIZES = {
+    post:   { w: 1080, h: 1350, label: 'Instagram Post  1080×1350' },
+    story:  { w: 1080, h: 1920, label: 'Instagram Story  1080×1920' },
+    square: { w: 1080, h: 1080, label: 'Square  1080×1080' },
+    native: { w: 0,    h: 0,    label: 'Original (natural height)' },
+  };
+
   const downloadJPEG = async () => {
     if (!flyerRef.current) return;
     setDownloading(true); setErr('');
     try {
       const mod = await import('html-to-image');
-      const dataUrl = await mod.toJpeg(flyerRef.current, {
+      const PR = 3;
+      // Render the flyer at native DOM size first.
+      const naturalDataUrl = await mod.toJpeg(flyerRef.current, {
         quality: 0.95,
         backgroundColor: '#f4f6fb',
-        pixelRatio: 3,
+        pixelRatio: PR,
         cacheBust: true,
       });
+
+      let finalDataUrl = naturalDataUrl;
+      const target = OUTPUT_SIZES[outputSize];
+      if (target && target.w > 0) {
+        // Post-process onto a canvas sized to the chosen Instagram spec.
+        // The natural render fits inside (letterboxing top-aligned so the
+        // hero + starting-from card always stay in frame); if the natural
+        // flyer is shorter than the target it gets padded at the bottom
+        // with the same page background.
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = () => reject(new Error('could not read rendered flyer'));
+          img.src = naturalDataUrl;
+        });
+        const tw = target.w * PR;
+        const th = target.h * PR;
+        const canvas = document.createElement('canvas');
+        canvas.width = tw;
+        canvas.height = th;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#f4f6fb';
+        ctx.fillRect(0, 0, tw, th);
+        // Fit-inside: scale down proportionally if natural render is
+        // taller than target; never scale UP if it's shorter.
+        const scale = Math.min(tw / img.width, th / img.height, 1);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const drawX = Math.round((tw - drawW) / 2);
+        const drawY = 0; // top-align — header stays at top
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      }
+
       const link = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
-      link.download = `voyage-ed-flyer-${stamp}.jpg`;
-      link.href = dataUrl;
+      const suffix = target && target.w > 0 ? `${target.w}x${target.h}` : 'full';
+      link.download = `voyage-ed-flyer-${stamp}-${suffix}.jpg`;
+      link.href = finalDataUrl;
       link.click();
       window.veToast && window.veToast('Flyer downloaded ✓', 'success');
     } catch (e) {
@@ -14493,6 +14544,17 @@ function FlyerStudioPage() {
                 <button type="button" onClick={() => setShowEdit((v) => !v)} disabled={reviewing} style={{ background: '#fff', color: '#0d1b3e', border: '1.5px solid #c9961a', borderRadius: 10, padding: '9px 18px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
                   ✏️ Edit
                 </button>
+                <select
+                  value={outputSize}
+                  onChange={(e) => setOutputSize(e.target.value)}
+                  disabled={downloading}
+                  style={{ background: '#fff', color: '#0d1b3e', border: '1.5px solid #c9961a', borderRadius: 10, padding: '9px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                  title="Choose the output aspect for Instagram / WhatsApp"
+                >
+                  {Object.entries(OUTPUT_SIZES).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
                 <button type="button" onClick={downloadJPEG} disabled={downloading} style={{ background: 'linear-gradient(135deg,#15803d,#22a04e)', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 20px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
                   {downloading ? '⏳ Making JPEG…' : '✅ Confirm & Download JPEG'}
                 </button>
@@ -14527,7 +14589,7 @@ function FlyerStudioPage() {
           </div>
 
           <div style={{ marginTop: 10, fontSize: 11, color: '#6b7a99', textAlign: 'center' }}>
-            💡 JPEG ~1800px wide (retina-scale) hogi — WhatsApp, Instagram, aur email attachment ke liye ready.
+            💡 Default: <b>1080×1350</b> (Instagram Post 4:5). Story aur Square options bhi hain — WhatsApp, Instagram, email ke liye ready.
           </div>
         </div>
       )}
