@@ -3254,6 +3254,7 @@ function pickFallbackCoverV2(deal) {
     singapore: origin + '/hero/singapore.jpg',
     dubai:     origin + '/hero/dubai.jpg',
     almaty:    origin + '/hero/almaty.jpg',
+    uk:        origin + '/hero/uk.jpg',
   };
   // Destination-specific — checked first
   if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
@@ -3262,6 +3263,7 @@ function pickFallbackCoverV2(deal) {
   if (/\bsingapore\b|sentosa|marina bay/.test(_d)) return HERO.singapore;
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa/.test(_d)) return HERO.dubai;
   if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(_d)) return HERO.almaty;
+  if (/\buk\b|united kingdom|\bengland\b|\bbritain\b|london|edinburgh|glasgow|manchester|liverpool|birmingham|scotland|\blhr\b|\bedi\b|\bman\b|\blgw\b|\bbhx\b|\bstn\b/.test(_d)) return HERO.uk;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -3391,7 +3393,12 @@ function buildProposalHTMLV2(deal, opts) {
   const landDayLines = (deal.landVendors || []).filter((l) => l.itinerary).map((l) => parseDaysV2(l.itinerary)).reduce((a, b) => a.concat(b), []);
   const aiItineraryRaw = deal.aiItineraryText || '';
   const aiDayLines = aiItineraryRaw ? parseDaysV2(aiItineraryRaw) : [];
-  const allDayLines = aiDayLines.length ? aiDayLines : landDayLines;
+  // Priority order: user-edited days from Proposal Builder > AI-generated
+  // itinerary > raw vendor itinerary notes. Editing days in the builder is
+  // an explicit override — those saved lines should win over anything
+  // auto-derived from other sources.
+  const editedDayLines = (o.days && Array.isArray(o.days)) ? o.days.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  const allDayLines = editedDayLines.length ? editedDayLines : (aiDayLines.length ? aiDayLines : landDayLines);
   // The AI itinerary text also has an opening welcome note before "Day 1" —
   // parseDaysV2 drops everything before the first day header, so pull that
   // intro paragraph out separately to show as a warm note above the days.
@@ -6221,6 +6228,7 @@ No preamble, no markdown, just JSON.`,
       showPrice: propShowPrice,
       coverUrl: propCoverUrl.trim(),
       incText: propInc, excText: propExc,
+      days: propDays,
     });
     onClose();
   };
@@ -13968,6 +13976,7 @@ function pickFlyerHero(sections) {
   if (/vietnam|hanoi|saigon|ho chi minh|\bhan\b|\bsgn\b|da nang|halong|\bdad\b/.test(all)) return origin + '/hero/vietnam.jpg';
   if (/thailand|bangkok|phuket|krabi|pattaya|\bbkk\b|\bhkt\b/.test(all)) return origin + '/hero/thailand.jpg';
   if (/\bsingapore\b|\bsin\b|sentosa|marina bay/.test(all)) return origin + '/hero/singapore.jpg';
+  if (/\buk\b|united kingdom|\bengland\b|\bbritain\b|london|edinburgh|glasgow|manchester|liverpool|birmingham|scotland|\blhr\b|\blgw\b|\bedi\b|\bman\b|\bbhx\b|\bstn\b/.test(all)) return origin + '/hero/uk.jpg';
   return null;
 }
 
