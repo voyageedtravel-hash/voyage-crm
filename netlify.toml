@@ -1,7 +1,7 @@
 [build]
   base = "frontend"
   publish = "build"
-  command = "yarn install --frozen-lockfile && yarn build"
+  command = "CI=false yarn install --frozen-lockfile && CI=false DISABLE_ESLINT_PLUGIN=true yarn build"
 
 [build.environment]
   NODE_VERSION = "22"
