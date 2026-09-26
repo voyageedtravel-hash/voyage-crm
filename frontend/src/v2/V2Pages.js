@@ -14513,31 +14513,34 @@ function PackageFlyerContent() {
   );
 
   // ─── Preview hotel card renderer ───────────────────────
-  const HotelCard = ({ h, span }) => (
-    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column', gridColumn: span || 'auto', boxShadow: '0 2px 4px rgba(13,27,62,0.06)' }}>
-      <div style={{ width: '100%', paddingBottom: '46%', position: 'relative', background: theme.accentSoft }}>
+  // horizontal=true → photo left / details right (used when there's
+  // only one hotel — the card gets the full flyer width and looks more
+  // premium than a stretched vertical thumbnail).
+  const HotelCard = ({ h, span, horizontal }) => (
+    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: horizontal ? 'row' : 'column', gridColumn: span || 'auto', boxShadow: '0 2px 4px rgba(13,27,62,0.06)', minHeight: horizontal ? 220 : 'auto' }}>
+      <div style={{ width: horizontal ? '52%' : '100%', paddingBottom: horizontal ? 0 : '46%', position: 'relative', background: theme.accentSoft, flexShrink: 0 }}>
         {h.photo ? (
-          <img src={h.photo} alt={h.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img src={h.photo} alt={h.name} style={{ position: horizontal ? 'static' : 'absolute', inset: 0, width: '100%', height: horizontal ? '100%' : '100%', objectFit: 'cover', display: 'block' }} />
         ) : (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.accentDeep, fontSize: 12, fontWeight: 700 }}>🏨 Hotel photo</div>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.accentDeep, fontSize: 13, fontWeight: 700 }}>🏨 Hotel photo</div>
         )}
-        {h.nights && <div style={{ position: 'absolute', top: 6, right: 6, background: theme.tag, color: '#fff', fontSize: 9, fontWeight: 800, padding: '3px 6px', borderRadius: 6 }}>{h.nights} NIGHT{Number(h.nights) !== 1 ? 'S' : ''}</div>}
+        {h.nights && <div style={{ position: 'absolute', top: 8, right: 8, background: theme.tag, color: '#fff', fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 6 }}>{h.nights} NIGHT{Number(h.nights) !== 1 ? 'S' : ''}</div>}
       </div>
-      <div style={{ padding: '9px 12px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#0d1b3e', marginBottom: 2 }}>{h.name || 'Hotel Name'}</div>
-        <div style={{ fontSize: 10, color: '#c9961a', marginBottom: 4, letterSpacing: 1 }}>{'★'.repeat(Number(h.stars) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(h.stars) || 0)))}</div>
-        {(h.room || h.mealPlan) && (
-          <div style={{ fontSize: 10.5, color: '#334e82', marginBottom: 5, fontWeight: 600 }}>
-            {h.room}{h.room && h.mealPlan ? ' · ' : ''}{h.mealPlan}
-          </div>
+      <div style={{ padding: horizontal ? '20px 24px' : '9px 12px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: horizontal ? 'center' : 'flex-start' }}>
+        <div style={{ fontSize: horizontal ? 22 : 13, fontWeight: 800, color: '#0d1b3e', marginBottom: horizontal ? 8 : 2, fontFamily: horizontal ? 'Georgia, serif' : 'inherit', lineHeight: 1.2 }}>{h.name || 'Hotel Name'}</div>
+        <div style={{ fontSize: horizontal ? 14 : 10, color: '#c9961a', marginBottom: horizontal ? 12 : 4, letterSpacing: 1 }}>{'★'.repeat(Number(h.stars) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(h.stars) || 0)))}</div>
+        {h.room && (
+          <div style={{ fontSize: horizontal ? 11 : 9, fontWeight: 800, color: theme.accent, letterSpacing: 1.5, marginBottom: horizontal ? 4 : 2 }}>ROOM CATEGORY</div>
         )}
-        {h.inclusions && (
-          <div style={{ fontSize: 10, color: '#5a6b8c', lineHeight: 1.5, marginTop: 'auto' }}>
-            {String(h.inclusions).split(/[·•,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 3).map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 1 }}>
-                <span style={{ color: theme.accent, fontWeight: 800 }}>✓</span> <span>{s}</span>
-              </div>
-            ))}
+        {h.room && (
+          <div style={{ fontSize: horizontal ? 14 : 10.5, color: '#0d1b3e', marginBottom: horizontal ? 10 : 4, fontWeight: 600 }}>{h.room}</div>
+        )}
+        {h.mealPlan && (
+          <div style={{ fontSize: horizontal ? 11 : 9, fontWeight: 800, color: theme.accent, letterSpacing: 1.5, marginBottom: horizontal ? 4 : 2 }}>MEAL PLAN</div>
+        )}
+        {h.mealPlan && (
+          <div style={{ fontSize: horizontal ? 14 : 10.5, color: '#0d1b3e', fontWeight: 600 }}>
+            {({ RO: 'Room Only', CP: 'CP · Breakfast', MAP: 'MAP · Breakfast + 1 meal', AP: 'AP · All meals', AI: 'All Inclusive' })[h.mealPlan] || h.mealPlan}
           </div>
         )}
       </div>
@@ -14672,8 +14675,6 @@ function PackageFlyerContent() {
                   <option value="AI">All Inclusive</option>
                 </select>
               </div>
-              <div style={S.label}>Inclusions (comma or · separated)</div>
-              <textarea value={h.inclusions} onChange={(e) => setHotel(i, 'inclusions', e.target.value)} rows={2} style={{ ...S.input, resize: 'vertical' }} placeholder="Breakfast · Free WiFi · Pool access · Airport transfer" />
             </div>
           ))}
           {pkg.hotels.length < 4 && (
@@ -14771,7 +14772,7 @@ function PackageFlyerContent() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: hotelGridCols, gap: 10 }}>
                 {pkg.hotels.map((h, i) => (
-                  <HotelCard key={i} h={h} span={pkg.hotels.length === 3 && i === 2 ? '1 / span 2' : null} />
+                  <HotelCard key={i} h={h} span={pkg.hotels.length === 3 && i === 2 ? '1 / span 2' : null} horizontal={pkg.hotels.length === 1} />
                 ))}
               </div>
             </div>
