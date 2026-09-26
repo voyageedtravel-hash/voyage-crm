@@ -3242,10 +3242,14 @@ function addDaysToDateStrV2(dateStr, days) {
 // tropicboat bucket and never see its own dedicated hero.
 function pickFallbackCoverV2(deal) {
   const _d = ((deal && deal.destination) || '').toLowerCase();
-  // Absolute URL so the image resolves both when the proposal is viewed in
-  // the CRM and when the print-to-PDF output is opened standalone. Uses the
-  // current page's origin at runtime — works on Netlify preview URLs,
-  // production, and localhost dev without hardcoding.
+  // Also scan flight route codes, hotel city/country, and train segments —
+  // a UK trip typed as "Trip to United Kingdon" (common typo) or "UK visa"
+  // may not match a strict destination-string regex, but the itinerary
+  // data will unambiguously say LHR/EDI/London/Edinburgh.
+  const _flightCodes = ((deal && deal.flightVendors) || []).flatMap((f) => (f.segments || []).flatMap((s) => [s.fromCode, s.toCode, s.from, s.to])).filter(Boolean).join(' ').toLowerCase();
+  const _hotelPlaces = ((deal && deal.hotelVendors) || []).flatMap((h) => [h.city, h.country]).filter(Boolean).join(' ').toLowerCase();
+  const _trainPlaces = ((deal && deal.trainVendors) || []).flatMap((t) => (t.segments || []).flatMap((s) => [s.fromCode, s.toCode, s.from, s.to])).filter(Boolean).join(' ').toLowerCase();
+  const _all = `${_d} ${_flightCodes} ${_hotelPlaces} ${_trainPlaces}`;
   const origin = (typeof window !== 'undefined' && window.location) ? window.location.origin : '';
   const HERO = {
     bali:      origin + '/hero/bali.jpg',
@@ -3256,14 +3260,19 @@ function pickFallbackCoverV2(deal) {
     almaty:    origin + '/hero/almaty.jpg',
     uk:        origin + '/hero/uk.jpg',
   };
-  // Destination-specific — checked first
-  if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu/.test(_d)) return HERO.bali;
-  if (/\bvietnam\b|hanoi|ho chi minh|saigon|da nang|hoi an|halong|ha long|phu quoc|sapa|nha trang/.test(_d)) return HERO.vietnam;
-  if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai/.test(_d)) return HERO.thailand;
-  if (/\bsingapore\b|sentosa|marina bay/.test(_d)) return HERO.singapore;
-  if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa/.test(_d)) return HERO.dubai;
-  if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(_d)) return HERO.almaty;
-  if (/\buk\b|united kingdom|\bengland\b|\bbritain\b|london|edinburgh|glasgow|manchester|liverpool|birmingham|scotland|\blhr\b|\bedi\b|\bman\b|\blgw\b|\bbhx\b|\bstn\b/.test(_d)) return HERO.uk;
+  // Destination-specific — checked first, matched against destination +
+  // flight/hotel/train place data so a typo or generic destination string
+  // ("UK visa", "Europe trip") still resolves via the actual itinerary.
+  if (/\bbali\b|denpasar|ubud|kuta|seminyak|jimbaran|nusa dua|uluwatu|\bdps\b/.test(_all)) return HERO.bali;
+  if (/\bvietnam\b|hanoi|ho chi minh|saigon|da nang|hoi an|halong|ha long|phu quoc|sapa|nha trang|\bhan\b|\bsgn\b|\bdad\b/.test(_all)) return HERO.vietnam;
+  if (/thailand|phuket|krabi|pattaya|bangkok|koh samui|chiang mai|\bbkk\b|\bhkt\b/.test(_all)) return HERO.thailand;
+  if (/\bsingapore\b|sentosa|marina bay|\bsin\b/.test(_all)) return HERO.singapore;
+  if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa|\bdxb\b|\bauh\b|\bshj\b/.test(_all)) return HERO.dubai;
+  if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(_all)) return HERO.almaty;
+  // UK matcher — tolerant of the common typo "Kingdon" for Kingdom, and
+  // also matches when destination is vague ("UK visa") but the flight
+  // sectors land at LHR/LGW/STN/BHX/EDI/GLA/MAN.
+  if (/\buk\b|united kingdo[mn]|\bengland\b|\bbritain\b|british|london|edinburgh|glasgow|manchester|liverpool|birmingham|scotland|\blhr\b|\bedi\b|\blgw\b|\bbhx\b|\bstn\b|\bman\b|\bgla\b|\bmyb\b|\bbhm\b|\bbmo\b|\bbcn\b|\bbic\b|\bedb\b/.test(_all)) return HERO.uk;
   const F = {
     mountain: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=1400&q=85',
     beach: 'https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=1400&q=85',
@@ -14296,7 +14305,511 @@ function FlyerTemplateV1({ data, innerRef }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// PACKAGE FLYER — form-driven flyer with destination hero, flights
+// (single/return/multi-sector), up to 4 hotels with photos & details,
+// and a themed price banner. Different from Fare Sheet Flyer (which
+// AI-extracts from vendor B2B PDFs).
+// ═══════════════════════════════════════════════════════════════════
+
+// Destination presets — theme + fallback hero. Anything not listed
+// falls back to a neutral navy+gold theme with no hero image.
+const PKG_THEMES = {
+  bali:      { accent: '#0f766e', accentDeep: '#065f46', accentSoft: '#ccfbf1', tag: '#ea580c', tagDeep: '#9a3412', hero: '/hero/bali.jpg',      label: 'Bali' },
+  thailand:  { accent: '#7c3aed', accentDeep: '#4c1d95', accentSoft: '#f3e8ff', tag: '#db2777', tagDeep: '#9d174d', hero: '/hero/thailand.jpg',  label: 'Thailand' },
+  dubai:     { accent: '#b45309', accentDeep: '#78350f', accentSoft: '#fef3c7', tag: '#b91c1c', tagDeep: '#7f1d1d', hero: '/hero/dubai.jpg',     label: 'Dubai' },
+  singapore: { accent: '#0369a1', accentDeep: '#0c4a6e', accentSoft: '#e0f2fe', tag: '#dc2626', tagDeep: '#991b1b', hero: '/hero/singapore.jpg', label: 'Singapore' },
+  vietnam:   { accent: '#059669', accentDeep: '#065f46', accentSoft: '#d1fae5', tag: '#dc2626', tagDeep: '#991b1b', hero: '/hero/vietnam.jpg',   label: 'Vietnam' },
+  almaty:    { accent: '#1e40af', accentDeep: '#1e3a8a', accentSoft: '#dbeafe', tag: '#0891b2', tagDeep: '#155e75', hero: '/hero/almaty.jpg',    label: 'Almaty' },
+  canada:    { accent: '#b91c1c', accentDeep: '#7f1d1d', accentSoft: '#fee2e2', tag: '#0d1b3e', tagDeep: '#050e2b', hero: '/hero/canada.jpg',    label: 'Canada' },
+  australia: { accent: '#0891b2', accentDeep: '#155e75', accentSoft: '#cffafe', tag: '#ea580c', tagDeep: '#9a3412', hero: '/hero/australia.jpg', label: 'Australia' },
+  uk:        { accent: '#1e40af', accentDeep: '#1e3a8a', accentSoft: '#dbeafe', tag: '#b91c1c', tagDeep: '#7f1d1d', hero: '/hero/uk.jpg',        label: 'United Kingdom' },
+};
+const PKG_THEME_DEFAULT = { accent: '#0d1b3e', accentDeep: '#050e2b', accentSoft: '#eef3fc', tag: '#c9961a', tagDeep: '#8a6d1a', hero: '', label: '' };
+
+function pkgThemeFor(destination) {
+  const key = String(destination || '').toLowerCase().trim();
+  for (const k of Object.keys(PKG_THEMES)) {
+    if (key.includes(k)) return PKG_THEMES[k];
+  }
+  return PKG_THEME_DEFAULT;
+}
+
+// Compress an uploaded image file to a base64 dataURL, max 1200px wide.
+function pkgCompressImage(file, maxWidth = 1200, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('Not an image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function emptyFlight() {
+  return { airline: '', code: '', from: '', fromCode: '', to: '', toCode: '', date: '', depTime: '', arrTime: '', cls: 'Economy', baggage: '' };
+}
+function emptyHotel() {
+  return { name: '', photo: '', stars: 4, room: '', mealPlan: 'CP', inclusions: '', nights: '' };
+}
+
+function PackageFlyerContent() {
+  const [pkg, setPkg] = React.useState({
+    destination: 'Bali',
+    title: 'Discover Bali',
+    tagline: 'ISLAND OF THE GODS',
+    headline: 'Culture · Nature · Adventure',
+    daysNights: '5N / 6D',
+    dates: '16 – 22 Nov 2026',
+    flightType: 'return',
+    flightsSingle: [emptyFlight()],
+    flightsReturnOut: [emptyFlight()],
+    flightsReturnIn: [emptyFlight()],
+    flightsMulti: [emptyFlight(), emptyFlight()],
+    hotels: [{ ...emptyHotel(), name: 'Grand Hyatt Bali', stars: 5, room: 'Deluxe King', mealPlan: 'CP', inclusions: 'Breakfast · Free WiFi · Pool access', nights: '3' }],
+    price: '75000',
+    perPerson: true,
+    currency: '₹',
+  });
+  const flyerRef = React.useRef(null);
+  const [downloading, setDownloading] = React.useState(false);
+  const [outputSize, setOutputSize] = React.useState('post');
+  const [err, setErr] = React.useState('');
+
+  const theme = pkgThemeFor(pkg.destination);
+  const heroUrl = theme.hero ? (window.location.origin + theme.hero) : '';
+
+  const set = (k, v) => setPkg((p) => ({ ...p, [k]: v }));
+  const setFlight = (arrKey, idx, key, val) => setPkg((p) => {
+    const a = [...p[arrKey]]; a[idx] = { ...a[idx], [key]: val }; return { ...p, [arrKey]: a };
+  });
+  const addFlight = (arrKey) => setPkg((p) => ({ ...p, [arrKey]: [...p[arrKey], emptyFlight()] }));
+  const removeFlight = (arrKey, idx) => setPkg((p) => {
+    const a = [...p[arrKey]]; a.splice(idx, 1); return { ...p, [arrKey]: a.length ? a : [emptyFlight()] };
+  });
+  const setHotel = (idx, key, val) => setPkg((p) => {
+    const a = [...p.hotels]; a[idx] = { ...a[idx], [key]: val }; return { ...p, hotels: a };
+  });
+  const addHotel = () => setPkg((p) => p.hotels.length < 4 ? { ...p, hotels: [...p.hotels, emptyHotel()] } : p);
+  const removeHotel = (idx) => setPkg((p) => {
+    const a = [...p.hotels]; a.splice(idx, 1); return { ...p, hotels: a.length ? a : [emptyHotel()] };
+  });
+
+  const uploadHotelPhoto = async (idx, file) => {
+    if (!file) return;
+    try {
+      const dataUrl = await pkgCompressImage(file, 1200, 0.85);
+      setHotel(idx, 'photo', dataUrl);
+    } catch (e) { setErr('Photo upload failed: ' + (e.message || 'unknown')); }
+  };
+
+  const OUTPUT_SIZES = {
+    post:   { w: 1080, h: 1350, label: 'Instagram Post  1080×1350' },
+    story:  { w: 1080, h: 1920, label: 'Instagram Story  1080×1920' },
+    square: { w: 1080, h: 1080, label: 'Square  1080×1080' },
+    native: { w: 0,    h: 0,    label: 'Original (natural height)' },
+  };
+
+  const downloadJPEG = async () => {
+    if (!flyerRef.current) return;
+    setDownloading(true); setErr('');
+    try {
+      const mod = await import('html-to-image');
+      const PR = 3;
+      const naturalDataUrl = await mod.toJpeg(flyerRef.current, { quality: 0.95, backgroundColor: '#f4f6fb', pixelRatio: PR, cacheBust: true });
+      let finalDataUrl = naturalDataUrl;
+      const target = OUTPUT_SIZES[outputSize];
+      if (target && target.w > 0) {
+        const img = new Image();
+        await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error('read failed')); img.src = naturalDataUrl; });
+        const tw = target.w * PR, th = target.h * PR;
+        const canvas = document.createElement('canvas');
+        canvas.width = tw; canvas.height = th;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#f4f6fb'; ctx.fillRect(0, 0, tw, th);
+        const scale = Math.min(tw / img.width, th / img.height, 1);
+        const drawW = img.width * scale, drawH = img.height * scale;
+        const drawX = Math.round((tw - drawW) / 2), drawY = 0;
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        finalDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      }
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      const suffix = target && target.w > 0 ? `${target.w}x${target.h}` : 'full';
+      link.download = `voyage-ed-package-${(pkg.destination || 'trip').toLowerCase().replace(/\s+/g,'-')}-${stamp}-${suffix}.jpg`;
+      link.href = finalDataUrl; link.click();
+      window.veToast && window.veToast('Package flyer downloaded ✓', 'success');
+    } catch (e) {
+      setErr('Download failed: ' + (e.message || 'unknown'));
+    }
+    setDownloading(false);
+  };
+
+  const getFlightsToRender = () => {
+    if (pkg.flightType === 'single') return [{ label: '', segments: pkg.flightsSingle }];
+    if (pkg.flightType === 'return') return [{ label: 'OUTBOUND', segments: pkg.flightsReturnOut }, { label: 'RETURN', segments: pkg.flightsReturnIn }];
+    return [{ label: '', segments: pkg.flightsMulti, numbered: true }];
+  };
+
+  // ─── Inline styles for form ────────────────────────────
+  const S = {
+    label: { fontSize: 11, fontWeight: 700, color: '#5a6b8c', letterSpacing: .5, marginBottom: 6, textTransform: 'uppercase' },
+    input: { width: '100%', background: '#fff', border: '1px solid #d4e0f5', borderRadius: 8, padding: '8px 11px', fontSize: 12.5, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' },
+    section: { background: '#fff', border: '1px solid #e3eaf7', borderRadius: 12, padding: 14, marginBottom: 12 },
+    sectionTitle: { fontSize: 13, fontWeight: 800, color: '#0d1b3e', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 },
+    row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 },
+    smallBtn: { background: '#eef3fc', border: '1px solid #c2d2ee', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#334e82' },
+    dangerBtn: { background: 'transparent', border: '1px solid #fdeaea', color: '#b91c1c', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 },
+  };
+
+  // ─── Preview flight card renderer ──────────────────────
+  const FlightCard = ({ f, num }) => (
+    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 12, padding: '14px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 1px 3px rgba(13,27,62,0.06)' }}>
+      {num != null && <div style={{ minWidth: 44, background: theme.accent, color: '#fff', borderRadius: 10, padding: '10px 0', textAlign: 'center', fontSize: 10, fontWeight: 800 }}>LEG<br/>{num}</div>}
+      <div style={{ minWidth: 72 }}>
+        <div style={{ background: theme.accent, color: '#fff', fontSize: 14, fontWeight: 800, borderRadius: 8, padding: '6px 8px', textAlign: 'center', letterSpacing: 1 }}>{f.code || 'FL'}</div>
+        <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 4, textAlign: 'center' }}>{f.airline || 'Airline'}</div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.fromCode || '---'}</div>
+          <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 2 }}>{f.from || 'From'}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: theme.accent, marginTop: 4 }}>{f.depTime || '--:--'}</div>
+        </div>
+        <div style={{ flex: 1, textAlign: 'center', padding: '0 8px' }}>
+          <div style={{ borderTop: `1.5px dashed ${theme.accent}`, position: 'relative', margin: '10px 0' }}>
+            <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: '0 6px', fontSize: 14, color: theme.accent }}>✈</div>
+          </div>
+          <div style={{ fontSize: 10, color: '#7d8bab', fontWeight: 700 }}>{f.date || 'Date'}</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.toCode || '---'}</div>
+          <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 2 }}>{f.to || 'To'}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: theme.accent, marginTop: 4 }}>{f.arrTime || '--:--'}</div>
+        </div>
+      </div>
+      <div style={{ minWidth: 76, textAlign: 'right' }}>
+        <div style={{ fontSize: 10, color: '#5a6b8c', fontWeight: 700 }}>{f.cls || 'Economy'}</div>
+        {f.baggage && <div style={{ fontSize: 10, color: '#334e82', marginTop: 2 }}>🧳 {f.baggage}</div>}
+      </div>
+    </div>
+  );
+
+  // ─── Preview hotel card renderer ───────────────────────
+  const HotelCard = ({ h, span }) => (
+    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column', gridColumn: span || 'auto', boxShadow: '0 2px 4px rgba(13,27,62,0.06)' }}>
+      <div style={{ width: '100%', paddingBottom: '56%', position: 'relative', background: theme.accentSoft }}>
+        {h.photo ? (
+          <img src={h.photo} alt={h.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.accentDeep, fontSize: 12, fontWeight: 700 }}>🏨 Hotel photo</div>
+        )}
+        {h.nights && <div style={{ position: 'absolute', top: 8, right: 8, background: theme.tag, color: '#fff', fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 8 }}>{h.nights} NIGHT{Number(h.nights) !== 1 ? 'S' : ''}</div>}
+      </div>
+      <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#0d1b3e', marginBottom: 4 }}>{h.name || 'Hotel Name'}</div>
+        <div style={{ fontSize: 11, color: '#c9961a', marginBottom: 6, letterSpacing: 1 }}>{'★'.repeat(Number(h.stars) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(h.stars) || 0)))}</div>
+        {(h.room || h.mealPlan) && (
+          <div style={{ fontSize: 11, color: '#334e82', marginBottom: 8, fontWeight: 600 }}>
+            {h.room}{h.room && h.mealPlan ? ' · ' : ''}{h.mealPlan}
+          </div>
+        )}
+        {h.inclusions && (
+          <div style={{ fontSize: 10.5, color: '#5a6b8c', lineHeight: 1.6, marginTop: 'auto' }}>
+            {String(h.inclusions).split(/[·•,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 4).map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 2 }}>
+                <span style={{ color: theme.accent, fontWeight: 800 }}>✓</span> <span>{s}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const hotelGridCols = pkg.hotels.length <= 1 ? '1fr' : pkg.hotels.length === 2 ? '1fr 1fr' : '1fr 1fr';
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 400px) 1fr', gap: 16, alignItems: 'start' }}>
+      {/* ═════ LEFT: FORM ═════ */}
+      <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', paddingRight: 6 }}>
+        {err && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '8px 12px', borderRadius: 8, fontSize: 12, marginBottom: 10 }}>⚠️ {err}</div>
+        )}
+
+        {/* Trip Basics */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>📍 Trip Basics</div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={S.label}>Destination</div>
+            <select value={pkg.destination} onChange={(e) => set('destination', e.target.value)} style={S.input}>
+              {Object.entries(PKG_THEMES).map(([k, v]) => <option key={k} value={v.label}>{v.label}</option>)}
+              <option value="other">Other (no preset theme)</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={S.label}>Title</div>
+            <input value={pkg.title} onChange={(e) => set('title', e.target.value)} style={S.input} placeholder="Discover Bali" />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={S.label}>Tagline (small caps)</div>
+            <input value={pkg.tagline} onChange={(e) => set('tagline', e.target.value)} style={S.input} placeholder="ISLAND OF THE GODS" />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={S.label}>Headline</div>
+            <input value={pkg.headline} onChange={(e) => set('headline', e.target.value)} style={S.input} placeholder="Culture · Nature · Adventure" />
+          </div>
+          <div style={S.row}>
+            <div>
+              <div style={S.label}>Days / Nights</div>
+              <input value={pkg.daysNights} onChange={(e) => set('daysNights', e.target.value)} style={S.input} placeholder="5N / 6D" />
+            </div>
+            <div>
+              <div style={S.label}>Travel Dates</div>
+              <input value={pkg.dates} onChange={(e) => set('dates', e.target.value)} style={S.input} placeholder="16 – 22 Nov 2026" />
+            </div>
+          </div>
+        </div>
+
+        {/* Flights */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>✈ Flights</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[['single', 'One-way'], ['return', 'Return'], ['multi', 'Multi-sector']].map(([id, label]) => (
+              <button key={id} onClick={() => set('flightType', id)} style={{ flex: 1, background: pkg.flightType === id ? '#0d1b3e' : '#f4f7fc', color: pkg.flightType === id ? '#fff' : '#334e82', border: '1px solid ' + (pkg.flightType === id ? '#0d1b3e' : '#d4e0f5'), borderRadius: 8, padding: '8px 4px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>{label}</button>
+            ))}
+          </div>
+
+          {(pkg.flightType === 'single' ? [['flightsSingle', null]] :
+            pkg.flightType === 'return' ? [['flightsReturnOut', 'OUTBOUND'], ['flightsReturnIn', 'RETURN']] :
+            [['flightsMulti', null]]).map(([arrKey, label]) => (
+            <div key={arrKey} style={{ marginBottom: 12 }}>
+              {label && <div style={{ fontSize: 10, fontWeight: 800, color: theme.accent, letterSpacing: 1.5, marginBottom: 6 }}>{label}</div>}
+              {pkg[arrKey].map((f, i) => (
+                <div key={i} style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#7d8bab' }}>{pkg.flightType === 'multi' ? `Leg ${i + 1}` : `Flight ${i + 1}`}</div>
+                    {(pkg[arrKey].length > 1 || pkg.flightType === 'multi') && <button onClick={() => removeFlight(arrKey, i)} style={S.dangerBtn}>✕</button>}
+                  </div>
+                  <div style={S.row}>
+                    <input value={f.airline} onChange={(e) => setFlight(arrKey, i, 'airline', e.target.value)} style={S.input} placeholder="Airline (e.g. Vietjet)" />
+                    <input value={f.code} onChange={(e) => setFlight(arrKey, i, 'code', e.target.value.toUpperCase())} style={S.input} placeholder="Code (e.g. VJ)" />
+                  </div>
+                  <div style={S.row}>
+                    <input value={f.from} onChange={(e) => setFlight(arrKey, i, 'from', e.target.value)} style={S.input} placeholder="From city" />
+                    <input value={f.fromCode} onChange={(e) => setFlight(arrKey, i, 'fromCode', e.target.value.toUpperCase())} style={S.input} placeholder="DEL" maxLength={4} />
+                  </div>
+                  <div style={S.row}>
+                    <input value={f.to} onChange={(e) => setFlight(arrKey, i, 'to', e.target.value)} style={S.input} placeholder="To city" />
+                    <input value={f.toCode} onChange={(e) => setFlight(arrKey, i, 'toCode', e.target.value.toUpperCase())} style={S.input} placeholder="DPS" maxLength={4} />
+                  </div>
+                  <div style={{ ...S.row, gridTemplateColumns: '1.4fr 1fr 1fr' }}>
+                    <input value={f.date} onChange={(e) => setFlight(arrKey, i, 'date', e.target.value)} style={S.input} placeholder="16 Nov 2026" />
+                    <input value={f.depTime} onChange={(e) => setFlight(arrKey, i, 'depTime', e.target.value)} style={S.input} placeholder="09:30" />
+                    <input value={f.arrTime} onChange={(e) => setFlight(arrKey, i, 'arrTime', e.target.value)} style={S.input} placeholder="17:45" />
+                  </div>
+                  <div style={S.row}>
+                    <select value={f.cls} onChange={(e) => setFlight(arrKey, i, 'cls', e.target.value)} style={S.input}>
+                      <option>Economy</option><option>Premium Economy</option><option>Business</option><option>First</option>
+                    </select>
+                    <input value={f.baggage} onChange={(e) => setFlight(arrKey, i, 'baggage', e.target.value)} style={S.input} placeholder="20kg baggage" />
+                  </div>
+                </div>
+              ))}
+              {pkg.flightType === 'multi' && (
+                <button onClick={() => addFlight(arrKey)} style={{ ...S.smallBtn, width: '100%' }}>+ Add leg</button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Hotels */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>🏨 Hotels ({pkg.hotels.length}/4)</div>
+          {pkg.hotels.map((h, i) => (
+            <div key={i} style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#7d8bab' }}>Hotel {i + 1}</div>
+                {pkg.hotels.length > 1 && <button onClick={() => removeHotel(i)} style={S.dangerBtn}>✕</button>}
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={S.label}>Photo</div>
+                {h.photo && <img src={h.photo} alt="" style={{ width: '100%', height: 100, objectFit: 'cover', borderRadius: 6, marginBottom: 6 }} />}
+                <input type="file" accept="image/*" onChange={(e) => uploadHotelPhoto(i, e.target.files && e.target.files[0])} style={{ fontSize: 11, width: '100%' }} />
+              </div>
+              <input value={h.name} onChange={(e) => setHotel(i, 'name', e.target.value)} style={{ ...S.input, marginBottom: 8 }} placeholder="Hotel name" />
+              <div style={S.row}>
+                <select value={h.stars} onChange={(e) => setHotel(i, 'stars', Number(e.target.value))} style={S.input}>
+                  {[1,2,3,4,5].map((n) => <option key={n} value={n}>{'★'.repeat(n)} {n}-star</option>)}
+                </select>
+                <input value={h.nights} onChange={(e) => setHotel(i, 'nights', e.target.value)} style={S.input} placeholder="Nights" />
+              </div>
+              <div style={S.row}>
+                <input value={h.room} onChange={(e) => setHotel(i, 'room', e.target.value)} style={S.input} placeholder="Room (Deluxe King)" />
+                <select value={h.mealPlan} onChange={(e) => setHotel(i, 'mealPlan', e.target.value)} style={S.input}>
+                  <option value="">Meal plan</option>
+                  <option value="RO">Room Only</option>
+                  <option value="CP">CP · B/fast</option>
+                  <option value="MAP">MAP · B/fast + 1 meal</option>
+                  <option value="AP">AP · All meals</option>
+                  <option value="AI">All Inclusive</option>
+                </select>
+              </div>
+              <div style={S.label}>Inclusions (comma or · separated)</div>
+              <textarea value={h.inclusions} onChange={(e) => setHotel(i, 'inclusions', e.target.value)} rows={2} style={{ ...S.input, resize: 'vertical' }} placeholder="Breakfast · Free WiFi · Pool access · Airport transfer" />
+            </div>
+          ))}
+          {pkg.hotels.length < 4 && (
+            <button onClick={addHotel} style={{ ...S.smallBtn, width: '100%' }}>+ Add hotel (up to 4)</button>
+          )}
+        </div>
+
+        {/* Price */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>💰 Price</div>
+          <div style={{ ...S.row, gridTemplateColumns: '60px 1fr 100px' }}>
+            <input value={pkg.currency} onChange={(e) => set('currency', e.target.value)} style={S.input} maxLength={3} />
+            <input value={pkg.price} onChange={(e) => set('price', e.target.value)} style={S.input} placeholder="75000" />
+            <select value={pkg.perPerson ? 'pp' : 'total'} onChange={(e) => set('perPerson', e.target.value === 'pp')} style={S.input}>
+              <option value="pp">Per person</option>
+              <option value="total">Total</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* ═════ RIGHT: PREVIEW + DOWNLOAD ═════ */}
+      <div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+          <select value={outputSize} onChange={(e) => setOutputSize(e.target.value)} disabled={downloading}
+            style={{ background: '#fff', color: '#0d1b3e', border: '1.5px solid #c9961a', borderRadius: 10, padding: '9px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            {Object.entries(OUTPUT_SIZES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <button onClick={downloadJPEG} disabled={downloading}
+            style={{ background: 'linear-gradient(135deg,#15803d,#22a04e)', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 20px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+            {downloading ? '⏳ Making JPEG…' : '✅ Download JPEG'}
+          </button>
+          <div style={{ fontSize: 11, color: '#7d8bab' }}>Default: 1080×1350 Instagram Post</div>
+        </div>
+
+        <div style={{ background: '#f4f6fb', padding: 12, borderRadius: 12, overflow: 'auto' }}>
+          <div ref={flyerRef} style={{ width: 1080, background: '#fdf9f0', margin: '0 auto', fontFamily: 'Helvetica, Arial, sans-serif' }}>
+            {/* ═ HERO ═ */}
+            <div style={{ position: 'relative', width: '100%', height: 460, backgroundImage: heroUrl ? `url(${heroUrl})` : `linear-gradient(135deg,${theme.accent},${theme.accentDeep})`, backgroundSize: 'cover', backgroundPosition: 'center', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(10,21,48,.35), rgba(10,21,48,.15) 40%, rgba(10,21,48,.85))' }} />
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: '#f0c842' }} />
+              {/* Logo */}
+              <div style={{ position: 'absolute', top: 28, left: 32, background: '#fff', borderRadius: 12, padding: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, background: '#0d1b3e', color: '#f0c842', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>V</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>VOYAGE-ED</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: '#c9961a', letterSpacing: 1.5, marginTop: 2 }}>TRAVELS</div>
+                </div>
+              </div>
+              {/* Days pill */}
+              <div style={{ position: 'absolute', top: 28, right: 32, background: theme.tag, color: '#fff', borderRadius: 14, padding: '10px 20px', textAlign: 'center' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, opacity: .9 }}>TRIP LENGTH</div>
+                <div style={{ fontSize: 22, fontWeight: 800, marginTop: 2 }}>{pkg.daysNights}</div>
+              </div>
+              {/* Title block */}
+              <div style={{ position: 'absolute', bottom: 40, left: 40, right: 40, color: '#fff' }}>
+                <div style={{ fontSize: 72, fontWeight: 800, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, textShadow: '0 4px 12px rgba(0,0,0,.4)' }}>{pkg.title}</div>
+                {pkg.tagline && <div style={{ fontSize: 14, fontWeight: 700, color: '#f0c842', letterSpacing: 2, marginTop: 12 }}>{pkg.tagline}</div>}
+                {pkg.headline && <div style={{ fontSize: 18, fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', marginTop: 6 }}>{pkg.headline}</div>}
+                <div style={{ display: 'inline-block', marginTop: 14, background: 'rgba(255,255,255,.12)', backdropFilter: 'blur(6px)', border: '1px solid rgba(240,200,66,.4)', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>📅 {pkg.dates}</div>
+              </div>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 5, background: '#f0c842' }} />
+            </div>
+
+            {/* ═ FLIGHTS ═ */}
+            <div style={{ padding: '24px 32px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>✈  Your Flights</div>
+                <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
+              </div>
+              {getFlightsToRender().map((group, gi) => (
+                <div key={gi} style={{ marginBottom: 12 }}>
+                  {group.label && <div style={{ fontSize: 11, fontWeight: 800, color: theme.accent, letterSpacing: 2, marginBottom: 8 }}>— {group.label} —</div>}
+                  {group.segments.map((f, i) => (
+                    <FlightCard key={i} f={f} num={group.numbered ? i + 1 : null} />
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            {/* ═ HOTELS ═ */}
+            <div style={{ padding: '16px 32px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>🏨  Your Stays</div>
+                <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: hotelGridCols, gap: 14 }}>
+                {pkg.hotels.map((h, i) => (
+                  <HotelCard key={i} h={h} span={pkg.hotels.length === 3 && i === 2 ? '1 / span 2' : null} />
+                ))}
+              </div>
+            </div>
+
+            {/* ═ PRICE BANNER ═ */}
+            <div style={{ margin: '24px 32px', background: theme.tag, color: '#fff', borderRadius: 16, padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: theme.tagDeep }} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: theme.tagDeep }} />
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, opacity: .85 }}>TRAVEL DATES</div>
+                <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>{pkg.dates}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, opacity: .85, marginTop: 12 }}>STARTING FROM</div>
+                <div style={{ fontSize: 11, opacity: .8, marginTop: 2 }}>{pkg.perPerson ? 'Per person · Twin-sharing basis' : 'Total package price'}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 54, fontWeight: 800, fontFamily: 'Georgia, serif', lineHeight: 1 }}>{pkg.currency} {Number(pkg.price || 0).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 2, marginTop: 6, opacity: .9 }}>/ {pkg.perPerson ? 'PER PERSON' : 'TOTAL'}</div>
+              </div>
+            </div>
+
+            {/* ═ FOOTER ═ */}
+            <div style={{ background: '#0a1530', color: '#fff', padding: '20px 32px', borderTop: '3px solid #f0c842' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Vishal Sharma</div>
+                  <div style={{ fontSize: 11, marginTop: 2 }}>+91 70096 59048</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Sahitya Singh</div>
+                  <div style={{ fontSize: 11, marginTop: 2 }}>+91 98187 94297</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>enquiry@voyage-ed.com</div>
+                  <div style={{ fontSize: 11, marginTop: 2 }}>www.voyage-ed.com</div>
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #2a3b5f', marginTop: 14, paddingTop: 10, fontSize: 10, color: '#8fa3c0', textAlign: 'center' }}>
+                Suite 315, Regus GMADA Aerocity, Mohali 140306 · GSTIN 04ABBFV6015A1ZT · IATA Accredited
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FlyerStudioPage() {
+  const [flyerMode, setFlyerMode] = React.useState('fare'); // 'fare' | 'package'
   const [step, setStep] = React.useState('upload'); // upload, preview, generated
   const [data, setData] = React.useState(null);
   const [markup, setMarkup] = React.useState('2000');
@@ -14464,24 +14977,33 @@ function FlyerStudioPage() {
 
   return (
     <div className="v2-content-inner">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 12 }}>
         <h1 className="v2-page-title">🎨 Flyer Studio</h1>
-        {step !== 'upload' && (
+        <div style={{ display: 'flex', gap: 6, background: '#f4f7fc', padding: 4, borderRadius: 10 }}>
+          {[['fare', '🧾 Fare Sheet'], ['package', '📦 Package Flyer']].map(([id, label]) => (
+            <button key={id} onClick={() => setFlyerMode(id)}
+              style={{ background: flyerMode === id ? '#0d1b3e' : 'transparent', color: flyerMode === id ? '#fff' : '#334e82', border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{label}</button>
+          ))}
+        </div>
+        {step !== 'upload' && flyerMode === 'fare' && (
           <button className="v2-hero-btn" onClick={resetAll}>↺ Start over</button>
         )}
       </div>
       <p style={{ color: '#5a6b8c', fontSize: 13, marginBottom: 20, lineHeight: 1.6 }}>
-        Vendor B2B flyer upload karo → AI prices/routes/dates extract karega → apna markup daalo → Voyage-Ed branded flyer JPEG mein download karo. Design Voyage-Ed's own original template hai — vendor ka logo/contact automatically hat jaata hai.
+        {flyerMode === 'fare'
+          ? 'Vendor B2B flyer upload karo → AI prices/routes/dates extract karega → apna markup daalo → Voyage-Ed branded flyer JPEG mein download karo.'
+          : 'Trip details enter karo — destination, flights (single/return/multi), hotels (photo + name + stars + room + inclusions, up to 4), aur price. Live preview aa jaayega, JPEG download karke share karo.'}
       </p>
 
-      {err && (
+      {flyerMode === 'package' && <PackageFlyerContent />}
+      {flyerMode === 'fare' && err && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '10px 14px', borderRadius: 8, fontSize: 12, marginBottom: 14 }}>
           ⚠️ {err}
         </div>
       )}
 
       {/* STEP 1: UPLOAD */}
-      {step === 'upload' && (
+      {flyerMode === 'fare' && step === 'upload' && (
         <div style={{ background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e3eaf7' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e', marginBottom: 12 }}>1. Upload vendor flyer(s)</div>
           <PasteZone
