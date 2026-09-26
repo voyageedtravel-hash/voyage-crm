@@ -14481,33 +14481,33 @@ function PackageFlyerContent() {
 
   // ─── Preview flight card renderer ──────────────────────
   const FlightCard = ({ f, num }) => (
-    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 12, padding: '14px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 1px 3px rgba(13,27,62,0.06)' }}>
-      {num != null && <div style={{ minWidth: 44, background: theme.accent, color: '#fff', borderRadius: 10, padding: '10px 0', textAlign: 'center', fontSize: 10, fontWeight: 800 }}>LEG<br/>{num}</div>}
-      <div style={{ minWidth: 72 }}>
-        <div style={{ background: theme.accent, color: '#fff', fontSize: 14, fontWeight: 800, borderRadius: 8, padding: '6px 8px', textAlign: 'center', letterSpacing: 1 }}>{f.code || 'FL'}</div>
-        <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 4, textAlign: 'center' }}>{f.airline || 'Airline'}</div>
+    <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 10, padding: '8px 12px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 3px rgba(13,27,62,0.06)' }}>
+      {num != null && <div style={{ minWidth: 36, background: theme.accent, color: '#fff', borderRadius: 8, padding: '6px 0', textAlign: 'center', fontSize: 9, fontWeight: 800 }}>LEG<br/>{num}</div>}
+      <div style={{ minWidth: 62 }}>
+        <div style={{ background: theme.accent, color: '#fff', fontSize: 12, fontWeight: 800, borderRadius: 6, padding: '4px 6px', textAlign: 'center', letterSpacing: 1 }}>{f.code || 'FL'}</div>
+        <div style={{ fontSize: 9, color: '#5a6b8c', marginTop: 2, textAlign: 'center' }}>{f.airline || 'Airline'}</div>
       </div>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.fromCode || '---'}</div>
-          <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 2 }}>{f.from || 'From'}</div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: theme.accent, marginTop: 4 }}>{f.depTime || '--:--'}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.fromCode || '---'}</div>
+          <div style={{ fontSize: 9, color: '#5a6b8c', marginTop: 1 }}>{f.from || 'From'}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: theme.accent, marginTop: 2 }}>{f.depTime || '--:--'}</div>
         </div>
         <div style={{ flex: 1, textAlign: 'center', padding: '0 8px' }}>
-          <div style={{ borderTop: `1.5px dashed ${theme.accent}`, position: 'relative', margin: '10px 0' }}>
-            <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: '0 6px', fontSize: 14, color: theme.accent }}>✈</div>
+          <div style={{ borderTop: `1.5px dashed ${theme.accent}`, position: 'relative', margin: '6px 0' }}>
+            <div style={{ position: 'absolute', top: -9, left: '50%', transform: 'translateX(-50%)', background: '#fff', padding: '0 5px', fontSize: 12, color: theme.accent }}>✈</div>
           </div>
-          <div style={{ fontSize: 10, color: '#7d8bab', fontWeight: 700 }}>{f.date || 'Date'}</div>
+          <div style={{ fontSize: 9, color: '#7d8bab', fontWeight: 700 }}>{f.date || 'Date'}</div>
         </div>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.toCode || '---'}</div>
-          <div style={{ fontSize: 10, color: '#5a6b8c', marginTop: 2 }}>{f.to || 'To'}</div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: theme.accent, marginTop: 4 }}>{f.arrTime || '--:--'}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>{f.toCode || '---'}</div>
+          <div style={{ fontSize: 9, color: '#5a6b8c', marginTop: 1 }}>{f.to || 'To'}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: theme.accent, marginTop: 2 }}>{f.arrTime || '--:--'}</div>
         </div>
       </div>
-      <div style={{ minWidth: 76, textAlign: 'right' }}>
-        <div style={{ fontSize: 10, color: '#5a6b8c', fontWeight: 700 }}>{f.cls || 'Economy'}</div>
-        {f.baggage && <div style={{ fontSize: 10, color: '#334e82', marginTop: 2 }}>🧳 {f.baggage}</div>}
+      <div style={{ minWidth: 68, textAlign: 'right' }}>
+        <div style={{ fontSize: 9, color: '#5a6b8c', fontWeight: 700 }}>{f.cls || 'Economy'}</div>
+        {f.baggage && <div style={{ fontSize: 9, color: '#334e82', marginTop: 1 }}>🧳 {f.baggage}</div>}
       </div>
     </div>
   );
@@ -14515,26 +14515,26 @@ function PackageFlyerContent() {
   // ─── Preview hotel card renderer ───────────────────────
   const HotelCard = ({ h, span }) => (
     <div style={{ background: '#fff', border: '1px solid #e3eaf7', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column', gridColumn: span || 'auto', boxShadow: '0 2px 4px rgba(13,27,62,0.06)' }}>
-      <div style={{ width: '100%', paddingBottom: '56%', position: 'relative', background: theme.accentSoft }}>
+      <div style={{ width: '100%', paddingBottom: '46%', position: 'relative', background: theme.accentSoft }}>
         {h.photo ? (
           <img src={h.photo} alt={h.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: theme.accentDeep, fontSize: 12, fontWeight: 700 }}>🏨 Hotel photo</div>
         )}
-        {h.nights && <div style={{ position: 'absolute', top: 8, right: 8, background: theme.tag, color: '#fff', fontSize: 10, fontWeight: 800, padding: '4px 8px', borderRadius: 8 }}>{h.nights} NIGHT{Number(h.nights) !== 1 ? 'S' : ''}</div>}
+        {h.nights && <div style={{ position: 'absolute', top: 6, right: 6, background: theme.tag, color: '#fff', fontSize: 9, fontWeight: 800, padding: '3px 6px', borderRadius: 6 }}>{h.nights} NIGHT{Number(h.nights) !== 1 ? 'S' : ''}</div>}
       </div>
-      <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: '#0d1b3e', marginBottom: 4 }}>{h.name || 'Hotel Name'}</div>
-        <div style={{ fontSize: 11, color: '#c9961a', marginBottom: 6, letterSpacing: 1 }}>{'★'.repeat(Number(h.stars) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(h.stars) || 0)))}</div>
+      <div style={{ padding: '9px 12px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#0d1b3e', marginBottom: 2 }}>{h.name || 'Hotel Name'}</div>
+        <div style={{ fontSize: 10, color: '#c9961a', marginBottom: 4, letterSpacing: 1 }}>{'★'.repeat(Number(h.stars) || 0)}{'☆'.repeat(Math.max(0, 5 - (Number(h.stars) || 0)))}</div>
         {(h.room || h.mealPlan) && (
-          <div style={{ fontSize: 11, color: '#334e82', marginBottom: 8, fontWeight: 600 }}>
+          <div style={{ fontSize: 10.5, color: '#334e82', marginBottom: 5, fontWeight: 600 }}>
             {h.room}{h.room && h.mealPlan ? ' · ' : ''}{h.mealPlan}
           </div>
         )}
         {h.inclusions && (
-          <div style={{ fontSize: 10.5, color: '#5a6b8c', lineHeight: 1.6, marginTop: 'auto' }}>
-            {String(h.inclusions).split(/[·•,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 4).map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 2 }}>
+          <div style={{ fontSize: 10, color: '#5a6b8c', lineHeight: 1.5, marginTop: 'auto' }}>
+            {String(h.inclusions).split(/[·•,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 3).map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 1 }}>
                 <span style={{ color: theme.accent, fontWeight: 800 }}>✓</span> <span>{s}</span>
               </div>
             ))}
@@ -14725,37 +14725,37 @@ function PackageFlyerContent() {
         <div style={{ background: '#f4f6fb', padding: 12, borderRadius: 12, overflow: 'auto' }}>
           <div ref={flyerRef} style={{ width: 1080, background: '#fdf9f0', margin: '0 auto', fontFamily: 'Helvetica, Arial, sans-serif' }}>
             {/* ═ HERO ═ */}
-            <div style={{ position: 'relative', width: '100%', height: 460, backgroundImage: heroUrl ? `url(${heroUrl})` : `linear-gradient(135deg,${theme.accent},${theme.accentDeep})`, backgroundSize: 'cover', backgroundPosition: 'center', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', width: '100%', height: 340, backgroundImage: heroUrl ? `url(${heroUrl})` : `linear-gradient(135deg,${theme.accent},${theme.accentDeep})`, backgroundSize: 'cover', backgroundPosition: 'center', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(10,21,48,.35), rgba(10,21,48,.15) 40%, rgba(10,21,48,.85))' }} />
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: '#f0c842' }} />
               {/* Logo */}
-              <div style={{ position: 'absolute', top: 28, left: 32, background: '#fff', borderRadius: 12, padding: '10px 18px', display: 'flex', alignItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-                <img src={window.location.origin + '/voyage-ed-logo.jpg'} alt="Voyage-Ed Travels" style={{ height: 54, width: 'auto', display: 'block' }} />
+              <div style={{ position: 'absolute', top: 20, left: 24, background: '#fff', borderRadius: 10, padding: '7px 14px', display: 'flex', alignItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                <img src={window.location.origin + '/voyage-ed-logo.jpg'} alt="Voyage-Ed Travels" style={{ height: 42, width: 'auto', display: 'block' }} />
               </div>
               {/* Days pill */}
-              <div style={{ position: 'absolute', top: 28, right: 32, background: theme.tag, color: '#fff', borderRadius: 14, padding: '10px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1, opacity: .9 }}>TRIP LENGTH</div>
-                <div style={{ fontSize: 22, fontWeight: 800, marginTop: 2 }}>{pkg.daysNights}</div>
+              <div style={{ position: 'absolute', top: 20, right: 24, background: theme.tag, color: '#fff', borderRadius: 12, padding: '7px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: 1, opacity: .9 }}>TRIP LENGTH</div>
+                <div style={{ fontSize: 18, fontWeight: 800, marginTop: 1 }}>{pkg.daysNights}</div>
               </div>
               {/* Title block */}
-              <div style={{ position: 'absolute', bottom: 40, left: 40, right: 40, color: '#fff' }}>
-                <div style={{ fontSize: 72, fontWeight: 800, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, textShadow: '0 4px 12px rgba(0,0,0,.4)' }}>{pkg.title}</div>
-                {pkg.tagline && <div style={{ fontSize: 14, fontWeight: 700, color: '#f0c842', letterSpacing: 2, marginTop: 12 }}>{pkg.tagline}</div>}
-                {pkg.headline && <div style={{ fontSize: 18, fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', marginTop: 6 }}>{pkg.headline}</div>}
-                <div style={{ display: 'inline-block', marginTop: 14, background: 'rgba(255,255,255,.12)', backdropFilter: 'blur(6px)', border: '1px solid rgba(240,200,66,.4)', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700 }}>📅 {pkg.dates}</div>
+              <div style={{ position: 'absolute', bottom: 24, left: 32, right: 32, color: '#fff' }}>
+                <div style={{ fontSize: 52, fontWeight: 800, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, textShadow: '0 4px 12px rgba(0,0,0,.4)' }}>{pkg.title}</div>
+                {pkg.tagline && <div style={{ fontSize: 12, fontWeight: 700, color: '#f0c842', letterSpacing: 2, marginTop: 8 }}>{pkg.tagline}</div>}
+                {pkg.headline && <div style={{ fontSize: 15, fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', marginTop: 4 }}>{pkg.headline}</div>}
+                <div style={{ display: 'inline-block', marginTop: 10, background: 'rgba(255,255,255,.12)', backdropFilter: 'blur(6px)', border: '1px solid rgba(240,200,66,.4)', borderRadius: 8, padding: '5px 12px', fontSize: 11, fontWeight: 700 }}>📅 {pkg.dates}</div>
               </div>
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 5, background: '#f0c842' }} />
             </div>
 
             {/* ═ FLIGHTS ═ */}
-            <div style={{ padding: '24px 32px 8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>✈  Your Flights</div>
+            <div style={{ padding: '14px 28px 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>✈  Your Flights</div>
                 <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
               </div>
               {getFlightsToRender().map((group, gi) => (
-                <div key={gi} style={{ marginBottom: 12 }}>
-                  {group.label && <div style={{ fontSize: 11, fontWeight: 800, color: theme.accent, letterSpacing: 2, marginBottom: 8 }}>— {group.label} —</div>}
+                <div key={gi} style={{ marginBottom: 8 }}>
+                  {group.label && <div style={{ fontSize: 10, fontWeight: 800, color: theme.accent, letterSpacing: 2, marginBottom: 5 }}>— {group.label} —</div>}
                   {group.segments.map((f, i) => (
                     <FlightCard key={i} f={f} num={group.numbered ? i + 1 : null} />
                   ))}
@@ -14764,12 +14764,12 @@ function PackageFlyerContent() {
             </div>
 
             {/* ═ HOTELS ═ */}
-            <div style={{ padding: '16px 32px 8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>🏨  Your Stays</div>
+            <div style={{ padding: '10px 28px 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>🏨  Your Stays</div>
                 <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: hotelGridCols, gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: hotelGridCols, gap: 10 }}>
                 {pkg.hotels.map((h, i) => (
                   <HotelCard key={i} h={h} span={pkg.hotels.length === 3 && i === 2 ? '1 / span 2' : null} />
                 ))}
@@ -14778,18 +14778,18 @@ function PackageFlyerContent() {
 
             {/* ═ PACKAGE INCLUDES ═ */}
             {(pkg.packageIncludes || pkg.packageExcludes) && (
-              <div style={{ padding: '20px 32px 8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>📋  Package Inclusions</div>
+              <div style={{ padding: '10px 28px 4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>📋  Package Inclusions</div>
                   <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: pkg.packageExcludes ? '1.4fr 1fr' : '1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: pkg.packageExcludes ? '1.4fr 1fr' : '1fr', gap: 10 }}>
                   {pkg.packageIncludes && (
-                    <div style={{ background: '#fff', border: '1px solid #d1fae5', borderLeft: '5px solid #15803d', borderRadius: 12, padding: '16px 20px' }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#15803d', letterSpacing: 1.5, marginBottom: 12 }}>✅  WHAT'S INCLUDED</div>
+                    <div style={{ background: '#fff', border: '1px solid #d1fae5', borderLeft: '4px solid #15803d', borderRadius: 10, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: '#15803d', letterSpacing: 1.5, marginBottom: 6 }}>✅  WHAT'S INCLUDED</div>
                       <div>
                         {String(pkg.packageIncludes).split(/[·•\n]/).map((s) => s.trim()).filter(Boolean).map((s, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 12.5, color: '#0d1b3e', lineHeight: 1.5 }}>
+                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 3, fontSize: 11, color: '#0d1b3e', lineHeight: 1.4 }}>
                             <span style={{ color: '#15803d', fontWeight: 800, marginTop: 1 }}>✓</span>
                             <span>{s}</span>
                           </div>
@@ -14798,11 +14798,11 @@ function PackageFlyerContent() {
                     </div>
                   )}
                   {pkg.packageExcludes && (
-                    <div style={{ background: '#fff', border: '1px solid #fecaca', borderLeft: '5px solid #b91c1c', borderRadius: 12, padding: '16px 20px' }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: '#b91c1c', letterSpacing: 1.5, marginBottom: 12 }}>❌  NOT INCLUDED</div>
+                    <div style={{ background: '#fff', border: '1px solid #fecaca', borderLeft: '4px solid #b91c1c', borderRadius: 10, padding: '10px 14px' }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: '#b91c1c', letterSpacing: 1.5, marginBottom: 6 }}>❌  NOT INCLUDED</div>
                       <div>
                         {String(pkg.packageExcludes).split(/[·•\n]/).map((s) => s.trim()).filter(Boolean).map((s, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 12, color: '#334e82', lineHeight: 1.5 }}>
+                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 3, fontSize: 10.5, color: '#334e82', lineHeight: 1.4 }}>
                             <span style={{ color: '#b91c1c', fontWeight: 800, marginTop: 1 }}>✕</span>
                             <span>{s}</span>
                           </div>
@@ -14815,38 +14815,38 @@ function PackageFlyerContent() {
             )}
 
             {/* ═ PRICE BANNER ═ */}
-            <div style={{ margin: '24px 32px', background: theme.tag, color: '#fff', borderRadius: 16, padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ margin: '14px 28px 12px', background: theme.tag, color: '#fff', borderRadius: 14, padding: '14px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: theme.tagDeep }} />
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: theme.tagDeep }} />
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, opacity: .85 }}>TRAVEL DATES</div>
-                <div style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>{pkg.dates}</div>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, opacity: .85, marginTop: 12 }}>STARTING FROM</div>
-                <div style={{ fontSize: 11, opacity: .8, marginTop: 2 }}>{pkg.perPerson ? 'Per person · Twin-sharing basis' : 'Total package price'}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>{pkg.dates}</div>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 2, opacity: .85, marginTop: 8 }}>STARTING FROM</div>
+                <div style={{ fontSize: 10, opacity: .8, marginTop: 1 }}>{pkg.perPerson ? 'Per person · Twin-sharing basis' : 'Total package price'}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 54, fontWeight: 800, fontFamily: 'Georgia, serif', lineHeight: 1 }}>{pkg.currency} {Number(pkg.price || 0).toLocaleString('en-IN')}</div>
-                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 2, marginTop: 6, opacity: .9 }}>/ {pkg.perPerson ? 'PER PERSON' : 'TOTAL'}</div>
+                <div style={{ fontSize: 40, fontWeight: 800, fontFamily: 'Georgia, serif', lineHeight: 1 }}>{pkg.currency} {Number(pkg.price || 0).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 2, marginTop: 4, opacity: .9 }}>/ {pkg.perPerson ? 'PER PERSON' : 'TOTAL'}</div>
               </div>
             </div>
 
             {/* ═ FOOTER ═ */}
-            <div style={{ background: '#0a1530', color: '#fff', padding: '20px 32px', borderTop: '3px solid #f0c842' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+            <div style={{ background: '#0a1530', color: '#fff', padding: '12px 28px', borderTop: '3px solid #f0c842' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Vishal Sharma</div>
-                  <div style={{ fontSize: 11, marginTop: 2 }}>+91 70096 59048</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#f0c842' }}>Vishal Sharma</div>
+                  <div style={{ fontSize: 10, marginTop: 1 }}>+91 70096 59048</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>Sahitya Singh</div>
-                  <div style={{ fontSize: 11, marginTop: 2 }}>+91 98187 94297</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#f0c842' }}>Sahitya Singh</div>
+                  <div style={{ fontSize: 10, marginTop: 1 }}>+91 98187 94297</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: '#f0c842' }}>enquiry@voyage-ed.com</div>
-                  <div style={{ fontSize: 11, marginTop: 2 }}>www.voyage-ed.com</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#f0c842' }}>enquiry@voyage-ed.com</div>
+                  <div style={{ fontSize: 10, marginTop: 1 }}>www.voyage-ed.com</div>
                 </div>
               </div>
-              <div style={{ borderTop: '1px solid #2a3b5f', marginTop: 14, paddingTop: 10, fontSize: 10, color: '#8fa3c0', textAlign: 'center' }}>
+              <div style={{ borderTop: '1px solid #2a3b5f', marginTop: 8, paddingTop: 6, fontSize: 9, color: '#8fa3c0', textAlign: 'center' }}>
                 Suite 315, Regus GMADA Aerocity, Mohali 140306 · GSTIN 04ABBFV6015A1ZT · IATA Accredited
               </div>
             </div>
