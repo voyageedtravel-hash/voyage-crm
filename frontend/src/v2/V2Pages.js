@@ -14384,6 +14384,8 @@ function PackageFlyerContent() {
     price: '75000',
     perPerson: true,
     currency: '₹',
+    packageIncludes: 'Return airfare in Economy class · All private airport transfers (SUV/Coach) · Daily sightseeing as per itinerary · All entry tickets to monuments & attractions · English-speaking tour guide · Visa fees & assistance · 24/7 Voyage-Ed trip manager on WhatsApp · All taxes & GST',
+    packageExcludes: 'Meals other than specified · Personal expenses (laundry, phone, minibar) · Travel insurance · Anything not mentioned in inclusions · Tips & gratuities',
   });
   const flyerRef = React.useRef(null);
   const [downloading, setDownloading] = React.useState(false);
@@ -14679,6 +14681,19 @@ function PackageFlyerContent() {
           )}
         </div>
 
+        {/* Package Inclusions / Exclusions */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>📋 Package Inclusions</div>
+          <div style={{ ...S.label, color: '#15803d' }}>What's Included (separate with · or new line)</div>
+          <textarea value={pkg.packageIncludes} onChange={(e) => set('packageIncludes', e.target.value)} rows={5}
+            style={{ ...S.input, resize: 'vertical', lineHeight: 1.6, marginBottom: 10 }}
+            placeholder="Return airfare · Airport transfers · Sightseeing · Visa · Trip manager" />
+          <div style={{ ...S.label, color: '#b91c1c' }}>What's NOT Included</div>
+          <textarea value={pkg.packageExcludes} onChange={(e) => set('packageExcludes', e.target.value)} rows={3}
+            style={{ ...S.input, resize: 'vertical', lineHeight: 1.6 }}
+            placeholder="Meals other than specified · Personal expenses · Insurance" />
+        </div>
+
         {/* Price */}
         <div style={S.section}>
           <div style={S.sectionTitle}>💰 Price</div>
@@ -14714,12 +14729,8 @@ function PackageFlyerContent() {
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(10,21,48,.35), rgba(10,21,48,.15) 40%, rgba(10,21,48,.85))' }} />
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: '#f0c842' }} />
               {/* Logo */}
-              <div style={{ position: 'absolute', top: 28, left: 32, background: '#fff', borderRadius: 12, padding: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 40, height: 40, background: '#0d1b3e', color: '#f0c842', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>V</div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0d1b3e', lineHeight: 1 }}>VOYAGE-ED</div>
-                  <div style={{ fontSize: 9, fontWeight: 700, color: '#c9961a', letterSpacing: 1.5, marginTop: 2 }}>TRAVELS</div>
-                </div>
+              <div style={{ position: 'absolute', top: 28, left: 32, background: '#fff', borderRadius: 12, padding: '10px 18px', display: 'flex', alignItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                <img src={window.location.origin + '/voyage-ed-logo.jpg'} alt="Voyage-Ed Travels" style={{ height: 54, width: 'auto', display: 'block' }} />
               </div>
               {/* Days pill */}
               <div style={{ position: 'absolute', top: 28, right: 32, background: theme.tag, color: '#fff', borderRadius: 14, padding: '10px 20px', textAlign: 'center' }}>
@@ -14764,6 +14775,44 @@ function PackageFlyerContent() {
                 ))}
               </div>
             </div>
+
+            {/* ═ PACKAGE INCLUDES ═ */}
+            {(pkg.packageIncludes || pkg.packageExcludes) && (
+              <div style={{ padding: '20px 32px 8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#0d1b3e', fontFamily: 'Georgia, serif' }}>📋  Package Inclusions</div>
+                  <div style={{ flex: 1, height: 2, background: 'linear-gradient(to right, #f0c842, transparent)' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: pkg.packageExcludes ? '1.4fr 1fr' : '1fr', gap: 14 }}>
+                  {pkg.packageIncludes && (
+                    <div style={{ background: '#fff', border: '1px solid #d1fae5', borderLeft: '5px solid #15803d', borderRadius: 12, padding: '16px 20px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#15803d', letterSpacing: 1.5, marginBottom: 12 }}>✅  WHAT'S INCLUDED</div>
+                      <div>
+                        {String(pkg.packageIncludes).split(/[·•\n]/).map((s) => s.trim()).filter(Boolean).map((s, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 12.5, color: '#0d1b3e', lineHeight: 1.5 }}>
+                            <span style={{ color: '#15803d', fontWeight: 800, marginTop: 1 }}>✓</span>
+                            <span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {pkg.packageExcludes && (
+                    <div style={{ background: '#fff', border: '1px solid #fecaca', borderLeft: '5px solid #b91c1c', borderRadius: 12, padding: '16px 20px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#b91c1c', letterSpacing: 1.5, marginBottom: 12 }}>❌  NOT INCLUDED</div>
+                      <div>
+                        {String(pkg.packageExcludes).split(/[·•\n]/).map((s) => s.trim()).filter(Boolean).map((s, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 12, color: '#334e82', lineHeight: 1.5 }}>
+                            <span style={{ color: '#b91c1c', fontWeight: 800, marginTop: 1 }}>✕</span>
+                            <span>{s}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ═ PRICE BANNER ═ */}
             <div style={{ margin: '24px 32px', background: theme.tag, color: '#fff', borderRadius: 16, padding: '20px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }}>
