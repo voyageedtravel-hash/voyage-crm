@@ -269,9 +269,63 @@ const bookedTierOf = (d) => {
 const sellINR = (d) => {
   const tier = bookedTierOf(d);
   if (tier) return n(tier.totalPrice);
-  return dealVendors(d).reduce((s, v) => s + toINR(v.sellingPrice, v.currency, v.exchangeRate), 0);
+  return dealVendors(d).reduce((s, v) => s + vendorSellINR(v, d), 0);
 };
-const costINR = (d) => dealVendors(d).reduce((s, v) => s + toINR(v.costPrice, v.currency, v.exchangeRate), 0);
+const costINR = (d) => dealVendors(d).reduce((s, v) => s + vendorCostINR(v, d), 0);
+
+// ─── Per-vendor cost / sell in INR ─────────────────────────────
+// Robust to two "aggregate not synced" cases we've hit in the wild:
+//
+// 1) paxPricing = true: the vendor stores per-pax rates in v.paxRates
+//    ({adultC, adultS, childC, childS, infantC, infantS}) and the aggregate
+//    costPrice / sellingPrice is meant to be the pax-rate × pax-count sum.
+//    PaxRatesFields does that sync in a useEffect — but only while the
+//    edit modal is open. Vendors imported from V1 (which used four rate
+//    tiers, not three), or created before the sync existed, can end up
+//    with real paxRates and an empty costPrice — so costINR(d) returned 0
+//    for that vendor even though the paxRates clearly say ₹48,000 × 4 pax
+//    = ₹1,92,000. We recompute from paxRates whenever they're populated.
+//
+// 2) roomPricing = true (hotels): total cost comes from v.roomsList[].cost
+//    and .sell. RoomAssignmentBlock syncs it into costPrice/sellingPrice,
+//    but same edit-modal-only limitation. We fall through to the room sum
+//    when it's non-zero.
+//
+// Both paths keep the vendor's native currency and only convert to INR at
+// the end. If neither special case applies, the plain costPrice /
+// sellingPrice field is used exactly as before.
+const _paxCountsFor = (d) => ({
+  adult: n((d || {}).adults),
+  child: n((d || {}).children),
+  infant: n((d || {}).infants),
+});
+
+const _paxTotal = (v, d, side /* 'C' or 'S' */) => {
+  if (!v || !v.paxPricing || !v.paxRates) return 0;
+  const counts = _paxCountsFor(d);
+  return PAX_RATE_TYPES.reduce((s, [k]) => s + (Number(v.paxRates[k + side]) || 0) * counts[k], 0);
+};
+
+const _roomTotal = (v, side /* 'cost' or 'sell' */) => {
+  if (!v || !v.roomPricing || !Array.isArray(v.roomsList) || !v.roomsList.length) return 0;
+  return v.roomsList.reduce((s, r) => s + (Number(r[side]) || 0), 0);
+};
+
+const vendorCostINR = (v, d) => {
+  const pax = _paxTotal(v, d, 'C');
+  if (pax > 0) return toINR(pax, v.currency, v.exchangeRate);
+  const room = _roomTotal(v, 'cost');
+  if (room > 0) return toINR(room, v.currency, v.exchangeRate);
+  return toINR(v.costPrice, v.currency, v.exchangeRate);
+};
+
+const vendorSellINR = (v, d) => {
+  const pax = _paxTotal(v, d, 'S');
+  if (pax > 0) return toINR(pax, v.currency, v.exchangeRate);
+  const room = _roomTotal(v, 'sell');
+  if (room > 0) return toINR(room, v.currency, v.exchangeRate);
+  return toINR(v.sellingPrice, v.currency, v.exchangeRate);
+};
 const paidINR = (d) => sumBy(d.clientPayments, 'amount');
 
 // ─── Cancellation helpers ────────────────────────────────────────────
