@@ -3903,16 +3903,18 @@ function buildProposalHTMLV2(deal, opts) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Voyage-Ed Proposal — ${escHtml(deal.destination)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',sans-serif;background:#eef2f9;color:#1a2c52}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}body{font-family:'DM Sans',sans-serif;background:#eef2f9;color:#1a2c52}
 .page{max-width:820px;margin:0 auto;background:#f7fafd}
 h1,h2,.serif{font-family:'Playfair Display',serif}
-@media print{ body{background:#fff} .noprint{display:none} .ve-interactive{display:none!important} .ve-printsign{display:block!important} }
+@media print{ html,body{background:#fff;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important} .noprint{display:none} .ve-interactive{display:none!important} .ve-printsign{display:block!important} img{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;image-rendering:auto} }
+@page{margin:8mm}
 </style></head><body>
 <div class="page">
-  <div id="veHero" style="position:relative;height:96vh;min-height:640px;background:url('${cover}') center/cover no-repeat;display:flex;flex-direction:column;justify-content:flex-end">
-    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,21,48,.25),rgba(10,21,48,.78) 75%)"></div>
-    <div style="position:absolute;top:26px;left:28px;background:#fff;border-radius:12px;padding:8px 16px"><img src="${VE_LOGO}" style="height:42px;display:block" alt="Voyage-Ed Travels"/></div>
-    <div style="position:relative;padding:34px 40px 40px;color:#fff">
+  <div id="veHero" style="position:relative;height:96vh;min-height:640px;overflow:hidden;background:#0d1b3e;display:flex;flex-direction:column;justify-content:flex-end">
+    <img src="${cover}" alt="" crossorigin="anonymous" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:0;display:block"/>
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,21,48,.25),rgba(10,21,48,.78) 75%);z-index:1"></div>
+    <div style="position:absolute;top:26px;left:28px;background:#fff;border-radius:12px;padding:8px 16px;z-index:2"><img src="${VE_LOGO}" style="height:42px;display:block" alt="Voyage-Ed Travels"/></div>
+    <div style="position:relative;padding:34px 40px 40px;color:#fff;z-index:2">
       <h1 style="font-size:52px;line-height:1.05;margin-bottom:8px">Trip to ${escHtml(deal.destination) || 'Your Dream Destination'}</h1>
       <div style="font-size:11px;letter-spacing:4px;color:#f0c842;font-weight:700;margin-bottom:8px">LEARN · TRAVEL · EXPLORE</div>
       <div style="font-size:13px;opacity:.85;margin-bottom:16px">Reference: <b>${ref}</b></div>
@@ -3922,7 +3924,7 @@ h1,h2,.serif{font-family:'Playfair Display',serif}
         👥 <b>${deal.rooms || 1} room${Number(deal.rooms) === 1 ? '' : 's'}, ${pax}</b>
       </div>
     </div>
-    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px">Specially crafted for <b style="color:#f0c842">${escHtml(deal.clientName) || 'our valued guest'}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
+    <div style="position:relative;background:rgba(10,21,48,.85);padding:12px 40px;color:#fff;font-size:12px;z-index:2">Specially crafted for <b style="color:#f0c842">${escHtml(deal.clientName) || 'our valued guest'}</b> by <b style="color:#f0c842">VOYAGE-ED TRAVELS</b> &nbsp;·&nbsp; 📞 +91 70096 59048</div>
   </div>
 
   <div style="padding:34px 36px">
