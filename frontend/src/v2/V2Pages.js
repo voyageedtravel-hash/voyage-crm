@@ -755,9 +755,9 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
     // exactly why any booked deal is (or isn't) in the current cycle.
     return booked.map((d) => {
       const bookedLog = (d.auditLog || []).find((l) => /booked|booking/i.test(l.title || ''));
-      const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
+      const bookedAt = bookedLog && bookedLog.at ? localDate(bookedLog.at) : null;
       const fp = firstPaymentDateOf(d);
-      const created = d.createdAt ? String(d.createdAt).slice(0, 10) : null;
+      const created = d.createdAt ? localDate(d.createdAt) : null;
       // Pick the earliest of (bookedAt, fp) so retroactive payments land in
       // the correct cycle even if the audit-log 'at' timestamp was set to
       // 'now' at record-time. Concrete case: user records a payment today
@@ -1511,6 +1511,19 @@ const firstPaymentDateOf = (d) => {
   return dates.length ? dates[0] : null;
 };
 
+// Return YYYY-MM-DD in the browser's LOCAL timezone from any ISO timestamp.
+// Critical for cycle bucketing: an audit-log 'at' written as
+// new Date("2026-09-16T00:00:00").toISOString() in India becomes
+// "2026-09-15T18:30:00.000Z" (UTC). Slicing that string to 10 chars
+// gives "2026-09-15" — off by one day, pushing the deal into the wrong
+// cycle. This helper reconstructs the intended local date.
+const localDate = (isoStr) => {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (isNaN(d)) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 // Returns {start, end, label} for the cycle containing a given date.
 const cycleFor = (dateStr) => {
   const d = new Date(dateStr);
@@ -1710,9 +1723,9 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
     if (isDealsMode && (dateFrom || dateTo)) {
       list = list.filter((l) => {
         const bookedLog = (l.auditLog || []).find((e) => /booked|booking/i.test(e.title || ''));
-        const bookedAt = bookedLog && bookedLog.at ? String(bookedLog.at).slice(0, 10) : null;
+        const bookedAt = bookedLog && bookedLog.at ? localDate(bookedLog.at) : null;
         const fp = firstPaymentDateOf(l);
-        const created = l.createdAt ? String(l.createdAt).slice(0, 10) : null;
+        const created = l.createdAt ? localDate(l.createdAt) : null;
         // Use the earliest signal (same rule as dashboard cycleBucketing)
         let anchor;
         if (bookedAt && fp) anchor = fp <= bookedAt ? fp : bookedAt;
@@ -7904,7 +7917,15 @@ function AddPaymentModal({ deal, editing, onClose, onSaved }) {
           // a payment retroactively (paisa kal aaya, entry aaj kar rahe ho),
           // 'at' must reflect the actual payment date so the deal lands in
           // yesterday's cycle rather than today's.
-          const paymentAtISO = new Date(dateStr + 'T00:00:00').toISOString();
+          //
+          // Use T12:00:00Z (noon UTC). Earlier we used
+          // new Date(dateStr + 'T00:00:00').toISOString() which parses the
+          // date as LOCAL midnight and then converts to UTC — in India
+          // that pushed everything back one day (Sep 16 IST midnight →
+          // Sep 15 UTC 18:30), so a Sep-16 payment landed in the previous
+          // cycle. Noon-UTC is safe: the slice-to-10 date is stable and
+          // matches the user's intent in every real-world timezone.
+          const paymentAtISO = `${dateStr}T12:00:00.000Z`;
           patch.auditLog = [
             ...(deal.auditLog || []),
             { title: `Auto-booked on first payment recorded (was: ${deal.stage})`, at: paymentAtISO, by: (typeof window !== 'undefined' && window.__veUserName) || 'You' },
