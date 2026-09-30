@@ -3950,13 +3950,49 @@ function buildProposalHTMLV2(deal, opts) {
   const _tierMin = _tiers.length ? Math.min(...(_tiers.map((t) => Number(t.totalPrice) || 0).filter((v) => v > 0)).concat([Infinity])) : Infinity;
   const _fromPP = (_tierMin !== Infinity && totalPax > 0) ? Math.round(_tierMin / totalPax) : 0;
   const quoteVTDisplay = new Date(Date.now() + 7 * 864e5).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  // Occupancy-pricing breakdown: when the user has entered sharing-wise
+  // per-person prices (Adult twin sharing, Child without bed, etc.),
+  // showing a single "PRICE PER PERSON" averaged across all pax hides
+  // real numbers — a child paying ₹39k and an adult paying ₹60k both get
+  // labelled ₹51k. Instead we render a small table with each row and its
+  // subtotal. Rows with a missing count or per-person price are ignored so
+  // partially-filled data doesn't break the render.
+  const _occRows = (deal.occupancyPricingRows || [])
+    .map((r) => ({ cat: String(r.cat || '').trim(), count: Number(r.count) || 0, pp: Number(r.pp) || 0 }))
+    .filter((r) => r.cat && r.count > 0 && r.pp > 0);
+  const _occTotal = _occRows.reduce((s, r) => s + r.count * r.pp, 0);
+  // Only use occupancy breakdown if we have rows AND their total roughly
+  // matches the deal's overall sell (within 1% or ₹500 — allows for GST/
+  // rounding differences without silently showing wrong numbers).
+  const _useOcc = _occRows.length > 0 && _occTotal > 0 && (Math.abs(_occTotal - sell) <= Math.max(500, sell * 0.01) || !sell);
+  const _occBreakdownHTML = _useOcc ? `
+    <div style="margin-top:14px;background:rgba(255,255,255,.06);border:1px solid rgba(240,200,66,.2);border-radius:12px;padding:14px 16px">
+      <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:10px">SHARING-WISE PRICE BREAKDOWN</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        ${_occRows.map((r) => `
+          <tr style="border-bottom:1px dashed rgba(255,255,255,.15)">
+            <td style="padding:7px 0;color:#fff;font-weight:600">${escHtml(r.cat)}</td>
+            <td style="padding:7px 8px;text-align:center;color:#dfe6f2">× ${r.count}</td>
+            <td style="padding:7px 8px;text-align:right;color:#dfe6f2">₹${r.pp.toLocaleString('en-IN')} <span style="font-size:9px;color:rgba(255,255,255,.6)">pp</span></td>
+            <td style="padding:7px 0 7px 8px;text-align:right;color:#fff;font-weight:700">₹${(r.count * r.pp).toLocaleString('en-IN')}</td>
+          </tr>`).join('')}
+        <tr>
+          <td colspan="3" style="padding:10px 0 0;color:#f0c842;font-size:11px;letter-spacing:1.5px;font-weight:800">TOTAL PACKAGE</td>
+          <td style="padding:10px 0 0;text-align:right;color:#f0c842;font-size:18px;font-weight:800;font-family:Georgia,serif">₹${_occTotal.toLocaleString('en-IN')}</td>
+        </tr>
+      </table>
+    </div>` : '';
+
   const priceBlock = sell > 0 ? `
     <div style="background:linear-gradient(135deg,#0d1b3e,#1a3060);border-radius:18px;padding:26px 28px;color:#fff;margin:8px 0 18px">
-      <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">${_fromPP ? 'STARTING FROM · PER PERSON' : 'PRICE PER PERSON'}</div>
-      <div style="font-size:34px;font-weight:800">₹${(_fromPP || _perPax || sell).toLocaleString('en-IN')}<span style="font-size:13px;font-weight:600;opacity:.8"> /- all inclusive</span></div>
-      ${_fromPP
-      ? `<div style="font-size:12px;opacity:.85;margin-top:4px">${_tiers.length} stay options below${totalPax > 1 ? ' · ' + pax : ''}</div>`
-      : (totalPax > 1 ? `<div style="font-size:12px;opacity:.85;margin-top:4px">Total package ₹${sell.toLocaleString('en-IN')} · ${pax}</div>` : '')}
+      <div style="font-size:10px;letter-spacing:2px;color:#f0c842;font-weight:800;margin-bottom:6px">${_useOcc ? 'PACKAGE PRICE' : (_fromPP ? 'STARTING FROM · PER PERSON' : 'PRICE PER PERSON')}</div>
+      <div style="font-size:34px;font-weight:800">₹${(_useOcc ? _occTotal : (_fromPP || _perPax || sell)).toLocaleString('en-IN')}<span style="font-size:13px;font-weight:600;opacity:.8"> /- ${_useOcc ? 'all inclusive · ' + pax : 'all inclusive'}</span></div>
+      ${_useOcc ? ''
+      : (_fromPP
+        ? `<div style="font-size:12px;opacity:.85;margin-top:4px">${_tiers.length} stay options below${totalPax > 1 ? ' · ' + pax : ''}</div>`
+        : (totalPax > 1 ? `<div style="font-size:12px;opacity:.85;margin-top:4px">Total package ₹${sell.toLocaleString('en-IN')} · ${pax}</div>` : ''))}
+      ${_occBreakdownHTML}
       <div style="font-size:10px;opacity:.6;margin-top:10px">*Subject to availability at the time of booking. Prices may vary with currency fluctuation. Quote valid till <b>${quoteVTDisplay}</b>.</div>
     </div>` : `
     <div style="background:#fdf6e5;border:1px solid #ecd9a0;border-radius:14px;padding:16px 22px;margin:8px 0 18px;text-align:center">
