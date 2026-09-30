@@ -3326,6 +3326,7 @@ function pickFallbackCoverV2(deal) {
     dubai:     origin + '/hero/dubai.jpg',
     almaty:    origin + '/hero/almaty.jpg',
     uk:        origin + '/hero/uk.jpg',
+    coorg:     origin + '/hero/coorg.jpg',
   };
   // Destination-specific — checked first, matched against destination +
   // flight/hotel/train place data so a typo or generic destination string
@@ -3336,6 +3337,7 @@ function pickFallbackCoverV2(deal) {
   if (/\bsingapore\b|sentosa|marina bay|\bsin\b/.test(_all)) return HERO.singapore;
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|ajman|ras al khaimah|fujairah|burj khalifa|\bdxb\b|\bauh\b|\bshj\b/.test(_all)) return HERO.dubai;
   if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(_all)) return HERO.almaty;
+  if (/\bcoorg\b|madikeri|kodagu|abbey falls|talakaveri/.test(_all)) return HERO.coorg;
   // UK matcher — tolerant of the common typo "Kingdon" for Kingdom, and
   // also matches when destination is vague ("UK visa") but the flight
   // sectors land at LHR/LGW/STN/BHX/EDI/GLA/MAN.
@@ -14092,6 +14094,7 @@ function pickFlyerHero(sections) {
   // picks up singapore.jpg instead of australia.jpg.
   if (/australia|melbourne|sydney|brisbane|perth|adelaide|canberra|gold coast|\bmel\b|\bsyd\b|\bbne\b|\bper\b|\badl\b|\bcbr\b|\bool\b/.test(all)) return origin + '/hero/australia.jpg';
   if (/\balmaty\b|\bala\b|kazakhstan|medeu|shymbulak|astana|\bnqz\b/.test(all)) return origin + '/hero/almaty.jpg';
+  if (/\bcoorg\b|madikeri|kodagu|abbey falls|talakaveri/.test(all)) return origin + '/hero/coorg.jpg';
   if (/canada|toronto|vancouver|calgary|montreal|edmonton|ottawa|\byyz\b|\byvr\b|\byyc\b|\byul\b|\byeg\b|\byow\b/.test(all)) return origin + '/hero/canada.jpg';
   if (/\bdubai\b|\buae\b|abu dhabi|sharjah|\bdxb\b|\bauh\b|\bshj\b/.test(all)) return origin + '/hero/dubai.jpg';
   if (/\bbali\b|denpasar|\bdps\b/.test(all)) return origin + '/hero/bali.jpg';
