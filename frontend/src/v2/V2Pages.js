@@ -791,16 +791,30 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
     });
     // All-time outstanding — these are live liabilities/receivables across
     // every booked deal in the CRM, deliberately NOT limited to this cycle.
-    let vendorPmts = 0, vendorPaid = 0;
+    //
+    // Vendor pending is computed PER DEAL (max(0, cost - paid) summed), not
+    // net across the whole book. The old `max(0, totalCost - totalPaid)`
+    // formula silently cancelled overpaid vendors against underpaid ones:
+    // if deal A owed ₹40k and deal B had been overpaid by ₹12k, the KPI
+    // showed ₹28k ("net") while the drilldown — which filters per-deal and
+    // only lists deals with a positive balance — showed the real ₹40k.
+    // The two numbers never matched, and the KPI understated what we
+    // actually owed vendors (overpayments to one vendor can't legally
+    // settle a debt to another vendor).
+    let vendorPmts = 0, vendorPaid = 0, vendorDue = 0, vendorOverpaid = 0;
     booked.forEach((l) => {
-      vendorPmts += costINR(l);
-      vendorPaid += dealVendors(l).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      const cost = costINR(l);
+      const paid = dealVendors(l).reduce((s, v) => s + sumBy(v.payments, 'amount'), 0);
+      vendorPmts += cost;
+      vendorPaid += paid;
+      const diff = cost - paid;
+      if (diff > 0.5) vendorDue += diff;              // we still owe the vendor
+      else if (diff < -0.5) vendorOverpaid += -diff;  // we paid more than the invoice
     });
-    const vendorDue = Math.max(0, vendorPmts - vendorPaid);
     const clientDue = booked.reduce((s, d) => s + Math.max(0, netSellINR(d) - paidINR(d)), 0);
     return {
       collections, sell, bookings: cycleBooked.length, profit, gst, netProfit: profit - gst, cycleCost,
-      vendorPmts, vendorPaid, vendorDue, clientDue,
+      vendorPmts, vendorPaid, vendorDue, vendorOverpaid, clientDue,
       allTimeBookings: booked.length,
     };
   }, [booked, cycleBooked]);
@@ -1052,7 +1066,7 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
           <div className="v2-kpi-icon amber">◇</div>
           <div className="v2-kpi-label">Vendor Payments</div>
           <div className="v2-kpi-value">{fmtINR(stats.vendorPmts)}</div>
-          <div className="v2-kpi-delta">All time · Due: {fmtINR(stats.vendorDue)}</div>
+          <div className="v2-kpi-delta">All time · Due: {fmtINR(stats.vendorDue)}{stats.vendorOverpaid > 0.5 ? ` · Overpaid: ${fmtINR(stats.vendorOverpaid)}` : ''}</div>
         </div>
         <div className="v2-kpi-card" style={{ cursor: 'pointer' }} onClick={() => openDrilldown('Net Profit — This Cycle', null, (d) => profitINR(d) - gstINR(d), 'Net Profit', 'cycle')}>
           <div className="v2-kpi-icon gold">◆</div>
