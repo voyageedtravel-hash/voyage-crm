@@ -10,7 +10,9 @@
     "html-to-image": "1.11.11",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-globe.gl": "^2.38.0",
     "react-scripts": "5.0.1",
+    "three": "^0.186.1",
     "web-vitals": "^2.1.4"
   },
   "scripts": {

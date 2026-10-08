@@ -12,7 +12,14 @@
  * deal → toggle V2 off → open in V1).
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
+
+// Lazy-load the 3D globe (~400 kB of three.js) so it never blocks the
+// initial dashboard paint. It only renders on the Dashboard route and is
+// safe to defer — a short "Spinning up the globe…" placeholder covers the
+// first ~500 ms while the chunk downloads on the user's first visit; the
+// chunk is cached thereafter.
+const V2Globe = lazy(() => import('./V2Globe'));
 
 /* ─── Utils ──────────────────────────────────────────────── */
 
@@ -1045,6 +1052,27 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
           <div className="v2-health-metric-label">Total Profit</div>
         </div>
       </div>
+
+      {/* ─── Live 3D Globe — "Your World of Bookings" ────────────────── */}
+      {/* Shows every BOOKED deal as a pin at its destination with animated */}
+      {/* arcs from Mohali HQ. Pins cluster by destination so a hot market */}
+      {/* reads at a glance. Clicking a single-booking pin opens the deal. */}
+      <Suspense fallback={
+        <div style={{
+          height: 440, marginBottom: 24, borderRadius: 20,
+          background: 'radial-gradient(ellipse at center, #15264d 0%, #0a1530 60%, #050a1c 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#8fa3c0', fontSize: 13, letterSpacing: 1,
+          border: '1px solid rgba(240,200,66,0.15)',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.5 }}>🌍</div>
+            <div>Spinning up the globe…</div>
+          </div>
+        </div>
+      }>
+        <V2Globe deals={booked} onPinClick={onDealClick} />
+      </Suspense>
 
       <h2 className="v2-section-title">Today's Snapshot</h2>
       <p className="v2-section-sub">Live numbers from your CRM</p>
