@@ -204,15 +204,21 @@ export default function V2Globe({ deals = [], onPinClick }) {
     const pins = [];
     const arcs = [];
     byCoord.forEach((p) => {
-      // Pin altitude scales log-ish with aggregate value so a ₹10L booking
-      // and a ₹50k booking both read as "a pin" but the big one looms taller.
-      const alt = Math.min(0.6, 0.08 + Math.log10(1 + p.totalValue / 10000) * 0.08);
+      // Pin altitude = tall beam of light. Scales with aggregate value so a
+      // ₹10L booking looms higher than a ₹50k one, but the base is set high
+      // (0.35) so even single small bookings read as clear vertical beams
+      // against the dark Earth, not flat dots that disappear.
+      const alt = Math.min(1.1, 0.35 + Math.log10(1 + p.totalValue / 10000) * 0.14);
       pins.push({
         lat: p.lat,
         lng: p.lng,
         altitude: alt,
-        radius: 0.35 + Math.min(0.4, p.deals.length * 0.08),
-        color: p.deals.length > 1 ? '#f0c842' : '#ea580c',
+        // Beam width — narrow but readable, grows slightly with booking count
+        radius: 0.55 + Math.min(0.6, p.deals.length * 0.12),
+        // Bright saturated colours chosen for max contrast against the earth-
+        // night texture. Pure #f0c842 was fading into the globe's dark gold
+        // city lights — #ffd700 (pure gold) and #ff4500 (orange-red) pop.
+        color: p.deals.length > 1 ? '#ffd700' : '#ff4500',
         destLabel: p.destLabel,
         deals: p.deals,
         totalValue: p.totalValue,
@@ -222,7 +228,10 @@ export default function V2Globe({ deals = [], onPinClick }) {
         startLng: HQ.lng,
         endLat: p.lat,
         endLng: p.lng,
-        color: ['rgba(240,200,66,0.1)', 'rgba(240,200,66,0.85)', 'rgba(234,88,12,0.85)'],
+        // Gradient 0 → 1 along the arc: fully opaque gold at HQ, fading to
+        // vivid orange at the destination. Previously used 10% alpha at HQ
+        // which made arcs almost invisible on light landmasses.
+        color: ['rgba(255,215,0,1)', 'rgba(255,165,0,1)', 'rgba(255,69,0,1)'],
       });
     });
     return { pins, arcs, mappedCount: pins.length };
@@ -317,7 +326,9 @@ export default function V2Globe({ deals = [], onPinClick }) {
           <div style={{ fontSize: 12, color: '#8fa3c0', marginTop: 4 }}>
             {mappedCount > 0
               ? `${mappedCount} active destination${mappedCount > 1 ? 's' : ''} · spun from Mohali`
-              : 'No active destinations yet — book your first trip'}
+              : deals.length > 0
+                ? `${deals.length} booking${deals.length > 1 ? 's' : ''} but destinations not on the map — ping Claude to add them`
+                : 'No bookings yet — your first destination will light up here'}
           </div>
         </div>
         {mappedCount > 0 && (
@@ -378,21 +389,26 @@ export default function V2Globe({ deals = [], onPinClick }) {
             if (onPinClick && p.deals && p.deals.length === 1) onPinClick(p.deals[0]);
             // For clusters, let the user see the tooltip and pick from the drilldown elsewhere
           }}
-          /* Arcs: HQ → destinations, animated dashes */
+          /* Arcs: HQ → destinations, thick animated dashes */
           arcsData={arcs}
           arcColor="color"
-          arcStroke={0.4}
-          arcDashLength={0.4}
-          arcDashGap={0.15}
+          arcStroke={0.9}
+          arcDashLength={0.5}
+          arcDashGap={0.1}
           arcDashInitialGap={() => Math.random()}
           arcDashAnimateTime={2200}
-          arcAltitudeAutoScale={0.45}
-          /* HQ marker — a single always-visible gold ring */
-          ringsData={[{ lat: HQ.lat, lng: HQ.lng }]}
-          ringColor={() => '#f0c842'}
-          ringMaxRadius={3}
-          ringPropagationSpeed={1.5}
-          ringRepeatPeriod={1800}
+          arcAltitudeAutoScale={0.5}
+          /* Pulsing rings: HQ (large, slow) + every destination (small, fast)
+             so the whole globe looks alive with heartbeats. */
+          ringsData={[
+            { lat: HQ.lat, lng: HQ.lng, maxR: 6, speed: 2.5, period: 1600, color: '#ffd700' },
+            ...pins.map((p) => ({ lat: p.lat, lng: p.lng, maxR: 2.5, speed: 1.8, period: 2000, color: p.color })),
+          ]}
+          ringColor={(r) => r.color}
+          ringMaxRadius="maxR"
+          ringPropagationSpeed="speed"
+          ringRepeatPeriod="period"
+          ringAltitude={0.012}
         />
       </div>
 
