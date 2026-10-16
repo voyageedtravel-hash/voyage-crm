@@ -749,8 +749,50 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
   const [showBackup, setShowBackup] = useState(false);
   const [showDues, setShowDues] = useState(false);
   const [showNewLead, setShowNewLead] = useState(false);
+  // Global search in the dashboard header. Was previously an unwired input
+  // (no state, no onChange, no handler) so typing in it did nothing. Now
+  // live-matches across clients, deal numbers, destinations, phones, emails
+  // and vendor names, with the top 8 results dropping down as a clickable
+  // list. Click → opens the matching deal via the existing onDealClick prop.
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   // Compute KPIs from real data
   const booked = useMemo(() => leads.filter(isBookedStage), [leads]);
+
+  // Build result list live from the current query. Returns up to 8 matches
+  // ranked loosely: dealNumber hits first (users type Query IDs expecting
+  // instant jump), then client name, then everything else.
+  const globalMatches = useMemo(() => {
+    const q = globalSearch.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const qCompact = q.replace(/[-\s]/g, '');
+    const scored = [];
+    leads.forEach((l) => {
+      const name = clientName(l).toLowerCase();
+      const dest = destination(l).toLowerCase();
+      const dealNo = String(l.dealNumber || '').toLowerCase();
+      const dealNoCompact = dealNo.replace(/[-\s]/g, '');
+      const phone = String(l.contactNo || '');
+      const email = String(l.email || '').toLowerCase();
+      // Collect every vendor name on the deal so '/bhandari/' finds the
+      // visa vendor behind VE-2026-143, not just the clients named Bhandari.
+      const vendorNames = dealVendors(l).map((v) => String(v.name || '').toLowerCase()).join(' | ');
+
+      let score = 0, matchReason = '';
+      if (dealNo === q || dealNoCompact === qCompact) { score = 100; matchReason = 'Deal number'; }
+      else if (dealNo.includes(q) || dealNoCompact.includes(qCompact)) { score = 90; matchReason = 'Deal number'; }
+      else if (name.startsWith(q)) { score = 80; matchReason = 'Client'; }
+      else if (name.includes(q)) { score = 70; matchReason = 'Client'; }
+      else if (dest.includes(q)) { score = 60; matchReason = 'Destination'; }
+      else if (vendorNames.includes(q)) { score = 55; matchReason = 'Vendor'; }
+      else if (phone.includes(globalSearch)) { score = 50; matchReason = 'Phone'; }
+      else if (email && email.includes(q)) { score = 45; matchReason = 'Email'; }
+
+      if (score > 0) scored.push({ lead: l, score, matchReason });
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 8);
+  }, [globalSearch, leads]);
 
   // Current 16→15 billing cycle. Revenue figures (TTV / GPM / Net) on the
   // dashboard are scoped to THIS cycle only, so the headline numbers reflect
@@ -998,7 +1040,79 @@ function DashboardV2({ leads, onDealClick, onLeadCreated }) {
           </p>
         </div>
         <div className="v2-header-actions">
-          <input type="text" className="v2-search" placeholder="Search clients, deals, vendors…" />
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              className="v2-search"
+              placeholder="Search clients, deals, vendors…"
+              value={globalSearch}
+              onChange={(e) => { setGlobalSearch(e.target.value); setGlobalSearchOpen(true); }}
+              onFocus={() => setGlobalSearchOpen(true)}
+              onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 180)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setGlobalSearch(''); setGlobalSearchOpen(false); e.currentTarget.blur(); }
+                else if (e.key === 'Enter' && globalMatches.length > 0) {
+                  onDealClick(globalMatches[0].lead);
+                  setGlobalSearch(''); setGlobalSearchOpen(false); e.currentTarget.blur();
+                }
+              }}
+            />
+            {globalSearchOpen && globalSearch.trim().length >= 2 && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0,
+                background: '#fff', border: '1px solid #e3eaf7', borderRadius: 12,
+                boxShadow: '0 12px 36px rgba(13,27,62,0.18)', zIndex: 100,
+                maxHeight: 420, overflowY: 'auto', minWidth: 320,
+              }}>
+                {globalMatches.length === 0 ? (
+                  <div style={{ padding: '14px 16px', fontSize: 12, color: '#6b7a99' }}>
+                    No matches for "<b>{globalSearch}</b>"
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ padding: '8px 14px 6px', fontSize: 9, letterSpacing: 1.5, color: '#8894b0', fontWeight: 800, borderBottom: '1px solid #f0f2f7' }}>
+                      {globalMatches.length} RESULT{globalMatches.length > 1 ? 'S' : ''} · PRESS ENTER FOR TOP
+                    </div>
+                    {globalMatches.map((m, idx) => (
+                      <div
+                        key={m.lead._id || idx}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onDealClick(m.lead);
+                          setGlobalSearch(''); setGlobalSearchOpen(false);
+                        }}
+                        style={{
+                          padding: '10px 14px',
+                          borderBottom: idx < globalMatches.length - 1 ? '1px solid #f4f6fb' : 'none',
+                          cursor: 'pointer', transition: 'background 0.12s',
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafd'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: '#0d1b3e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {clientName(m.lead) || '(no name)'}
+                            </span>
+                            <span style={{ fontSize: 9, color: '#8894b0', background: '#f0f4fb', padding: '2px 6px', borderRadius: 4, fontWeight: 700, letterSpacing: 0.5 }}>
+                              {m.matchReason}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#6b7a99', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.lead.dealNumber || '—'} · {destination(m.lead) || 'No destination'} · {m.lead.stage || 'New'}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#c9961a', whiteSpace: 'nowrap' }}>
+                          ₹{(sellINR(m.lead) || 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <button className="v2-cta" onClick={() => setShowNewLead(true)} style={{ fontSize: 12, background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', fontWeight: 800 }} title="Naye client ki query banao — turant booking detail me jump kar jaoge">✨ New Query</button>
           <button className="v2-cta" onClick={() => setDrilldown({ title: 'daily-brief', deals: [] })} style={{ fontSize: 12 }}>📋 Today's Brief</button>
           <button className="v2-cta" onClick={() => setShowDues(true)} style={{ fontSize: 12, background: '#b91c1c' }} title="Vendor dues jinke liye paisa dena baaki hai">💸 Dues</button>
@@ -1780,11 +1894,21 @@ function LeadsV2({ leads, onDealClick, mode = 'active', onLeadCreated }) {
     }
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter((l) =>
-        clientName(l).toLowerCase().includes(q) ||
-        destination(l).toLowerCase().includes(q) ||
-        String(l.contactNo || '').includes(search)
-      );
+      // Normalise the dealNumber comparison so a search for '143' matches
+      // 'VE-2026-143', 've-2026-143' and even stripped forms like '2026143'.
+      const qCompact = q.replace(/[-\s]/g, '');
+      list = list.filter((l) => {
+        const dealNo = String(l.dealNumber || '').toLowerCase();
+        const dealNoCompact = dealNo.replace(/[-\s]/g, '');
+        return (
+          clientName(l).toLowerCase().includes(q) ||
+          destination(l).toLowerCase().includes(q) ||
+          String(l.contactNo || '').includes(search) ||
+          String(l.email || '').toLowerCase().includes(q) ||
+          dealNo.includes(q) ||
+          dealNoCompact.includes(qCompact)
+        );
+      });
     }
     return list;
   }, [scopedLeads, filter, search, isDealsMode, dateFrom, dateTo]);
