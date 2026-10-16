@@ -5460,7 +5460,14 @@ function buildInvoiceHTML(deal, billing, isProforma) {
 
 function InvoiceModal({ deal, onClose }) {
   const [billing, setBilling] = useState({
-    invoiceNo: '', invoiceDate: new Date().toISOString().slice(0, 10),
+    // Pre-fill with the deal number (e.g. VE-2026-143) so the invoice
+    // carries the same reference as everything else on this deal — the
+    // proposal, voucher, follow-up messages, bank narration. Keeping it
+    // editable means the user can still bump a suffix (-A, -R) for a
+    // reissue, or clear the field entirely to let the "auto if blank"
+    // fallback build a VE-INV-… / VE-PI-… number at generation time.
+    invoiceNo: deal.dealNumber || '',
+    invoiceDate: new Date().toISOString().slice(0, 10),
     dueDate: '', paymentTerms: '100% Advance',
     billToName: clientName(deal), billToCompany: '', billToAddress: '',
     billToGSTIN: '', billToEmail: deal.email || '', billToPhone: deal.contactNo || '',
