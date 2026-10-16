@@ -5310,7 +5310,17 @@ function buildInvoiceHTML(deal, billing, isProforma) {
     ? billing.customItems.map((i, idx) => ({ seq: idx + 1, desc: escHtml(i.desc || ''), sub: escHtml(i.sub || ''), paxCount: i.paxCount || '', amount: Number(i.amount) || 0 }))
     : buildInvoiceItemsV2(deal).map((i) => ({ ...i, desc: escHtml(i.desc), sub: escHtml(i.sub) }));
 
-  const total = items.reduce((s, i) => s + (i.amount || 0), 0);
+  const subtotal = items.reduce((s, i) => s + (i.amount || 0), 0);
+  // GST on the invoice. Caller passes gstRate (0 / 5 / 18) and gstType
+  // ('intra' = CGST + SGST, 'inter' = IGST). Half+half rounding on intra
+  // so CGST and SGST sum back to the whole gstAmount exactly, no stray
+  // paise. gstRate = 0 preserves the old "Inclusive" presentation.
+  const gstRate = Number(billing.gstRate) || 0;
+  const gstType = billing.gstType === 'inter' ? 'inter' : 'intra';
+  const gstAmount = Math.round((subtotal * gstRate) / 100);
+  const cgstAmount = Math.round(gstAmount / 2);
+  const sgstAmount = gstAmount - cgstAmount;
+  const total = subtotal + gstAmount;
 
   const itemsHTML = items.map((i) => `
     <tr>
@@ -5396,13 +5406,28 @@ function buildInvoiceHTML(deal, billing, isProforma) {
 
   <!-- Total -->
   <div style="display:flex;justify-content:flex-end;margin-bottom:24px">
-    <div style="width:280px">
+    <div style="width:300px">
       <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12.5px;color:#5a6b8c;border-top:1px solid #e3eaf7">
-        <span>Subtotal</span><span style="font-weight:600;color:#0d1b3e">₹${total.toLocaleString('en-IN')}</span>
+        <span>Subtotal</span><span style="font-weight:600;color:#0d1b3e">₹${subtotal.toLocaleString('en-IN')}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:11px;color:#6b7a99">
-        <span>GST</span><span>Inclusive</span>
-      </div>
+      ${gstRate > 0 && gstType === 'intra' ? `
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
+          <span>CGST @ ${gstRate / 2}%</span><span>₹${cgstAmount.toLocaleString('en-IN')}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
+          <span>SGST @ ${gstRate / 2}%</span><span>₹${sgstAmount.toLocaleString('en-IN')}</span>
+        </div>
+      ` : ''}
+      ${gstRate > 0 && gstType === 'inter' ? `
+        <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
+          <span>IGST @ ${gstRate}%</span><span>₹${gstAmount.toLocaleString('en-IN')}</span>
+        </div>
+      ` : ''}
+      ${gstRate === 0 ? `
+        <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:11px;color:#6b7a99">
+          <span>GST</span><span>Inclusive / exempt</span>
+        </div>
+      ` : ''}
       <div style="display:flex;justify-content:space-between;padding:12px 0;font-size:16px;font-weight:800;color:#0d1b3e;border-top:2px solid #0d1b3e">
         <span>TOTAL PAYABLE</span><span>₹${total.toLocaleString('en-IN')}</span>
       </div>
@@ -5453,7 +5478,45 @@ function InvoiceModal({ deal, onClose }) {
   const [totalDesc, setTotalDesc] = useState(() => `${destination(deal) || 'Travel'} Package — ${deal.travelDates || ''}`.trim());
   const [totalAmount, setTotalAmount] = useState(() => String(sellINR(deal) || ''));
 
+  // ── GST on the invoice ────────────────────────────────────────────────
+  // Indian GST on travel services is almost always one of:
+  //   5%  — tour operator services (SAC 998555) when selling a packaged
+  //         tour (hotel + transport + sightseeing bundled). No ITC for
+  //         the operator but simple-to-explain to the client.
+  //   18% — standalone service fees: visa processing, consultancy,
+  //         commission-only bookings, change fees. ITC allowed.
+  //   0%  — pass-through / inclusive scenarios where the agent isn't
+  //         separately raising GST on the invoice.
+  //
+  // Smart default: if the deal has ONLY visa vendors (and nothing else)
+  // we start at 18% because the user is almost certainly billing a visa
+  // service fee. Deals with hotels / flights / transfers default to 5%
+  // (tour-operator rate). Mixed-but-hotel-heavy deals also pick 5%.
+  // Everything else, including empty deals, starts at 0% so the user
+  // picks explicitly rather than inherit a wrong number silently.
+  const defaultGstRate = useMemo(() => {
+    const hasVisa = (deal.visaVendors || []).length > 0;
+    const hasPackageSide =
+      (deal.hotelVendors || []).length > 0 ||
+      (deal.flightVendors || []).length > 0 ||
+      (deal.landVendors || []).length > 0 ||
+      (deal.trainVendors || []).length > 0 ||
+      (deal.cruiseVendors || []).length > 0;
+    if (hasVisa && !hasPackageSide) return 18;
+    if (hasPackageSide) return 5;
+    return 0;
+  }, [deal]);
+  const [gstRate, setGstRate] = useState(defaultGstRate);
+  // Intra-state (both parties in the same state) → split 50/50 as CGST +
+  // SGST. Inter-state → single IGST line. Voyage-Ed is in Punjab; default
+  // to intra-state and let the user flip to IGST when billing a client
+  // outside Punjab.
+  const [gstType, setGstType] = useState('intra'); // 'intra' | 'inter'
+
   const componentsTotal = componentAmounts.reduce((s, v) => s + (Number(v) || 0), 0);
+  const subtotal = pricingMode === 'total' ? (Number(totalAmount) || 0) : componentsTotal;
+  const gstAmount = Math.round((subtotal * gstRate) / 100);
+  const grandTotal = subtotal + gstAmount;
 
   const generate = (isProforma) => {
     const customItems = pricingMode === 'total'
@@ -5461,7 +5524,7 @@ function InvoiceModal({ deal, onClose }) {
       : defaultItems.map((i, idx) => ({ desc: i.desc, sub: i.sub, paxCount: i.paxCount, amount: Number(componentAmounts[idx]) || 0 }));
     const w = window.open('', '_blank');
     if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
-    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems }, isProforma)); w.document.close(); }
+    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType }, isProforma)); w.document.close(); }
     catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
   };
 
@@ -5578,6 +5641,95 @@ function InvoiceModal({ deal, onClose }) {
               )}
             </div>
           )}
+
+          {/* ── GST ON INVOICE ──────────────────────────────────────── */}
+          <div style={{ fontSize: 10, letterSpacing: 1.5, color: '#c9961a', fontWeight: 800, marginTop: 4 }}>GST ON INVOICE</div>
+          <div style={{ background: '#f9fafc', border: '1px solid #e8ecf5', borderRadius: 10, padding: '10px 12px' }}>
+            {/* Rate selector pills — None / 5% / 18% */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+              {[
+                [0, '🚫 No GST', 'Inclusive / exempt'],
+                [5, '5% GST', 'Tour operator'],
+                [18, '18% GST', 'Visa / service fee'],
+              ].map(([rate, label, sub]) => (
+                <button
+                  key={rate}
+                  type="button"
+                  onClick={() => setGstRate(rate)}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: gstRate === rate ? '2px solid #0d1b3e' : '1px solid #d4e0f5',
+                    background: gstRate === rate ? '#0d1b3e' : '#fff',
+                    color: gstRate === rate ? '#fff' : '#0d1b3e',
+                    fontWeight: 700, fontSize: 12, cursor: 'pointer', textAlign: 'center',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div>{label}</div>
+                  <div style={{ fontSize: 9.5, fontWeight: 500, marginTop: 2, opacity: 0.75 }}>{sub}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Intra vs inter-state picker — only shown when GST is on */}
+            {gstRate > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {[
+                  ['intra', 'CGST + SGST', 'Client in Punjab'],
+                  ['inter', 'IGST', 'Client in other state'],
+                ].map(([type, label, sub]) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setGstType(type)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 8,
+                      border: gstType === type ? '2px solid #c9961a' : '1px solid #d4e0f5',
+                      background: gstType === type ? '#fdf6e5' : '#fff',
+                      color: '#0d1b3e',
+                      fontWeight: 700, fontSize: 11.5, cursor: 'pointer', textAlign: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div>{label}</div>
+                    <div style={{ fontSize: 9.5, fontWeight: 500, marginTop: 2, opacity: 0.7 }}>{sub}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Live preview — Subtotal → GST → Grand Total */}
+            <div style={{ borderTop: '1px dashed #d4e0f5', paddingTop: 10, marginTop: 2 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#5a6b8c', marginBottom: 4 }}>
+                <span>Subtotal</span>
+                <span style={{ fontWeight: 600, color: '#0d1b3e' }}>{fmtINR(subtotal)}</span>
+              </div>
+              {gstRate > 0 && gstType === 'intra' && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 3 }}>
+                    <span>CGST @ {gstRate / 2}%</span>
+                    <span>{fmtINR(Math.round(gstAmount / 2))}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
+                    <span>SGST @ {gstRate / 2}%</span>
+                    <span>{fmtINR(gstAmount - Math.round(gstAmount / 2))}</span>
+                  </div>
+                </>
+              )}
+              {gstRate > 0 && gstType === 'inter' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
+                  <span>IGST @ {gstRate}%</span>
+                  <span>{fmtINR(gstAmount)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, fontWeight: 800, color: '#0d1b3e', borderTop: '1px solid #0d1b3e', paddingTop: 6, marginTop: 4 }}>
+                <span>Grand Total</span>
+                <span>{fmtINR(grandTotal)}</span>
+              </div>
+            </div>
+          </div>
 
           {warnings.length > 0 && (
             <div style={{ background: '#fdf6e5', border: '1px solid #ecd9a0', borderRadius: 10, padding: '10px 14px' }}>
