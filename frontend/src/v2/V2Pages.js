@@ -5447,31 +5447,40 @@ function buildInvoiceHTML(deal, billing, isProforma) {
   // gstAmount exactly, no stray paise.
   const gstRate = Number(billing.gstRate) || 0;
   const gstType = billing.gstType === 'inter' ? 'inter' : 'intra';
+  const gstBasis = billing.gstBasis === 'exclusive' ? 'exclusive' : 'inclusive';
   const cp = Math.max(0, Number(billing.cp) || 0);
-  // GST is INCLUSIVE in the line-item amounts — the invoice total equals
-  // what the client has agreed to pay, no extra GST added on top. We back-
-  // calculate the GST portion out of it so the invoice shows a proper tax
-  // breakup for compliance while the Grand Total still matches the quote.
-  //
-  //   5%  → GST baked into full subtotal.          Taxable = SP / 1.05
-  //   18% → GST baked into margin only (SP − CP).  Taxable margin = (SP − CP) / 1.18
-  //         The CP portion is pass-through — vendor fee the agent collected
-  //         on behalf of the client (visa fee, airline ticket) — no GST on
-  //         the agent's side for that bit.
-  //   0%  → nothing to back out.
+  // Two orthogonal choices decide GST on the invoice:
+  //   RATE   — 0 / 5 / 18
+  //   BASIS  — inclusive (SP contains GST, total = SP) or exclusive
+  //            (SP is pre-GST, total = SP + GST)
+  // 5% charges on the full subtotal (SAC 998555). 18% charges on the agent's
+  // margin only — the CP portion is pass-through to the vendor and never
+  // attracted GST on the agent's side.
   const gstDivisor = 1 + gstRate / 100;
   const marginIncl = Math.max(0, subtotal - cp);
-  const taxableBase = gstRate === 0
-    ? subtotal
-    : (gstRate === 18 ? marginIncl / gstDivisor : subtotal / gstDivisor);
-  const gstAmount = Math.round((gstRate === 18 ? marginIncl : subtotal) - taxableBase);
+  let taxableBase, gstAmount, total;
+  if (gstRate === 0) {
+    taxableBase = subtotal; gstAmount = 0; total = subtotal;
+  } else if (gstBasis === 'inclusive') {
+    const baseIncl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseIncl / gstDivisor;
+    gstAmount = Math.round(baseIncl - taxableBase);
+    total = subtotal;
+  } else { // exclusive
+    const baseExcl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseExcl;
+    gstAmount = Math.round(baseExcl * gstRate / 100);
+    total = subtotal + gstAmount;
+  }
   const cgstAmount = Math.round(gstAmount / 2);
   const sgstAmount = gstAmount - cgstAmount;
-  const total = subtotal;                           // always = SP, GST within
-  // Label suffix explains the GST is included inside the SP, not added on
-  // top — so the client reading the PDF immediately understands
-  // "CGST @ 9% (within, on margin)" means it came OUT of the price.
-  const gstMarginLabel = gstRate === 18 ? ' (within, on margin)' : ' (within)';
+  // Label suffix explains how the GST relates to the subtotal — inclusive
+  // "within" so the client knows it came out of the price, exclusive
+  // "added" so the client knows it was charged on top. Margin suffix is
+  // kept for 18% so the number isn't confused with a flat 18%-of-subtotal.
+  const inclSuffix = gstBasis === 'inclusive' ? 'within' : 'added';
+  const marginSuffix = gstRate === 18 ? ', on margin' : '';
+  const gstMarginLabel = ` (${inclSuffix}${marginSuffix})`;
 
   const itemsHTML = items.map((i) => `
     <tr>
@@ -5559,10 +5568,10 @@ function buildInvoiceHTML(deal, billing, isProforma) {
   <div style="display:flex;justify-content:flex-end;margin-bottom:24px">
     <div style="width:320px">
       <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12.5px;color:#5a6b8c;border-top:1px solid #e3eaf7">
-        <span>Subtotal${gstRate > 0 ? ' (incl. GST)' : ''}</span><span style="font-weight:600;color:#0d1b3e">₹${subtotal.toLocaleString('en-IN')}</span>
+        <span>Subtotal${gstRate > 0 ? (gstBasis === 'inclusive' ? ' (incl. GST)' : ' (ex. GST)') : ''}</span><span style="font-weight:600;color:#0d1b3e">₹${subtotal.toLocaleString('en-IN')}</span>
       </div>
       ${gstRate > 0 ? `
-        <div style="padding:6px 0;font-size:10.5px;color:#8894b0;font-style:italic">Of which the following GST is included:</div>
+        <div style="padding:6px 0;font-size:10.5px;color:#8894b0;font-style:italic">${gstBasis === 'inclusive' ? 'Of which the following GST is included:' : 'Add GST:'}</div>
       ` : ''}
       ${gstRate > 0 && gstType === 'intra' ? `
         <div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;font-size:12px;color:#5a6b8c">
@@ -5684,29 +5693,53 @@ function InvoiceModal({ deal, onClose }) {
   // raised for only one leg of a bigger deal.
   const [cp, setCp] = useState(() => String(costINR(deal) || ''));
 
+  // Is GST inside the quoted price, or added on top?
+  //   'inclusive' → SP is the final all-in price the client agreed to.
+  //                 GST is back-calculated out of it. Grand Total = SP.
+  //                 Standard for B2C travel bookings — client doesn't
+  //                 want surprise additions on the quote.
+  //   'exclusive' → SP is pre-GST. GST adds on top. Grand Total = SP+GST.
+  //                 Standard for B2B — corporate client sees GST as a
+  //                 separate line, claims ITC on it.
+  // Default inclusive because 90% of Voyage-Ed's bookings are retail.
+  const [gstBasis, setGstBasis] = useState('inclusive'); // 'inclusive' | 'exclusive'
+
   const componentsTotal = componentAmounts.reduce((s, v) => s + (Number(v) || 0), 0);
   const subtotal = pricingMode === 'total' ? (Number(totalAmount) || 0) : componentsTotal;
   const cpNum = Number(cp) || 0;
-  // GST is INCLUSIVE in the subtotal — the price shown is the final price
-  // the client is paying. We back-calculate GST out of it rather than
-  // adding it on top. Grand Total = Subtotal, always. The agent cannot go
-  // back and ask the client for more just because tax came out of the
-  // margin — it has to come from within the price already agreed.
+  // ─ GST calculation. Two orthogonal choices decide what we do ────────
+  //   RATE  — 0 / 5 / 18 (none / tour operator / service fee)
+  //   BASIS — inclusive (SP already contains GST) or exclusive (adds on top)
   //
-  //   5%  → GST is baked into the full subtotal. Taxable value = SP ÷ 1.05
-  //         (SAC 998555, tour operator scheme).
-  //   18% → GST is baked into the margin only (SP − CP). The CP portion
-  //         is a straight pass-through to the vendor (visa fee, airline
-  //         ticket) and never attracted GST on the agent's side.
-  //         Taxable margin = (SP − CP) ÷ 1.18.
-  //   0%  → nothing to back out.
+  // 5% mode charges on the full subtotal (SAC 998555, tour operator). 18%
+  // charges on margin only (SP − CP) — the CP portion is a straight
+  // pass-through to the vendor and never attracted GST on the agent's side.
+  //
+  // Inclusive examples (grand total always = SP):
+  //    5%  → taxableBase = SP / 1.05           ; gstAmount = SP − taxableBase
+  //    18% → taxableBase = (SP − CP) / 1.18    ; gstAmount = (SP − CP) − taxableBase
+  //
+  // Exclusive examples (grand total = SP + gstAmount):
+  //    5%  → gstAmount = SP × 0.05
+  //    18% → gstAmount = (SP − CP) × 0.18
+  //
+  // marginIncl is the margin portion before any ÷ (used for both modes).
+  const marginIncl = Math.max(0, subtotal - cpNum);
   const gstDivisor = 1 + gstRate / 100;
-  const marginIncl = Math.max(0, subtotal - cpNum);   // margin portion incl. GST
-  const taxableBase = gstRate === 0
-    ? subtotal
-    : (gstRate === 18 ? marginIncl / gstDivisor : subtotal / gstDivisor);
-  const gstAmount = Math.round((gstRate === 18 ? marginIncl : subtotal) - taxableBase);
-  const grandTotal = subtotal;                        // always equal to SP
+  let taxableBase, gstAmount, grandTotal;
+  if (gstRate === 0) {
+    taxableBase = subtotal; gstAmount = 0; grandTotal = subtotal;
+  } else if (gstBasis === 'inclusive') {
+    const baseIncl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseIncl / gstDivisor;
+    gstAmount = Math.round(baseIncl - taxableBase);
+    grandTotal = subtotal; // GST was already inside SP
+  } else { // exclusive
+    const baseExcl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseExcl;
+    gstAmount = Math.round(baseExcl * gstRate / 100);
+    grandTotal = subtotal + gstAmount;
+  }
 
   const generate = (isProforma) => {
     const customItems = pricingMode === 'total'
@@ -5714,7 +5747,7 @@ function InvoiceModal({ deal, onClose }) {
       : defaultItems.map((i, idx) => ({ desc: i.desc, sub: i.sub, paxCount: i.paxCount, amount: Number(componentAmounts[idx]) || 0 }));
     const w = window.open('', '_blank');
     if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
-    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType, cp: cpNum }, isProforma)); w.document.close(); }
+    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType, cp: cpNum, gstBasis }, isProforma)); w.document.close(); }
     catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
   };
 
@@ -5864,7 +5897,7 @@ function InvoiceModal({ deal, onClose }) {
 
             {/* Intra vs inter-state picker — only shown when GST is on */}
             {gstRate > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                 {[
                   ['intra', 'CGST + SGST', 'Client in Punjab'],
                   ['inter', 'IGST', 'Client in other state'],
@@ -5890,6 +5923,36 @@ function InvoiceModal({ deal, onClose }) {
               </div>
             )}
 
+            {/* Inclusive vs exclusive picker — only shown when GST is on.
+                Decides whether the SP already has GST baked in (client pays
+                exactly SP) or GST is added on top (client pays SP + GST). */}
+            {gstRate > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                {[
+                  ['inclusive', 'GST within SP', `Client pays ${fmtINR(subtotal)}`],
+                  ['exclusive', 'GST on top of SP', 'Client pays SP + GST'],
+                ].map(([basis, label, sub]) => (
+                  <button
+                    key={basis}
+                    type="button"
+                    onClick={() => setGstBasis(basis)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 8,
+                      border: gstBasis === basis ? '2px solid #15803d' : '1px solid #d4e0f5',
+                      background: gstBasis === basis ? '#d1fae5' : '#fff',
+                      color: '#0d1b3e',
+                      fontWeight: 700, fontSize: 11.5, cursor: 'pointer', textAlign: 'center',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div>{label}</div>
+                    <div style={{ fontSize: 9.5, fontWeight: 500, marginTop: 2, opacity: 0.7 }}>{sub}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* CP field — only for 18% mode where GST is calculated on margin.
                 Pre-filled from the deal's actual vendor cost; editable so the
                 user can override when invoicing only part of a bigger deal. */}
@@ -5898,7 +5961,11 @@ function InvoiceModal({ deal, onClose }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ flex: 1 }}>
                     <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Cost Price (CP) — paid to vendor</div>
-                    <div style={{ fontSize: 10.5, color: '#6b7a99' }}>GST @ 18% comes OUT of your margin (SP − CP), not added on top. Client still pays ₹{subtotal.toLocaleString('en-IN')}.</div>
+                    <div style={{ fontSize: 10.5, color: '#6b7a99' }}>
+                      {gstBasis === 'inclusive'
+                        ? `GST @ 18% comes OUT of your margin (SP − CP). Client still pays ₹${subtotal.toLocaleString('en-IN')}.`
+                        : `GST @ 18% calculates on your margin (SP − CP) and ADDS on top. Client pays ₹${subtotal.toLocaleString('en-IN')} + GST.`}
+                    </div>
                   </div>
                   <input
                     type="number"
@@ -5911,11 +5978,12 @@ function InvoiceModal({ deal, onClose }) {
               </div>
             )}
 
-            {/* Live preview — SP (what client pays) with GST backed out
-                from within. Grand Total = SP, always. */}
+            {/* Live preview — subtotal / margin breakdown / GST / grand total.
+                Labels adapt to inclusive vs exclusive mode so the user always
+                sees whether the GST is coming OUT of SP or being ADDED on top. */}
             <div style={{ borderTop: '1px dashed #d4e0f5', paddingTop: 10, marginTop: 2 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, fontWeight: 700, color: '#0d1b3e', marginBottom: 6 }}>
-                <span>Client pays (SP, incl. GST)</span>
+                <span>Selling Price (SP){gstRate > 0 ? (gstBasis === 'inclusive' ? ' — incl. GST' : ' — ex. GST') : ''}</span>
                 <span>{fmtINR(subtotal)}</span>
               </div>
               {gstRate === 18 && (
@@ -5925,7 +5993,7 @@ function InvoiceModal({ deal, onClose }) {
                     <span>{fmtINR(cpNum)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#5a6b8c', marginBottom: 2 }}>
-                    <span>Your margin (incl. GST)</span>
+                    <span>Your margin{gstBasis === 'inclusive' ? ' (incl. GST)' : ''}</span>
                     <span>{fmtINR(marginIncl)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0d1b3e', fontWeight: 700 }}>
@@ -5945,18 +6013,18 @@ function InvoiceModal({ deal, onClose }) {
               {gstRate > 0 && gstType === 'intra' && (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 3 }}>
-                    <span>&nbsp;&nbsp;↳ CGST @ {gstRate / 2}% (within)</span>
+                    <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} CGST @ {gstRate / 2}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
                     <span>{fmtINR(Math.round(gstAmount / 2))}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                    <span>&nbsp;&nbsp;↳ SGST @ {gstRate / 2}% (within)</span>
+                    <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} SGST @ {gstRate / 2}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
                     <span>{fmtINR(gstAmount - Math.round(gstAmount / 2))}</span>
                   </div>
                 </>
               )}
               {gstRate > 0 && gstType === 'inter' && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                  <span>&nbsp;&nbsp;↳ IGST @ {gstRate}% (within)</span>
+                  <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} IGST @ {gstRate}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
                   <span>{fmtINR(gstAmount)}</span>
                 </div>
               )}
