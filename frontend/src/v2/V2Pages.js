@@ -5311,16 +5311,29 @@ function buildInvoiceHTML(deal, billing, isProforma) {
     : buildInvoiceItemsV2(deal).map((i) => ({ ...i, desc: escHtml(i.desc), sub: escHtml(i.sub) }));
 
   const subtotal = items.reduce((s, i) => s + (i.amount || 0), 0);
-  // GST on the invoice. Caller passes gstRate (0 / 5 / 18) and gstType
-  // ('intra' = CGST + SGST, 'inter' = IGST). Half+half rounding on intra
-  // so CGST and SGST sum back to the whole gstAmount exactly, no stray
-  // paise. gstRate = 0 preserves the old "Inclusive" presentation.
+  // GST on the invoice.
+  //   gstRate — 0 / 5 / 18, passed from the modal.
+  //   gstType — 'intra' (CGST + SGST) or 'inter' (IGST), passed from modal.
+  //   cp      — cost price for 18% mode only. 18% is a service/commission
+  //             scheme where GST applies to margin (SP − CP), not full SP;
+  //             the pass-through vendor cost is exempt. 5% stays on the
+  //             full subtotal (tour operator scheme, SAC 998555). 0% keeps
+  //             the old "Inclusive / exempt" presentation.
+  // Half+half rounding on intra so CGST and SGST sum back to the whole
+  // gstAmount exactly, no stray paise.
   const gstRate = Number(billing.gstRate) || 0;
   const gstType = billing.gstType === 'inter' ? 'inter' : 'intra';
-  const gstAmount = Math.round((subtotal * gstRate) / 100);
+  const cp = Math.max(0, Number(billing.cp) || 0);
+  const marginProfit = Math.max(0, subtotal - cp);
+  const gstBase = gstRate === 18 ? marginProfit : subtotal;
+  const gstAmount = Math.round((gstBase * gstRate) / 100);
   const cgstAmount = Math.round(gstAmount / 2);
   const sgstAmount = gstAmount - cgstAmount;
   const total = subtotal + gstAmount;
+  // Suffix shown on the GST label when it's margin-based so the client
+  // isn't confused why 18% of ₹3,700 doesn't equal ₹666. Shows up as
+  // "CGST @ 9% (on margin)" / "IGST @ 18% (on service margin)".
+  const gstMarginLabel = gstRate === 18 ? ' (on service margin)' : '';
 
   const itemsHTML = items.map((i) => `
     <tr>
@@ -5412,15 +5425,15 @@ function buildInvoiceHTML(deal, billing, isProforma) {
       </div>
       ${gstRate > 0 && gstType === 'intra' ? `
         <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
-          <span>CGST @ ${gstRate / 2}%</span><span>₹${cgstAmount.toLocaleString('en-IN')}</span>
+          <span>CGST @ ${gstRate / 2}%${gstMarginLabel}</span><span>₹${cgstAmount.toLocaleString('en-IN')}</span>
         </div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
-          <span>SGST @ ${gstRate / 2}%</span><span>₹${sgstAmount.toLocaleString('en-IN')}</span>
+          <span>SGST @ ${gstRate / 2}%${gstMarginLabel}</span><span>₹${sgstAmount.toLocaleString('en-IN')}</span>
         </div>
       ` : ''}
       ${gstRate > 0 && gstType === 'inter' ? `
         <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:#5a6b8c">
-          <span>IGST @ ${gstRate}%</span><span>₹${gstAmount.toLocaleString('en-IN')}</span>
+          <span>IGST @ ${gstRate}%${gstMarginLabel}</span><span>₹${gstAmount.toLocaleString('en-IN')}</span>
         </div>
       ` : ''}
       ${gstRate === 0 ? `
@@ -5520,9 +5533,24 @@ function InvoiceModal({ deal, onClose }) {
   // outside Punjab.
   const [gstType, setGstType] = useState('intra'); // 'intra' | 'inter'
 
+  // Cost Price for the invoice. Only matters for 18% mode, where GST is
+  // charged on the agent's margin (SP − CP) under the service/commission
+  // scheme — the ₹1,000 that goes straight to the visa vendor or airline
+  // is a pass-through and doesn't attract GST on the agent's side. 5% mode
+  // (tour operator) still charges on the full subtotal, so CP is only
+  // shown when 18% is active. Default = the deal's actual all-vendors
+  // cost total; editable per invoice because sometimes the invoice is
+  // raised for only one leg of a bigger deal.
+  const [cp, setCp] = useState(() => String(costINR(deal) || ''));
+
   const componentsTotal = componentAmounts.reduce((s, v) => s + (Number(v) || 0), 0);
   const subtotal = pricingMode === 'total' ? (Number(totalAmount) || 0) : componentsTotal;
-  const gstAmount = Math.round((subtotal * gstRate) / 100);
+  const cpNum = Number(cp) || 0;
+  const marginProfit = Math.max(0, subtotal - cpNum); // never charge GST on a loss
+  // GST base differs by rate: 5% on full subtotal (tour operator scheme),
+  // 18% on margin only (service/commission scheme).
+  const gstBase = gstRate === 18 ? marginProfit : subtotal;
+  const gstAmount = Math.round((gstBase * gstRate) / 100);
   const grandTotal = subtotal + gstAmount;
 
   const generate = (isProforma) => {
@@ -5531,7 +5559,7 @@ function InvoiceModal({ deal, onClose }) {
       : defaultItems.map((i, idx) => ({ desc: i.desc, sub: i.sub, paxCount: i.paxCount, amount: Number(componentAmounts[idx]) || 0 }));
     const w = window.open('', '_blank');
     if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
-    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType }, isProforma)); w.document.close(); }
+    try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType, cp: cpNum }, isProforma)); w.document.close(); }
     catch (e) { w.document.write('<pre style="padding:40px;color:#b91c1c">' + String(e.stack || e) + '</pre>'); w.document.close(); }
   };
 
@@ -5707,27 +5735,60 @@ function InvoiceModal({ deal, onClose }) {
               </div>
             )}
 
-            {/* Live preview — Subtotal → GST → Grand Total */}
+            {/* CP field — only for 18% mode where GST is calculated on margin.
+                Pre-filled from the deal's actual vendor cost; editable so the
+                user can override when invoicing only part of a bigger deal. */}
+            {gstRate === 18 && (
+              <div style={{ borderTop: '1px dashed #d4e0f5', paddingTop: 10, marginTop: 2, marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="v2-detail-field-label" style={{ marginBottom: 4 }}>Cost Price (CP) — paid to vendor</div>
+                    <div style={{ fontSize: 10.5, color: '#6b7a99' }}>GST @ 18% charges on your margin (SP − CP) only, not the full ₹{subtotal.toLocaleString('en-IN')}. Pass-through vendor cost is exempt.</div>
+                  </div>
+                  <input
+                    type="number"
+                    value={cp}
+                    onChange={(e) => setCp(e.target.value)}
+                    style={{ width: 130, border: '1px solid #d4e0f5', borderRadius: 7, padding: '7px 10px', fontSize: 13, textAlign: 'right', outline: 'none', fontWeight: 600, color: '#0d1b3e' }}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Live preview — Subtotal → (profit if 18%) → GST → Grand Total */}
             <div style={{ borderTop: '1px dashed #d4e0f5', paddingTop: 10, marginTop: 2 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#5a6b8c', marginBottom: 4 }}>
-                <span>Subtotal</span>
+                <span>Selling Price (SP) — Subtotal</span>
                 <span style={{ fontWeight: 600, color: '#0d1b3e' }}>{fmtINR(subtotal)}</span>
               </div>
+              {gstRate === 18 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 3 }}>
+                    <span>Less: Cost Price (CP)</span>
+                    <span>− {fmtINR(cpNum)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#0d1b3e', fontWeight: 700, marginBottom: 6, paddingBottom: 4, borderBottom: '1px dotted #d4e0f5' }}>
+                    <span>Taxable margin</span>
+                    <span>{fmtINR(marginProfit)}</span>
+                  </div>
+                </>
+              )}
               {gstRate > 0 && gstType === 'intra' && (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 3 }}>
-                    <span>CGST @ {gstRate / 2}%</span>
+                    <span>CGST @ {gstRate / 2}%{gstRate === 18 ? ' (on margin)' : ''}</span>
                     <span>{fmtINR(Math.round(gstAmount / 2))}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                    <span>SGST @ {gstRate / 2}%</span>
+                    <span>SGST @ {gstRate / 2}%{gstRate === 18 ? ' (on margin)' : ''}</span>
                     <span>{fmtINR(gstAmount - Math.round(gstAmount / 2))}</span>
                   </div>
                 </>
               )}
               {gstRate > 0 && gstType === 'inter' && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                  <span>IGST @ {gstRate}%</span>
+                  <span>IGST @ {gstRate}%{gstRate === 18 ? ' (on margin)' : ''}</span>
                   <span>{fmtINR(gstAmount)}</span>
                 </div>
               )}
