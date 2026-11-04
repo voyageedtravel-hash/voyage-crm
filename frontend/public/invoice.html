@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voyage-Ed · Standalone Invoice Generator</title>
+<style>
+  /* ─── Reset + base ────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html, body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; color: #0d1b3e; background: #eef2f9; line-height: 1.5; }
+
+  /* ─── Editor panel (hidden when printing) ─────────────── */
+  .editor { max-width: 980px; margin: 24px auto; padding: 20px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(13,27,62,0.08); }
+  .editor h1 { font-family: 'Playfair Display', Georgia, serif; font-size: 20px; color: #0d1b3e; margin-bottom: 4px; }
+  .editor .subtitle { font-size: 12px; color: #8894b0; margin-bottom: 20px; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 10px; letter-spacing: 1.5px; color: #c9961a; font-weight: 800; margin-bottom: 10px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+  label { display: block; font-size: 10px; letter-spacing: 0.8px; color: #6b7a99; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; }
+  input, textarea, select { width: 100%; padding: 8px 10px; border: 1px solid #d4e0f5; border-radius: 7px; font-size: 13px; font-family: inherit; color: #0d1b3e; background: #f8fafd; outline: none; transition: border 0.15s, background 0.15s; }
+  input:focus, textarea:focus, select:focus { border-color: #c9961a; background: #fff; }
+  textarea { resize: vertical; min-height: 60px; }
+
+  /* ─── Line items table ─────────────────────────────────── */
+  .items-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .items-table th { font-size: 10px; letter-spacing: 0.8px; color: #6b7a99; font-weight: 700; text-align: left; padding: 6px 8px; border-bottom: 1px solid #d4e0f5; }
+  .items-table th.num { text-align: right; width: 110px; }
+  .items-table th.remove { width: 32px; }
+  .items-table td { padding: 4px 4px; }
+  .items-table td input { background: #fff; }
+  .items-table td input.num { text-align: right; }
+  .btn-remove { background: #fdf6e5; color: #b91c1c; border: 1px solid #f0c842; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; font-weight: 800; }
+  .btn-remove:hover { background: #f0c842; }
+  .btn-add { background: #f0f4fb; color: #0d1b3e; border: 1px dashed #c9961a; border-radius: 7px; padding: 8px 14px; cursor: pointer; font-size: 12px; font-weight: 700; width: 100%; margin-top: 4px; transition: all 0.15s; }
+  .btn-add:hover { background: #fdf6e5; border-style: solid; }
+
+  /* ─── GST pills ─────────────────────────────────────────── */
+  .pills { display: grid; gap: 8px; margin-bottom: 10px; }
+  .pills.three { grid-template-columns: 1fr 1fr 1fr; }
+  .pills.two { grid-template-columns: 1fr 1fr; }
+  .pill { padding: 8px 10px; border-radius: 8px; border: 1px solid #d4e0f5; background: #fff; color: #0d1b3e; font-weight: 700; font-size: 12px; cursor: pointer; text-align: center; transition: all 0.15s; }
+  .pill .sub { font-size: 9.5px; font-weight: 500; margin-top: 2px; opacity: 0.75; }
+  .pill.active[data-group="rate"] { background: #0d1b3e; color: #fff; border: 2px solid #0d1b3e; }
+  .pill.active[data-group="type"] { background: #fdf6e5; border: 2px solid #c9961a; }
+  .pill.active[data-group="basis"] { background: #d1fae5; border: 2px solid #15803d; }
+
+  /* ─── Live totals preview ──────────────────────────────── */
+  .totals { background: #f8fafd; border: 1px solid #d4e0f5; border-radius: 10px; padding: 14px 16px; font-size: 12.5px; }
+  .totals .row { display: flex; justify-content: space-between; padding: 4px 0; color: #5a6b8c; }
+  .totals .row.strong { color: #0d1b3e; font-weight: 700; }
+  .totals .row.grand { border-top: 2px solid #0d1b3e; margin-top: 6px; padding-top: 10px; font-size: 15px; font-weight: 800; color: #0d1b3e; }
+  .totals .margin-box { background: #f0f4fb; border: 1px dashed #d4e0f5; border-radius: 7px; padding: 7px 10px; margin: 6px 0; font-size: 11px; }
+  .totals .margin-box .row { padding: 2px 0; }
+
+  /* ─── Action buttons ───────────────────────────────────── */
+  .actions { display: flex; gap: 10px; margin-top: 20px; }
+  .btn-primary, .btn-secondary { flex: 1; padding: 12px 18px; border-radius: 10px; font-size: 14px; font-weight: 800; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn-primary { background: linear-gradient(135deg, #0d1b3e, #1a3060); color: #fff; }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(13,27,62,0.25); }
+  .btn-secondary { background: linear-gradient(135deg, #c9961a, #f0c842); color: #0d1b3e; }
+  .btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(201,150,26,0.3); }
+
+  /* ─── Preview / print invoice ──────────────────────────── */
+  .invoice-wrap { max-width: 820px; margin: 24px auto 40px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(13,27,62,0.08); overflow: hidden; }
+  .inv-header { background: linear-gradient(135deg, #0a1530, #1a3060); color: #fff; padding: 30px 40px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .inv-logo-card { background: #fff; border-radius: 10px; padding: 8px 14px; display: inline-block; }
+  .inv-logo-card img { height: 46px; display: block; }
+  .inv-brand { text-align: right; }
+  .inv-brand h2 { font-family: 'Playfair Display', Georgia, serif; font-size: 22px; margin-bottom: 2px; letter-spacing: 0.5px; }
+  .inv-brand .tag { font-size: 10px; letter-spacing: 2px; color: #f0c842; font-weight: 700; }
+  .inv-brand .company-lines { font-size: 10.5px; color: rgba(255,255,255,0.75); margin-top: 8px; line-height: 1.5; }
+  .inv-title-bar { background: #f0c842; color: #0d1b3e; padding: 10px 40px; display: flex; justify-content: space-between; align-items: center; }
+  .inv-title-bar .title { font-family: 'Playfair Display', Georgia, serif; font-size: 20px; font-weight: 800; letter-spacing: 1px; }
+  .inv-title-bar .num { font-size: 13px; font-weight: 700; }
+  .inv-meta { padding: 20px 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; border-bottom: 1px solid #e3eaf7; }
+  .inv-meta .block h4 { font-size: 10px; letter-spacing: 1.5px; color: #c9961a; font-weight: 800; margin-bottom: 8px; }
+  .inv-meta .block .name { font-size: 14px; font-weight: 700; color: #0d1b3e; margin-bottom: 4px; }
+  .inv-meta .block .line { font-size: 11.5px; color: #5a6b8c; margin-bottom: 2px; }
+  .inv-items { padding: 20px 40px; }
+  .inv-items-table { width: 100%; border-collapse: collapse; }
+  .inv-items-table th { background: #0d1b3e; color: #fff; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; padding: 10px 12px; text-align: left; }
+  .inv-items-table th.num { text-align: right; }
+  .inv-items-table td { padding: 12px; font-size: 12.5px; color: #0d1b3e; border-bottom: 1px solid #f0f2f7; }
+  .inv-items-table td.num { text-align: right; }
+  .inv-items-table tr:last-child td { border-bottom: none; }
+  .inv-totals { padding: 0 40px 24px; display: flex; justify-content: flex-end; }
+  .inv-totals-box { width: 340px; }
+  .inv-totals-box .row { display: flex; justify-content: space-between; padding: 7px 0; font-size: 12.5px; color: #5a6b8c; }
+  .inv-totals-box .row.top { border-top: 1px solid #e3eaf7; }
+  .inv-totals-box .row.gst-label { padding: 6px 0; font-size: 10.5px; color: #8894b0; font-style: italic; }
+  .inv-totals-box .row.gst-item { padding: 5px 0 5px 12px; font-size: 12px; }
+  .inv-totals-box .row.grand { border-top: 2px solid #0d1b3e; margin-top: 4px; padding: 12px 0; font-size: 17px; font-weight: 800; color: #0d1b3e; }
+  .inv-bank { padding: 20px 40px; background: #f8fafd; border-top: 1px solid #e3eaf7; }
+  .inv-bank h4 { font-size: 10px; letter-spacing: 1.5px; color: #c9961a; font-weight: 800; margin-bottom: 8px; }
+  .inv-bank .bank-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; font-size: 11.5px; color: #5a6b8c; line-height: 1.7; }
+  .inv-bank .bank-grid b { color: #0d1b3e; }
+  .inv-footer { padding: 16px 40px; background: #0a1530; color: rgba(255,255,255,0.7); font-size: 10px; text-align: center; letter-spacing: 1px; }
+  .inv-footer .gold { color: #f0c842; font-weight: 700; }
+
+  /* ─── Print styles ──────────────────────────────────────── */
+  @media print {
+    body { background: #fff; }
+    .editor, .actions, .no-print { display: none !important; }
+    .invoice-wrap { box-shadow: none; border-radius: 0; margin: 0; max-width: 100%; }
+    @page { margin: 8mm; }
+  }
+
+  /* ─── Mobile responsiveness ───────────────────────────── */
+  @media (max-width: 640px) {
+    .editor, .invoice-wrap { margin: 12px; padding: 14px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .inv-header, .inv-items, .inv-meta, .inv-totals, .inv-bank, .inv-footer { padding-left: 20px; padding-right: 20px; }
+    .inv-header { flex-direction: column; gap: 14px; }
+    .inv-brand { text-align: left; }
+    .inv-totals-box { width: 100%; }
+    .inv-meta { grid-template-columns: 1fr; gap: 16px; }
+    .pills.three, .pills.two { grid-template-columns: 1fr; }
+    .actions { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── EDITOR PANEL (fills the invoice) ──────────────────── -->
+<div class="editor no-print">
+  <h1>🧾 Standalone Invoice Generator</h1>
+  <p class="subtitle">Works without the CRM backend · No login · Pure browser tool · Keep this tab bookmarked</p>
+
+  <!-- Invoice meta -->
+  <div class="section">
+    <div class="section-title">INVOICE DETAILS</div>
+    <div class="grid-4">
+      <div>
+        <label>Invoice No.</label>
+        <input id="invNo" type="text" placeholder="VE-INV-2026-001" />
+      </div>
+      <div>
+        <label>Invoice Date</label>
+        <input id="invDate" type="date" />
+      </div>
+      <div>
+        <label>Due Date</label>
+        <input id="dueDate" type="date" />
+      </div>
+      <div>
+        <label>Payment Terms</label>
+        <input id="terms" type="text" value="100% Advance" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Bill To -->
+  <div class="section">
+    <div class="section-title">BILL TO</div>
+    <div class="grid-2">
+      <div>
+        <label>Client Name</label>
+        <input id="billName" type="text" placeholder="Mr. Harsimran Singh" />
+      </div>
+      <div>
+        <label>Company (optional)</label>
+        <input id="billCompany" type="text" placeholder="Acme Pvt Ltd" />
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label>Address</label>
+      <textarea id="billAddress" placeholder="House no, street, city, state, pincode"></textarea>
+    </div>
+    <div class="grid-3" style="margin-top:12px">
+      <div>
+        <label>Phone</label>
+        <input id="billPhone" type="text" placeholder="+91 ..." />
+      </div>
+      <div>
+        <label>Email</label>
+        <input id="billEmail" type="email" placeholder="client@example.com" />
+      </div>
+      <div>
+        <label>GSTIN (optional)</label>
+        <input id="billGstin" type="text" placeholder="04AAECA..." />
+      </div>
+    </div>
+  </div>
+
+  <!-- Line items -->
+  <div class="section">
+    <div class="section-title">LINE ITEMS</div>
+    <table class="items-table" id="itemsTable">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th class="num">Amount (₹)</th>
+          <th class="remove"></th>
+        </tr>
+      </thead>
+      <tbody id="itemsBody">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+    <button class="btn-add" onclick="addItem()">+ Add Line Item</button>
+  </div>
+
+  <!-- GST -->
+  <div class="section">
+    <div class="section-title">GST ON INVOICE</div>
+
+    <!-- Rate pills -->
+    <div class="pills three">
+      <div class="pill" data-group="rate" data-value="0" onclick="setRate(0)">🚫 No GST<div class="sub">Inclusive / exempt</div></div>
+      <div class="pill" data-group="rate" data-value="5" onclick="setRate(5)">5% GST<div class="sub">Tour operator</div></div>
+      <div class="pill active" data-group="rate" data-value="18" onclick="setRate(18)">18% GST<div class="sub">Visa / service fee</div></div>
+    </div>
+
+    <!-- Type + basis pills (shown when rate > 0) -->
+    <div id="typeBasisBlock">
+      <div class="pills two">
+        <div class="pill active" data-group="type" data-value="intra" onclick="setType('intra')">CGST + SGST<div class="sub">Client in Punjab</div></div>
+        <div class="pill" data-group="type" data-value="inter" onclick="setType('inter')">IGST<div class="sub">Client in other state</div></div>
+      </div>
+      <div class="pills two">
+        <div class="pill active" data-group="basis" data-value="inclusive" onclick="setBasis('inclusive')">GST within SP<div class="sub">Client pays exactly SP</div></div>
+        <div class="pill" data-group="basis" data-value="exclusive" onclick="setBasis('exclusive')">GST on top of SP<div class="sub">Client pays SP + GST</div></div>
+      </div>
+    </div>
+
+    <!-- CP (only 18%) -->
+    <div id="cpBlock" style="margin-top:10px">
+      <div style="display:flex; align-items:center; gap:12px; background:#f0f4fb; border:1px dashed #d4e0f5; border-radius:8px; padding:10px 12px">
+        <div style="flex:1">
+          <label style="margin-bottom:2px">Cost Price (CP) — paid to vendor</label>
+          <div style="font-size:11px; color:#6b7a99" id="cpHelper">GST @ 18% comes OUT of your margin (SP − CP), not added on top.</div>
+        </div>
+        <input id="cp" type="number" value="0" style="width:120px; text-align:right; font-weight:600" />
+      </div>
+    </div>
+
+    <!-- Live totals preview -->
+    <div class="totals" style="margin-top:12px" id="totalsPreview">
+      <!-- rendered by JS -->
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="section">
+    <div class="section-title">NOTES (optional)</div>
+    <textarea id="notes" placeholder="Any custom note for the client: payment instructions, travel reminders, etc."></textarea>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn-secondary" onclick="renderInvoice()">👁️  Update Preview</button>
+    <button class="btn-primary" onclick="printInvoice()">🖨️  Print / Save as PDF</button>
+  </div>
+</div>
+
+<!-- ─── INVOICE PREVIEW / PRINT ─────────────────────────── -->
+<div class="invoice-wrap" id="invoicePreview">
+  <!-- rendered by JS -->
+</div>
+
+<script>
+// ─── State ──────────────────────────────────────────────
+let items = [
+  { desc: 'Visa Processing Service', amount: 0 },
+];
+let gstRate = 18;
+let gstType = 'intra';
+let gstBasis = 'inclusive';
+
+// ─── Formatters ─────────────────────────────────────────
+const fmt = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const esc = s => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const prettyDate = iso => {
+  if (!iso) return '—';
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+// ─── Line item management ───────────────────────────────
+function renderItemsTable() {
+  const tbody = document.getElementById('itemsBody');
+  tbody.innerHTML = items.map((it, i) => `
+    <tr>
+      <td><input type="text" value="${esc(it.desc)}" oninput="items[${i}].desc = this.value; renderTotals()" /></td>
+      <td><input type="number" class="num" value="${it.amount}" oninput="items[${i}].amount = Number(this.value) || 0; renderTotals()" /></td>
+      <td>${items.length > 1 ? `<button class="btn-remove" onclick="removeItem(${i})" title="Remove row">×</button>` : ''}</td>
+    </tr>
+  `).join('');
+}
+function addItem() { items.push({ desc: '', amount: 0 }); renderItemsTable(); renderTotals(); }
+function removeItem(i) { items.splice(i, 1); renderItemsTable(); renderTotals(); }
+
+// ─── GST pill setters ───────────────────────────────────
+function setRate(r) {
+  gstRate = r;
+  document.querySelectorAll('[data-group="rate"]').forEach(el => el.classList.toggle('active', Number(el.dataset.value) === r));
+  document.getElementById('typeBasisBlock').style.display = r > 0 ? 'block' : 'none';
+  document.getElementById('cpBlock').style.display = r === 18 ? 'block' : 'none';
+  renderTotals();
+}
+function setType(t) {
+  gstType = t;
+  document.querySelectorAll('[data-group="type"]').forEach(el => el.classList.toggle('active', el.dataset.value === t));
+  renderTotals();
+}
+function setBasis(b) {
+  gstBasis = b;
+  document.querySelectorAll('[data-group="basis"]').forEach(el => el.classList.toggle('active', el.dataset.value === b));
+  document.getElementById('cpHelper').textContent = b === 'inclusive'
+    ? 'GST @ 18% comes OUT of your margin (SP − CP), not added on top.'
+    : 'GST @ 18% calculates on your margin (SP − CP) and ADDS on top.';
+  renderTotals();
+}
+
+// ─── Totals math (same rules as the CRM InvoiceModal) ───
+function computeTotals() {
+  const subtotal = items.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const cp = Math.max(0, Number(document.getElementById('cp').value) || 0);
+  const marginIncl = Math.max(0, subtotal - cp);
+  let taxableBase, gstAmount, total;
+
+  if (gstRate === 0) {
+    taxableBase = subtotal; gstAmount = 0; total = subtotal;
+  } else if (gstBasis === 'inclusive') {
+    const baseIncl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseIncl / (1 + gstRate / 100);
+    gstAmount = Math.round(baseIncl - taxableBase);
+    total = subtotal;
+  } else { // exclusive
+    const baseExcl = gstRate === 18 ? marginIncl : subtotal;
+    taxableBase = baseExcl;
+    gstAmount = Math.round(baseExcl * gstRate / 100);
+    total = subtotal + gstAmount;
+  }
+  const cgst = Math.round(gstAmount / 2);
+  const sgst = gstAmount - cgst;
+  return { subtotal, cp, marginIncl, taxableBase, gstAmount, cgst, sgst, total };
+}
+
+// ─── Totals preview (editor side) ───────────────────────
+function renderTotals() {
+  const { subtotal, cp, marginIncl, taxableBase, gstAmount, cgst, sgst, total } = computeTotals();
+  const preview = document.getElementById('totalsPreview');
+  const suffix = gstBasis === 'inclusive' ? 'within' : 'added';
+  const inclSuffix = gstBasis === 'inclusive' ? 'incl. GST' : 'ex. GST';
+  preview.innerHTML = `
+    <div class="row strong"><span>Selling Price (SP)${gstRate > 0 ? ' — ' + inclSuffix : ''}</span><span>${fmt(subtotal)}</span></div>
+    ${gstRate === 18 ? `
+      <div class="margin-box">
+        <div class="row"><span>Pass-through to vendor (CP)</span><span>${fmt(cp)}</span></div>
+        <div class="row"><span>Your margin${gstBasis === 'inclusive' ? ' (incl. GST)' : ''}</span><span>${fmt(marginIncl)}</span></div>
+        <div class="row strong"><span>Taxable margin (ex-GST)</span><span>${fmt(Math.round(taxableBase))}</span></div>
+      </div>
+    ` : ''}
+    ${gstRate === 5 ? `
+      <div class="margin-box">
+        <div class="row strong"><span>Taxable value (ex-GST)</span><span>${fmt(Math.round(taxableBase))}</span></div>
+      </div>
+    ` : ''}
+    ${gstRate > 0 && gstType === 'intra' ? `
+      <div class="row"><span>&nbsp;&nbsp;${gstBasis === 'inclusive' ? '↳' : '+'} CGST @ ${gstRate / 2}% (${suffix})</span><span>${fmt(cgst)}</span></div>
+      <div class="row"><span>&nbsp;&nbsp;${gstBasis === 'inclusive' ? '↳' : '+'} SGST @ ${gstRate / 2}% (${suffix})</span><span>${fmt(sgst)}</span></div>
+    ` : ''}
+    ${gstRate > 0 && gstType === 'inter' ? `
+      <div class="row"><span>&nbsp;&nbsp;${gstBasis === 'inclusive' ? '↳' : '+'} IGST @ ${gstRate}% (${suffix})</span><span>${fmt(gstAmount)}</span></div>
+    ` : ''}
+    <div class="row grand"><span>Grand Total (client pays)</span><span>${fmt(total)}</span></div>
+  `;
+  renderInvoice();
+}
+
+// ─── Invoice preview / print render ─────────────────────
+function renderInvoice() {
+  const { subtotal, gstAmount, cgst, sgst, total } = computeTotals();
+  const suffix = gstBasis === 'inclusive' ? 'within' : 'added';
+  const marginSuffix = gstRate === 18 ? ', on margin' : '';
+  const gstLabel = ` (${suffix}${marginSuffix})`;
+  const invNo = document.getElementById('invNo').value || 'VE-INV-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-4);
+  const invDate = document.getElementById('invDate').value || todayISO();
+  const dueDate = document.getElementById('dueDate').value;
+  const terms = document.getElementById('terms').value || '100% Advance';
+  const name = document.getElementById('billName').value || 'Valued Client';
+  const company = document.getElementById('billCompany').value;
+  const address = document.getElementById('billAddress').value;
+  const phone = document.getElementById('billPhone').value;
+  const email = document.getElementById('billEmail').value;
+  const billGstin = document.getElementById('billGstin').value;
+  const notes = document.getElementById('notes').value;
+
+  document.getElementById('invoicePreview').innerHTML = `
+    <div class="inv-header">
+      <div class="inv-logo-card"><img src="/voyage-ed-logo.jpg" alt="Voyage-Ed Travels" /></div>
+      <div class="inv-brand">
+        <h2>VOYAGE-ED TRAVELS</h2>
+        <div class="tag">LEARN · TRAVEL · EXPLORE</div>
+        <div class="company-lines">
+          Suite 315, Regus GMADA Aerocity<br/>
+          Mohali, Punjab 140306 · India<br/>
+          GSTIN: 04ABBFV6015A1ZT · IATA Accredited<br/>
+          +91 70096 59048 · enquiry@voyage-ed.com
+        </div>
+      </div>
+    </div>
+
+    <div class="inv-title-bar">
+      <div class="title">INVOICE</div>
+      <div class="num">${esc(invNo)}</div>
+    </div>
+
+    <div class="inv-meta">
+      <div class="block">
+        <h4>BILL TO</h4>
+        <div class="name">${esc(name)}</div>
+        ${company ? `<div class="line">${esc(company)}</div>` : ''}
+        ${address ? `<div class="line">${esc(address).replace(/\n/g, '<br/>')}</div>` : ''}
+        ${phone ? `<div class="line">📞 ${esc(phone)}</div>` : ''}
+        ${email ? `<div class="line">✉️  ${esc(email)}</div>` : ''}
+        ${billGstin ? `<div class="line">GSTIN: ${esc(billGstin)}</div>` : ''}
+      </div>
+      <div class="block" style="text-align:right">
+        <h4>INVOICE DETAILS</h4>
+        <div class="line"><b style="color:#0d1b3e">Date:</b> ${prettyDate(invDate)}</div>
+        ${dueDate ? `<div class="line"><b style="color:#0d1b3e">Due:</b> ${prettyDate(dueDate)}</div>` : ''}
+        <div class="line"><b style="color:#0d1b3e">Terms:</b> ${esc(terms)}</div>
+      </div>
+    </div>
+
+    <div class="inv-items">
+      <table class="inv-items-table">
+        <thead>
+          <tr>
+            <th>DESCRIPTION</th>
+            <th class="num">AMOUNT</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.filter(i => i.desc || i.amount).map(it => `
+            <tr>
+              <td>${esc(it.desc || 'Service')}</td>
+              <td class="num">₹${(Number(it.amount) || 0).toLocaleString('en-IN')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="inv-totals">
+      <div class="inv-totals-box">
+        <div class="row top"><span>Subtotal${gstRate > 0 ? (gstBasis === 'inclusive' ? ' (incl. GST)' : ' (ex. GST)') : ''}</span><span style="font-weight:600;color:#0d1b3e">₹${subtotal.toLocaleString('en-IN')}</span></div>
+        ${gstRate > 0 ? `<div class="row gst-label">${gstBasis === 'inclusive' ? 'Of which the following GST is included:' : 'Add GST:'}</div>` : ''}
+        ${gstRate > 0 && gstType === 'intra' ? `
+          <div class="row gst-item"><span>CGST @ ${gstRate / 2}%${gstLabel}</span><span>₹${cgst.toLocaleString('en-IN')}</span></div>
+          <div class="row gst-item"><span>SGST @ ${gstRate / 2}%${gstLabel}</span><span>₹${sgst.toLocaleString('en-IN')}</span></div>
+        ` : ''}
+        ${gstRate > 0 && gstType === 'inter' ? `
+          <div class="row gst-item"><span>IGST @ ${gstRate}%${gstLabel}</span><span>₹${gstAmount.toLocaleString('en-IN')}</span></div>
+        ` : ''}
+        ${gstRate === 0 ? `<div class="row"><span>GST</span><span>Inclusive / exempt</span></div>` : ''}
+        <div class="row grand"><span>TOTAL PAYABLE</span><span>₹${total.toLocaleString('en-IN')}</span></div>
+      </div>
+    </div>
+
+    ${notes ? `
+      <div style="padding: 0 40px 20px">
+        <div style="background:#fdf6e5; border-left:4px solid #f0c842; padding: 12px 16px; border-radius:6px; font-size:12px; color:#0d1b3e">
+          <b style="color:#c9961a; font-size:10px; letter-spacing:1.5px">NOTE</b><br/>
+          ${esc(notes).replace(/\n/g, '<br/>')}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="inv-bank">
+      <h4>BANK DETAILS · PAYMENT</h4>
+      <div class="bank-grid">
+        <div>
+          <b>Account Name:</b> Voyage-Ed Travels<br/>
+          <b>Account No:</b> [Enter in CRM settings]<br/>
+          <b>IFSC:</b> [Enter in CRM settings]<br/>
+          <b>Bank:</b> [Enter in CRM settings]
+        </div>
+        <div>
+          <b>UPI:</b> voyageed@upi<br/>
+          <b>Pay via:</b> Bank Transfer / UPI / Card<br/>
+          <b>Confirm payment to:</b><br/>
+          <b>WhatsApp:</b> +91 70096 59048
+        </div>
+      </div>
+    </div>
+
+    <div class="inv-footer">
+      THANK YOU FOR CHOOSING <span class="gold">VOYAGE-ED TRAVELS</span> · WWW.VOYAGE-ED.COM
+    </div>
+  `;
+}
+
+function printInvoice() {
+  renderInvoice();
+  window.print();
+}
+
+// ─── Init ───────────────────────────────────────────────
+document.getElementById('invDate').value = todayISO();
+document.getElementById('cp').addEventListener('input', renderTotals);
+['invNo', 'dueDate', 'terms', 'billName', 'billCompany', 'billAddress', 'billPhone', 'billEmail', 'billGstin', 'notes'].forEach(id => {
+  document.getElementById(id).addEventListener('input', renderInvoice);
+});
+renderItemsTable();
+renderTotals();
+</script>
+</body>
+</html>
