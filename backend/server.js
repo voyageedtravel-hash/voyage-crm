@@ -705,6 +705,22 @@ const start = async () => {
     });
 
     app.get("/api/version", (req, res) => res.json({ version: "2.4.0-otp-reset", deployed: "2026-06-08", features: ["whatsapp-otp", "role-enum-expanded", "updateOne-reset"] }));
+
+    // Lightweight health check for UptimeRobot-style keep-alive pings so
+    // Render's free-tier container does not sleep after 15 min of
+    // inactivity (that sleep is what causes "Couldn't load data" on
+    // morning opens — cold starts can take 30-60 s). Also doubles as a
+    // smoke test for the Mongo connection: readyState 1 means connected,
+    // anything else means we would fail on the first real query.
+    app.get("/api/health", (req, res) => {
+      const mongoReady = require("mongoose").connection.readyState === 1;
+      res.status(mongoReady ? 200 : 503).json({
+        status: mongoReady ? "ok" : "degraded",
+        mongo: mongoReady ? "connected" : "disconnected",
+        uptime_s: Math.round(process.uptime()),
+        ts: new Date().toISOString(),
+      });
+    });
     app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
 
     // ── Backup: routes + daily cron ──
