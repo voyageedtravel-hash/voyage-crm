@@ -5246,23 +5246,9 @@ function EditDealNumberModal({ deal, allLeads, onClose, onSaved }) {
   };
 
   return (
-    <ModalShell title="✎ Edit Deal Number" onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Update">
-      <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: '#78350f', lineHeight: 1.55 }}>
-        <b>⚠ Regulatory correction only.</b> Deal number sirf tab change karo jab:
-        <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
-          <li>Invoice already issue ho chuki hai doosre ID pe aur tum GST ke wajah se usey change nahi kar sakte</li>
-          <li>Ya duplicate deal delete karne ke baad numbering gap bana hai aur wo fix karna hai</li>
-        </ul>
-        <div style={{ marginTop: 6, fontStyle: 'italic' }}>Normal workflow mein deal number auto-assign hota hai — manually change karne ki zarurat nahi.</div>
-      </div>
-
-      <div>
-        <label style={{ display: 'block', fontSize: 11, color: '#6b7a99', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
-          Current Deal Number
-        </label>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#64748b', background: '#f1f5f9', padding: '10px 14px', borderRadius: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
-          {deal.dealNumber || '(none)'}
-        </div>
+    <ModalShell title="Edit Deal Number" onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Save">
+      <div style={{ fontSize: 12, color: '#6b7a99', lineHeight: 1.5 }}>
+        Current: <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontWeight: 700, color: '#0d1b3e', background: '#f1f5f9', padding: '2px 8px', borderRadius: 4 }}>{deal.dealNumber || '(none)'}</span>
       </div>
 
       <div>
@@ -5276,38 +5262,34 @@ function EditDealNumberModal({ deal, allLeads, onClose, onSaved }) {
           placeholder="VE-2026-153"
           autoFocus
           style={{
-            width: '100%', padding: '11px 14px', fontSize: 15, fontWeight: 700,
+            width: '100%', padding: '14px 16px', fontSize: 18, fontWeight: 700,
             fontFamily: 'ui-monospace, Menlo, monospace',
             border: `2px solid ${clash ? '#dc2626' : (!format && trimmed ? '#dc2626' : (canSubmit ? '#15803d' : '#d4e0f5'))}`,
             borderRadius: 8, outline: 'none', color: '#0d1b3e',
             background: canSubmit ? '#f0fdf4' : '#fff',
+            letterSpacing: 1,
           }}
         />
-        {/* Live-validation hints */}
         {trimmed && !format && (
-          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>
-            Format galat — use <b>VE-YYYY-NNN</b> (e.g. <code>VE-2026-153</code>)
+          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 6 }}>
+            Format: <b>VE-YYYY-NNN</b> (e.g. <code>VE-2026-153</code>)
           </div>
         )}
         {trimmed && format && clash && (
-          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>
-            <b>{trimmed}</b> pehle se assigned hai: <b>{clientName(clash)}</b> — {destination(clash) || 'no destination'}. Pehle use free karo.
+          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 6 }}>
+            ✕ Already used by <b>{clientName(clash)}</b> — pick a different number
           </div>
         )}
         {trimmed && format && !clash && unchanged && (
-          <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4 }}>
-            Same as current — nothing to change.
+          <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 6 }}>
+            Same as current — change karo tab Save enable hoga
           </div>
         )}
         {canSubmit && (
-          <div style={{ fontSize: 11, color: '#15803d', marginTop: 4, fontWeight: 600 }}>
-            ✓ Available — Save karne par deal ka number update ho jaayega.
+          <div style={{ fontSize: 12, color: '#15803d', marginTop: 6, fontWeight: 700 }}>
+            ✓ Available — click Save
           </div>
         )}
-      </div>
-
-      <div style={{ fontSize: 11, color: '#6b7a99', background: '#f8fafd', padding: '8px 12px', borderRadius: 8, borderLeft: '3px solid #c9961a' }}>
-        <b style={{ color: '#0d1b3e' }}>Note:</b> Audit log mein ye change record ho jaayega (kis se kis mein, timestamp ke saath). Agar do deals ke numbers swap karne hain, pehle ek ko temporary number par le jao (e.g. VE-2026-999), fir dusre ko original pe move karo, phir pehle ko target par le jao.
       </div>
     </ModalShell>
   );
@@ -11676,14 +11658,27 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             <button className="v2-hero-btn" onClick={() => setModal('invoice')}>🧾 Invoice</button>
           </div>
         </div>
-        <div
-          className="v2-hero-dealnum"
-          onClick={() => setModal('editDealNumber')}
-          title="Deal number edit karo (regulatory correction — jab invoice already different ID pe issue ho chuki ho)"
-          style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-        >
-          {deal.dealNumber}
-          <span style={{ fontSize: 10, opacity: 0.5, fontWeight: 400 }}>✎</span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          <div className="v2-hero-dealnum">{deal.dealNumber}</div>
+          <button
+            onClick={() => setModal('editDealNumber')}
+            title="Deal number manually change karo (regulatory correction)"
+            style={{
+              background: 'linear-gradient(135deg, #c9961a, #f0c842)',
+              color: '#0d1b3e',
+              border: 'none',
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: 0.5,
+              padding: '5px 12px',
+              borderRadius: 999,
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(201,150,26,0.35)',
+              textTransform: 'uppercase',
+            }}
+          >
+            ✎ Edit ID
+          </button>
         </div>
         <h1 className="v2-hero-title">
           {destination(deal) ? `Trip to ${destination(deal)}` : 'Deal'}
