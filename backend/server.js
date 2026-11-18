@@ -196,6 +196,27 @@ const start = async () => {
     // UPDATE deal — FIX: was missing, every save created duplicate
     app.put("/api/leads/:id", authMiddleware, async (req, res) => {
       try {
+        // When the caller is changing the dealNumber (used for regulatory
+        // corrections — e.g. an invoice was issued against VE-2026-153 and
+        // the underlying deal has to match that number because GST rules
+        // don't allow re-issuing the invoice), enforce uniqueness: no two
+        // deals can carry the same dealNumber. Without this check a
+        // typo at the edit modal would create duplicates that break every
+        // Query-ID search downstream.
+        if (req.body.dealNumber) {
+          const newNum = String(req.body.dealNumber).trim();
+          if (newNum) {
+            const clash = await Lead.findOne({
+              dealNumber: newNum,
+              _id: { $ne: req.params.id },
+            });
+            if (clash) {
+              return res.status(409).json({
+                error: `Deal number ${newNum} is already used by another deal (${clash.contactName || clash.email || clash._id}). Free that deal first, or pick a different number.`,
+              });
+            }
+          }
+        }
         const lead = await Lead.findByIdAndUpdate(
           req.params.id,
           { ...req.body, updatedAt: new Date() },

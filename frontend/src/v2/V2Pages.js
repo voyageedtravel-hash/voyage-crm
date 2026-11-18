@@ -5188,6 +5188,131 @@ function LinkDestinationsModal({ deal, allLeads, onClose, onSaved }) {
   );
 }
 
+/* ─── EDIT DEAL NUMBER MODAL ─────────────────────────────────────
+   Used for REGULATORY CORRECTIONS. In India, once a GST invoice has
+   been issued against an invoice number (typically the deal number
+   with the VE- prefix stripped — so VE-2026-153 → invoice VE-INV-2026-
+   153), the invoice number can't be re-issued under a different ID
+   without triggering a cancellation flow. If the invoice was raised
+   BEFORE the deal was created in the CRM — or if the next-number
+   assignment happened out of order (say a duplicate deal was created
+   and deleted) — the deal's dealNumber has to be changed to match the
+   already-issued invoice so downstream search and reconciliation
+   continue to work.
+
+   This modal is the ONE place in the UI where deal numbers can be
+   edited. The backend (PUT /api/leads/:id) now enforces uniqueness,
+   so a conflict error surfaces here rather than silently creating
+   two deals with the same ID.                                       */
+function EditDealNumberModal({ deal, allLeads, onClose, onSaved }) {
+  const [newNum, setNewNum] = useState(deal.dealNumber || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Live validation state — shown INSIDE the modal (not as the error
+  // banner) so the person sees it before clicking Save.
+  const trimmed = newNum.trim();
+  const format = /^VE-\d{4}-\d{1,4}$/.test(trimmed);
+  const clash = useMemo(() => {
+    if (!trimmed || trimmed === deal.dealNumber) return null;
+    return (allLeads || []).find((l) => l._id !== deal._id && String(l.dealNumber || '').trim() === trimmed);
+  }, [trimmed, allLeads, deal]);
+  const unchanged = trimmed === (deal.dealNumber || '').trim();
+  const canSubmit = trimmed && format && !clash && !unchanged;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSaving(true); setErr('');
+    try {
+      // Fetch directly instead of using patchDeal() so we can read the
+      // backend's 409 Conflict message verbatim and show it to the user.
+      // patchDeal throws a generic "Server error 409" which isn't helpful.
+      const res = await fetch(`${apiBase()}/api/leads/${deal._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          dealNumber: trimmed,
+          auditLog: [...(deal.auditLog || []), logEntryStatic(`Deal number changed: ${deal.dealNumber || '(none)'} → ${trimmed}`)],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      window.veToast && window.veToast(`Deal number updated to ${trimmed} ✓`, 'success');
+      onSaved(data);
+    } catch (ex) {
+      setErr(ex.message || 'Could not update — check connection and try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="✎ Edit Deal Number" onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel="✓ Update">
+      <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 10, padding: '12px 14px', fontSize: 12, color: '#78350f', lineHeight: 1.55 }}>
+        <b>⚠ Regulatory correction only.</b> Deal number sirf tab change karo jab:
+        <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+          <li>Invoice already issue ho chuki hai doosre ID pe aur tum GST ke wajah se usey change nahi kar sakte</li>
+          <li>Ya duplicate deal delete karne ke baad numbering gap bana hai aur wo fix karna hai</li>
+        </ul>
+        <div style={{ marginTop: 6, fontStyle: 'italic' }}>Normal workflow mein deal number auto-assign hota hai — manually change karne ki zarurat nahi.</div>
+      </div>
+
+      <div>
+        <label style={{ display: 'block', fontSize: 11, color: '#6b7a99', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
+          Current Deal Number
+        </label>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#64748b', background: '#f1f5f9', padding: '10px 14px', borderRadius: 8, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+          {deal.dealNumber || '(none)'}
+        </div>
+      </div>
+
+      <div>
+        <label style={{ display: 'block', fontSize: 11, color: '#6b7a99', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
+          New Deal Number
+        </label>
+        <input
+          type="text"
+          value={newNum}
+          onChange={(e) => setNewNum(e.target.value.toUpperCase())}
+          placeholder="VE-2026-153"
+          autoFocus
+          style={{
+            width: '100%', padding: '11px 14px', fontSize: 15, fontWeight: 700,
+            fontFamily: 'ui-monospace, Menlo, monospace',
+            border: `2px solid ${clash ? '#dc2626' : (!format && trimmed ? '#dc2626' : (canSubmit ? '#15803d' : '#d4e0f5'))}`,
+            borderRadius: 8, outline: 'none', color: '#0d1b3e',
+            background: canSubmit ? '#f0fdf4' : '#fff',
+          }}
+        />
+        {/* Live-validation hints */}
+        {trimmed && !format && (
+          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>
+            Format galat — use <b>VE-YYYY-NNN</b> (e.g. <code>VE-2026-153</code>)
+          </div>
+        )}
+        {trimmed && format && clash && (
+          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>
+            <b>{trimmed}</b> pehle se assigned hai: <b>{clientName(clash)}</b> — {destination(clash) || 'no destination'}. Pehle use free karo.
+          </div>
+        )}
+        {trimmed && format && !clash && unchanged && (
+          <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4 }}>
+            Same as current — nothing to change.
+          </div>
+        )}
+        {canSubmit && (
+          <div style={{ fontSize: 11, color: '#15803d', marginTop: 4, fontWeight: 600 }}>
+            ✓ Available — Save karne par deal ka number update ho jaayega.
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: '#6b7a99', background: '#f8fafd', padding: '8px 12px', borderRadius: 8, borderLeft: '3px solid #c9961a' }}>
+        <b style={{ color: '#0d1b3e' }}>Note:</b> Audit log mein ye change record ho jaayega (kis se kis mein, timestamp ke saath). Agar do deals ke numbers swap karne hain, pehle ek ko temporary number par le jao (e.g. VE-2026-999), fir dusre ko original pe move karo, phir pehle ko target par le jao.
+      </div>
+    </ModalShell>
+  );
+}
+
 function LandVoucherAIModal({ deal, onClose }) {
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState(null); // {itinerary, meetingPoints, vendorTC, emergencyContact, pickupTimes}
@@ -11551,7 +11676,15 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
             <button className="v2-hero-btn" onClick={() => setModal('invoice')}>🧾 Invoice</button>
           </div>
         </div>
-        <div className="v2-hero-dealnum">{deal.dealNumber}</div>
+        <div
+          className="v2-hero-dealnum"
+          onClick={() => setModal('editDealNumber')}
+          title="Deal number edit karo (regulatory correction — jab invoice already different ID pe issue ho chuki ho)"
+          style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          {deal.dealNumber}
+          <span style={{ fontSize: 10, opacity: 0.5, fontWeight: 400 }}>✎</span>
+        </div>
         <h1 className="v2-hero-title">
           {destination(deal) ? `Trip to ${destination(deal)}` : 'Deal'}
         </h1>
@@ -12688,6 +12821,7 @@ Keep it under 200 words. Be specific with names, destination and amounts. Don't 
           {modal === 'cancellation' && <AddCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'dealCancellation' && <DealCancellationModal deal={deal} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'link' && <LinkDestinationsModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
+          {modal === 'editDealNumber' && <EditDealNumberModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onSaved={handleSaved} />}
           {modal === 'proposalBuilder' && <ProposalBuilderModal deal={deal} allLeads={allLeads} onClose={() => setModal(null)} onDealUpdated={(updated) => { setDeal(updated); onDealUpdated && onDealUpdated(updated); }} />}
           {callScriptOpen && (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.5)', zIndex: 250, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
