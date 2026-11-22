@@ -16881,9 +16881,473 @@ function UsersV2() {
   );
 }
 
+/* ─── LMS STUDENTS ADMIN PANEL ─────────────────────────────────
+   Manages the Voyage-Ed GDS training students who log in at
+   voyage-ed.com/lms.  Admin can:
+     - List / search / filter students
+     - Create a new student with a unique username + password
+     - Edit (change batch, reset password, suspend / reactivate)
+     - Delete (cascades to chat history)
+     - View any student's chat history with the AI tutor
+     - Upload / replace the QRG text that the AI reads from
+   The student-facing chat UI is NOT in the CRM — it's a separate
+   lightweight site at voyage-ed.com/lms so students don't need
+   access to any CRM data.                                         */
+function LMSStudentsV2() {
+  const [students, setStudents] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState(null);     // student being edited
+  const [viewingChats, setViewingChats] = useState(null);  // student whose chats are open
+  const [showQrg, setShowQrg] = useState(false);
+
+  const currentUser = (() => { try { return JSON.parse(localStorage.getItem('ve_user') || '{}'); } catch { return {}; } })();
+  const isAdmin = currentUser.role === 'admin';
+
+  const loadStudents = () => {
+    setLoading(true);
+    const url = `${apiBase()}/api/admin/lms/students${q ? '?q=' + encodeURIComponent(q) : ''}`;
+    fetch(url, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((data) => { setStudents(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  const loadStats = () => {
+    fetch(`${apiBase()}/api/admin/lms/stats`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d && setStats(d))
+      .catch(() => {});
+  };
+  useEffect(() => { loadStudents(); loadStats(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(loadStudents, 300); return () => clearTimeout(t); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const deleteStudent = async (s) => {
+    if (!window.confirm(`Delete ${s.name} (${s.username})? Chat history bhi delete ho jaayegi, undo nahi hoga.`)) return;
+    try {
+      const res = await fetch(`${apiBase()}/api/admin/lms/students/${s._id}`, { method: 'DELETE', headers: authHeaders() });
+      if (!res.ok) throw new Error('Delete failed');
+      window.veToast && window.veToast('Student deleted', 'success');
+      loadStudents(); loadStats();
+    } catch (e) {
+      window.veToast && window.veToast('Could not delete', 'warning');
+    }
+  };
+
+  const toggleStatus = async (s) => {
+    const newStatus = s.status === 'active' ? 'suspended' : 'active';
+    try {
+      const res = await fetch(`${apiBase()}/api/admin/lms/students/${s._id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error();
+      window.veToast && window.veToast(`Student ${newStatus === 'active' ? 'activated' : 'suspended'}`, 'success');
+      loadStudents();
+    } catch { window.veToast && window.veToast('Could not update', 'warning'); }
+  };
+
+  if (!isAdmin) {
+    return (
+      <main className="v2-page">
+        <div className="v2-page-header"><h1 className="v2-page-title">◉ GDS Students</h1></div>
+        <div style={{ padding: 40, textAlign: 'center', color: '#6b7a99' }}>
+          Only admins can manage LMS students. Vishal se access maango.
+        </div>
+      </main>
+    );
+  }
+
+  const copyLoginUrl = () => {
+    const url = 'https://voyage-ed.com/lms/login.html';
+    navigator.clipboard.writeText(url).then(() => window.veToast && window.veToast('Login URL copied ✓', 'success'));
+  };
+
+  return (
+    <main className="v2-page">
+      <div className="v2-page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="v2-page-title">◉ GDS Students</h1>
+          <p className="v2-page-sub">Manage Amadeus training students, their logins, and the AI tutor's QRG.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="v2-cta" onClick={copyLoginUrl} style={{ fontSize: 12, background: '#334e82' }} title="Student login URL copy karo — WhatsApp pe bhejne ke liye">🔗 Copy Login URL</button>
+          <button className="v2-cta" onClick={() => setShowQrg(true)} style={{ fontSize: 12, background: '#6b7a99' }}>📄 Manage QRG</button>
+          <button className="v2-cta" onClick={() => setShowNew(true)} style={{ fontSize: 12, background: 'linear-gradient(135deg,#c9961a,#f0c842)', color: '#0d1b3e', fontWeight: 800 }}>+ Add Student</button>
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      {stats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <StatCard label="Total Students" value={stats.totalStudents} accent="#0d1b3e" />
+          <StatCard label="Active" value={stats.activeStudents} accent="#15803d" />
+          <StatCard label="Total Chats" value={stats.totalChats} accent="#c9961a" />
+          <StatCard label="Today's Chats" value={stats.todayChats} accent="#334e82" />
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="v2-filter-bar" style={{ marginBottom: 14 }}>
+        <input
+          type="text"
+          className="v2-filter-search"
+          placeholder="Search by name, username, batch, college, email…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#6b7a99' }}>Loading students…</div>
+      ) : students.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#6b7a99' }}>
+          {q ? 'No students match that search.' : 'Abhi tak koi student add nahi kiya. "+ Add Student" se shuru karo.'}
+        </div>
+      ) : (
+        <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 4px 16px rgba(13,27,62,0.06)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#0d1b3e', color: '#fff' }}>
+                <th style={lmsThStyle}>USERNAME</th>
+                <th style={lmsThStyle}>NAME</th>
+                <th style={lmsThStyle}>BATCH / COLLEGE</th>
+                <th style={lmsThStyle}>LAST LOGIN</th>
+                <th style={{ ...lmsThStyle, textAlign: 'center' }}>CHATS</th>
+                <th style={{ ...lmsThStyle, textAlign: 'center' }}>STATUS</th>
+                <th style={{ ...lmsThStyle, textAlign: 'right' }}>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s, i) => (
+                <tr key={s._id} style={{ background: i % 2 ? '#fff' : '#f8fafd', borderBottom: '1px solid #f0f2f7' }}>
+                  <td style={lmsTdStyle}>
+                    <code style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontWeight: 700, color: '#0d1b3e' }}>{s.username}</code>
+                  </td>
+                  <td style={lmsTdStyle}>
+                    <div style={{ fontWeight: 600 }}>{s.name}</div>
+                    {s.email && <div style={{ fontSize: 11, color: '#8894b0' }}>{s.email}</div>}
+                  </td>
+                  <td style={lmsTdStyle}>
+                    <div>{s.batchName || '—'}</div>
+                    {s.college && <div style={{ fontSize: 11, color: '#8894b0' }}>{s.college}</div>}
+                  </td>
+                  <td style={lmsTdStyle}>
+                    {s.lastLoginAt
+                      ? <span title={new Date(s.lastLoginAt).toLocaleString('en-IN')}>{new Date(s.lastLoginAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                      : <span style={{ color: '#8894b0', fontStyle: 'italic' }}>Never</span>}
+                  </td>
+                  <td style={{ ...lmsTdStyle, textAlign: 'center', fontWeight: 700 }}>
+                    <button onClick={() => setViewingChats(s)} style={{ background: 'none', border: 'none', color: '#c9961a', fontWeight: 700, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }} title="View chat history">
+                      {s.chatCount || 0}
+                    </button>
+                  </td>
+                  <td style={{ ...lmsTdStyle, textAlign: 'center' }}>
+                    <button onClick={() => toggleStatus(s)} style={{
+                      background: s.status === 'active' ? '#d1fae5' : '#fee2e2',
+                      color: s.status === 'active' ? '#15803d' : '#b91c1c',
+                      border: 'none', padding: '4px 10px', borderRadius: 999, fontSize: 10,
+                      fontWeight: 800, cursor: 'pointer', letterSpacing: 0.5, textTransform: 'uppercase',
+                    }} title="Click to toggle">
+                      {s.status}
+                    </button>
+                  </td>
+                  <td style={{ ...lmsTdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => setEditing(s)} style={lmsBtnStyle('#334e82')}>✎ Edit</button>
+                    <button onClick={() => deleteStudent(s)} style={lmsBtnStyle('#b91c1c')}>✕ Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showNew && <LMSStudentFormModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); loadStudents(); loadStats(); }} />}
+      {editing && <LMSStudentFormModal student={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); loadStudents(); }} />}
+      {viewingChats && <LMSStudentChatsModal student={viewingChats} onClose={() => setViewingChats(null)} />}
+      {showQrg && <LMSQrgModal onClose={() => setShowQrg(false)} />}
+    </main>
+  );
+}
+
+const lmsThStyle = { padding: '12px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: 1 };
+const lmsTdStyle = { padding: '12px 14px', color: '#0d1b3e' };
+const lmsBtnStyle = (color) => ({
+  background: 'none', border: `1px solid ${color}40`, color,
+  padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+  cursor: 'pointer', marginLeft: 6, fontFamily: 'inherit',
+});
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 10, padding: '14px 16px', borderLeft: `3px solid ${accent}`, boxShadow: '0 2px 8px rgba(13,27,62,0.04)' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: '#6b7a99', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: '#0d1b3e', marginTop: 4, fontFamily: "'Playfair Display', serif" }}>{value}</div>
+    </div>
+  );
+}
+
+// ── Student create / edit modal ──────────────────────────────────
+function LMSStudentFormModal({ student, onClose, onSaved }) {
+  const isEdit = Boolean(student);
+  const [form, setForm] = useState({
+    username: student?.username || '',
+    password: '',  // only set when creating or resetting
+    name: student?.name || '',
+    email: student?.email || '',
+    phone: student?.phone || '',
+    batchName: student?.batchName || '',
+    college: student?.college || '',
+    course: student?.course || 'Amadeus GDS',
+    expiresOn: student?.expiresOn ? String(student.expiresOn).slice(0, 10) : '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const submit = async () => {
+    if (!form.username || !form.name) { setErr('Username aur name zaroori hai'); return; }
+    if (!isEdit && !form.password) { setErr('Password zaroori hai'); return; }
+    if (form.password && form.password.length < 6) { setErr('Password kam se kam 6 characters ka ho'); return; }
+    setSaving(true); setErr('');
+    try {
+      const body = { ...form };
+      if (!body.password) delete body.password;  // don't send empty password on edit
+      if (!body.expiresOn) delete body.expiresOn;
+      const url = isEdit ? `${apiBase()}/api/admin/lms/students/${student._id}` : `${apiBase()}/api/admin/lms/students`;
+      const res = await fetch(url, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      window.veToast && window.veToast(isEdit ? 'Student updated ✓' : 'Student created ✓', 'success');
+      onSaved();
+    } catch (e) {
+      setErr(e.message || 'Could not save');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title={isEdit ? `✎ Edit ${student.name}` : '+ Add Student'} onClose={onClose} onSubmit={submit} saving={saving} err={err} submitLabel={isEdit ? '✓ Update' : '+ Create'}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Username *" required>
+          <input type="text" value={form.username} onChange={set('username')} placeholder="ve-2027-001" style={lmsInput} autoFocus={!isEdit} />
+        </Field>
+        <Field label={isEdit ? 'New Password (leave blank to keep)' : 'Password *'}>
+          <input type="text" value={form.password} onChange={set('password')} placeholder={isEdit ? '••••••••' : 'min 6 chars'} style={lmsInput} />
+        </Field>
+      </div>
+      <Field label="Full Name *">
+        <input type="text" value={form.name} onChange={set('name')} placeholder="Student full name" style={lmsInput} />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Email">
+          <input type="email" value={form.email} onChange={set('email')} placeholder="student@example.com" style={lmsInput} />
+        </Field>
+        <Field label="Phone">
+          <input type="text" value={form.phone} onChange={set('phone')} placeholder="+91 ..." style={lmsInput} />
+        </Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Batch">
+          <input type="text" value={form.batchName} onChange={set('batchName')} placeholder="e.g. Jan-2027 Weekday" style={lmsInput} />
+        </Field>
+        <Field label="College / Institute">
+          <input type="text" value={form.college} onChange={set('college')} placeholder="Chandigarh University, etc." style={lmsInput} />
+        </Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Course">
+          <input type="text" value={form.course} onChange={set('course')} style={lmsInput} />
+        </Field>
+        <Field label="Access Expires On (optional)">
+          <input type="date" value={form.expiresOn} onChange={set('expiresOn')} style={lmsInput} />
+        </Field>
+      </div>
+      {isEdit && (
+        <div style={{ fontSize: 11, color: '#6b7a99', background: '#f8fafd', padding: '8px 12px', borderRadius: 6, borderLeft: '3px solid #c9961a' }}>
+          Password field blank chhodoge toh pehle wala password rahega. Reset karna hai toh naya password type karo.
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+const lmsInput = {
+  width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #d4e0f5',
+  borderRadius: 7, outline: 'none', color: '#0d1b3e', background: '#f8fafd',
+  fontFamily: 'inherit',
+};
+
+function Field({ label, children }) {
+  return (
+    <label style={{ display: 'block' }}>
+      <span style={{ display: 'block', fontSize: 10, color: '#6b7a99', fontWeight: 700, letterSpacing: 0.5, marginBottom: 4, textTransform: 'uppercase' }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ── View a student's chat history ────────────────────────────────
+function LMSStudentChatsModal({ student, onClose }) {
+  const [chats, setChats] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${apiBase()}/api/admin/lms/students/${student._id}/chats`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : [])
+      .then((d) => { setChats(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [student._id]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,35,80,.5)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 18, width: 720, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(15,35,80,.3)' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e8ecf5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600, color: '#0d1b3e', margin: 0 }}>💬 Chat History</h3>
+            <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4 }}>{student.name} · <code>{student.username}</code> · {chats.length} conversations</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6b7a99' }}>✕</button>
+        </div>
+        <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1 }}>
+          {loading ? (
+            <div style={{ padding: 30, textAlign: 'center', color: '#6b7a99' }}>Loading…</div>
+          ) : chats.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: '#6b7a99' }}>Abhi tak koi chat nahi — student ne login karke questions puche nahi hain.</div>
+          ) : chats.map((c) => (
+            <div key={c._id} style={{ marginBottom: 18, borderBottom: '1px dashed #e3eaf7', paddingBottom: 14 }}>
+              <div style={{ fontSize: 10, color: '#8894b0', fontWeight: 700, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
+                {new Date(c.createdAt).toLocaleString('en-IN')}
+                {c.helpful === 'yes' && <span style={{ marginLeft: 8, color: '#15803d' }}>👍 helpful</span>}
+                {c.helpful === 'no' && <span style={{ marginLeft: 8, color: '#b91c1c' }}>👎 not helpful</span>}
+              </div>
+              <div style={{ background: '#f0f4fb', padding: '10px 14px', borderRadius: 8, marginBottom: 8, fontSize: 13, color: '#0d1b3e' }}>
+                <b>Q:</b> {c.question}
+              </div>
+              <div style={{ background: '#fdf6e5', padding: '10px 14px', borderRadius: 8, fontSize: 13, color: '#0d1b3e', whiteSpace: 'pre-wrap', borderLeft: '3px solid #c9961a' }}>
+                <b>A:</b> {c.answer}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Manage QRG (upload/replace the Amadeus Quick Reference text) ──
+function LMSQrgModal({ onClose }) {
+  const [cfg, setCfg] = useState(null);
+  const [qrgText, setQrgText] = useState('');
+  const [qrgTitle, setQrgTitle] = useState('');
+  const [welcomeMsg, setWelcomeMsg] = useState('');
+  const [dailyLimit, setDailyLimit] = useState(50);
+  const [tutorModel, setTutorModel] = useState('claude-sonnet-4-6');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    fetch(`${apiBase()}/api/admin/lms/qrg`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (!d) return;
+        setCfg(d);
+        setQrgTitle(d.qrgTitle || '');
+        setWelcomeMsg(d.welcomeMsg || '');
+        setDailyLimit(d.dailyLimit || 50);
+        setTutorModel(d.tutorModel || 'claude-sonnet-4-6');
+      });
+  }, []);
+
+  const handleFile = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    // Read as plain text — the admin is expected to upload the text
+    // extracted from the PDF (via a service like pdftotext or an
+    // online converter).  We don't try to parse PDF in-browser.
+    const text = await f.text();
+    setQrgText(text);
+  };
+
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      const body = { qrgTitle, welcomeMsg, dailyLimit: Number(dailyLimit), tutorModel };
+      if (qrgText) body.qrgText = qrgText;
+      const res = await fetch(`${apiBase()}/api/admin/lms/qrg`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      window.veToast && window.veToast(`QRG saved — ${data.qrgTextLength.toLocaleString()} chars active`, 'success');
+      onClose();
+    } catch (e) {
+      setErr(e.message); setSaving(false);
+    }
+  };
+
+  const currentLen = cfg?.qrgTextLength || 0;
+  const hasQrg = currentLen > 100;
+
+  return (
+    <ModalShell title="📄 Manage Amadeus QRG" onClose={onClose} onSubmit={save} saving={saving} err={err} submitLabel="✓ Save">
+      <div style={{ background: hasQrg ? '#d1fae5' : '#fef3c7', border: `1px solid ${hasQrg ? '#86efac' : '#fcd34d'}`, borderRadius: 8, padding: '10px 14px', fontSize: 12, color: hasQrg ? '#065f46' : '#78350f' }}>
+        {hasQrg ? (
+          <><b>✓ QRG loaded:</b> {currentLen.toLocaleString()} characters active. Last updated {cfg?.qrgUpdatedAt ? new Date(cfg.qrgUpdatedAt).toLocaleString('en-IN') : 'never'}.</>
+        ) : (
+          <><b>⚠ No QRG uploaded yet.</b> Students ko AI tutor answer nahi de paayega jab tak QRG upload nahi hota. Niche se .txt file upload karo.</>
+        )}
+      </div>
+
+      <Field label="Upload New QRG (.txt file)">
+        <input type="file" accept=".txt,.md" onChange={handleFile} style={{ fontSize: 13, color: '#6b7a99' }} />
+        {qrgText && <div style={{ fontSize: 11, color: '#15803d', marginTop: 6 }}>✓ Ready to upload — {qrgText.length.toLocaleString()} characters. Click Save.</div>}
+        <div style={{ fontSize: 11, color: '#6b7a99', marginTop: 4 }}>
+          QRG PDF se text extract karke .txt mein save karo, phir upload. Quick way: PDF kholo → Ctrl+A → copy → paste into Notepad → save as qrg.txt
+        </div>
+      </Field>
+
+      <Field label="QRG Title (shown to students)">
+        <input type="text" value={qrgTitle} onChange={(e) => setQrgTitle(e.target.value)} style={lmsInput} />
+      </Field>
+
+      <Field label="Welcome Message (shown on chat screen)">
+        <textarea value={welcomeMsg} onChange={(e) => setWelcomeMsg(e.target.value)} rows={2} style={{ ...lmsInput, resize: 'vertical', minHeight: 60 }} />
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Daily Chat Limit (per student)">
+          <input type="number" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} min={5} max={500} style={lmsInput} />
+        </Field>
+        <Field label="AI Model">
+          <select value={tutorModel} onChange={(e) => setTutorModel(e.target.value)} style={lmsInput}>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (recommended — better technical Q&A)</option>
+            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (faster, cheaper)</option>
+          </select>
+        </Field>
+      </div>
+
+      {cfg?.qrgPreview && (
+        <Field label="Current QRG Preview (first 2 KB)">
+          <pre style={{ background: '#f8fafd', border: '1px solid #e3eaf7', borderRadius: 6, padding: 10, fontSize: 11, color: '#334155', maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, Menlo, monospace', margin: 0 }}>{cfg.qrgPreview}</pre>
+        </Field>
+      )}
+    </ModalShell>
+  );
+}
+
 /* ─── ROUTER ─────────────────────────────────────────── */
 
-const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'live', 'travelled', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'flyerstudio', 'users'];
+const ROUTABLE_V2_KEYS = ['dashboard', 'leads', 'deals', 'live', 'travelled', 'clients', 'proposals', 'vendors', 'visa', 'tasks', 'accounts', 'reports', 'flyerstudio', 'users', 'lmsStudents'];
 
 // ── Floating AI Assistant ────────────────────────────────────────────────
 // Ports V1's bottom-right chat widget: natural-language commands that either
@@ -17183,5 +17647,6 @@ export default function V2Pages() {
   if (route === 'reports') return wrap(<ReportsV2 leads={items} />);
   if (route === 'flyerstudio') return wrap(<FlyerStudioPage />);
   if (route === 'users') return wrap(<UsersV2 />);
+  if (route === 'lmsStudents') return wrap(<LMSStudentsV2 />);
   return wrap(<DashboardV2 leads={items} onDealClick={openDeal} onLeadCreated={refetch} />);
 }

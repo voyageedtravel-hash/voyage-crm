@@ -422,6 +422,346 @@ const start = async () => {
       } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
+    // ─── LMS — GDS STUDENT LEARNING PORTAL ────────────────────────────────────
+    // Separate auth namespace from CRM users: students use their own JWT
+    // signed with a different subject (sub="lms") so a student token can
+    // never be mistaken for a CRM admin token.  Admin-side (list, create,
+    // edit, delete, view-chats, QRG upload) rides the existing
+    // authMiddleware — any logged-in CRM user with role 'admin' can manage
+    // students.
+    const LMSStudent = require("./models/LMSStudent");
+    const LMSChat    = require("./models/LMSChat");
+    const LMSConfig  = require("./models/LMSConfig");
+    const bcryptLms  = require("bcrypt");
+
+    // Student-scoped auth.  Rejects CRM tokens (different sub) so a
+    // compromised student token can't accidentally read /api/leads.
+    const lmsAuth = (req, res, next) => {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (!token) return res.status(401).json({ error: "Login required" });
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.sub !== "lms") return res.status(401).json({ error: "Not a student token" });
+        req.student = decoded;
+        next();
+      } catch {
+        res.status(401).json({ error: "Session expired — please log in again" });
+      }
+    };
+
+    // Rate limits — students chat a lot more than CRM users search, and
+    // the full QRG is expensive to send per call, so we gate hard.
+    const lmsChatLimiter = makeRateLimiter(6);   // 6 chat calls per minute
+    const lmsLoginLimiter = makeRateLimiter(10); // 10 login attempts per minute
+
+    // Helper — fetch (and lazily create) the singleton LMSConfig doc so
+    // first-run doesn't blow up before the admin has uploaded a QRG.
+    async function getLmsConfig() {
+      let cfg = await LMSConfig.findById("default");
+      if (!cfg) cfg = await LMSConfig.create({ _id: "default" });
+      return cfg;
+    }
+
+    // ── Student endpoints ──
+    app.post("/api/lms/login", lmsLoginLimiter, async (req, res) => {
+      try {
+        const { username, password } = req.body || {};
+        if (!username || !password) return res.status(400).json({ error: "Username aur password dono bharna zaroori hai" });
+        const student = await LMSStudent.findOne({ username: String(username).toLowerCase().trim() });
+        if (!student) return res.status(401).json({ error: "Galat username ya password" });
+        if (student.status !== "active") return res.status(403).json({ error: "Account suspended hai. Trainer se baat karo." });
+        if (student.expiresOn && student.expiresOn < new Date()) {
+          return res.status(403).json({ error: "Access period khatam ho gaya. Trainer se renew karwao." });
+        }
+        const ok = await bcryptLms.compare(password, student.password);
+        if (!ok) return res.status(401).json({ error: "Galat username ya password" });
+        student.lastLoginAt = new Date();
+        student.loginCount = (student.loginCount || 0) + 1;
+        await student.save();
+        const token = jwt.sign({ sub: "lms", id: student._id.toString(), username: student.username }, JWT_SECRET, { expiresIn: "30d" });
+        res.json({
+          token,
+          student: {
+            id: student._id, name: student.name, username: student.username,
+            batchName: student.batchName, course: student.course,
+          },
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.get("/api/lms/me", lmsAuth, async (req, res) => {
+      try {
+        const s = await LMSStudent.findById(req.student.id, "-password");
+        if (!s) return res.status(404).json({ error: "Account not found" });
+        const cfg = await getLmsConfig();
+        res.json({
+          student: s,
+          welcomeMsg: cfg.welcomeMsg,
+          qrgTitle: cfg.qrgTitle,
+          qrgReady: Boolean(cfg.qrgText && cfg.qrgText.length > 100),
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Student asks the AI tutor a question.  Uses Anthropic directly
+    // (not the public /api/chat proxy) because:
+    //  - we need the FULL QRG in the system prompt (can be 300 KB+),
+    //    which exceeds the 6000-char cap on /api/chat
+    //  - we want per-student rate limiting + logging, not per-IP
+    //  - we want to log the Q&A to LMSChat for history and audit
+    app.post("/api/lms/chat", lmsAuth, lmsChatLimiter, async (req, res) => {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "AI tutor abhi configure nahi hua — admin ko batao" });
+      const question = String(req.body.question || "").trim();
+      if (!question) return res.status(400).json({ error: "Question khali hai" });
+      if (question.length > 2000) return res.status(400).json({ error: "Question bahut lamba hai — 2000 characters tak chalega" });
+
+      try {
+        const cfg = await getLmsConfig();
+        if (!cfg.qrgText || cfg.qrgText.length < 100) {
+          return res.status(503).json({ error: "QRG abhi upload nahi hua — admin ko batao" });
+        }
+
+        // Per-student daily cap — stops a single student burning the
+        // whole Anthropic quota in one sitting.
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayCount = await LMSChat.countDocuments({ studentId: req.student.id, createdAt: { $gte: todayStart } });
+        if (todayCount >= (cfg.dailyLimit || 50)) {
+          return res.status(429).json({ error: `Aaj ka daily limit (${cfg.dailyLimit}) pura ho gaya. Kal se phir try karo.` });
+        }
+
+        // System prompt pins the AI to the QRG and to the student's
+        // level — very important: students must not be given answers
+        // outside the QRG scope because they'll get marked wrong on
+        // Amadeus exams for "features" that don't exist in the course.
+        const systemPrompt = `You are the official Amadeus GDS AI Tutor for Voyage-Ed Travels' GDS training students.
+
+ROLE: Teach from the attached Quick Reference Guide (QRG) ONLY. If a question falls outside the QRG, tell the student honestly: "Ye topic QRG mein cover nahi hua hai — apne trainer Vishal Sir ya Sahitya Sir se puch lo."
+
+LANGUAGE: Match the student's language. They write in Hindi, English, or Hinglish — reply in the same mix. Keep it natural, conversational, like a patient senior at the training institute. Use "tum"/"aap" consistently per the student's tone.
+
+TEACHING STYLE:
+  - Give the EXACT Amadeus command (cryptic entry) when relevant, in its exact format
+  - Follow with a 1-2 line plain-language explanation of what each piece does
+  - Give a worked EXAMPLE with real codes (DEL, BOM, JFK, AI, EK etc.)
+  - If multiple commands do similar things, list them in a short table
+  - Keep answers tight — students are referring to this between practice sessions
+  - Use markdown sparingly: backticks for commands, **bold** for key terms, short bullets
+
+NEVER:
+  - Invent commands not in the QRG
+  - Give answers for Sabre, Galileo, or Worldspan (different GDS)
+  - Encourage test cheating ("here's the exam answer")
+
+The QRG content follows. Treat it as your single source of truth.
+
+────────────── QRG: ${cfg.qrgTitle} ──────────────
+
+${cfg.qrgText}
+
+────────────── END OF QRG ──────────────`;
+
+        const startedAt = Date.now();
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: cfg.tutorModel || "claude-sonnet-4-6",
+            max_tokens: 1500,
+            system: systemPrompt,
+            messages: [{ role: "user", content: question }],
+          }),
+        });
+        const data = await r.json();
+        const latencyMs = Date.now() - startedAt;
+        if (!r.ok) {
+          return res.status(r.status).json({ error: data.error?.message || "AI call failed" });
+        }
+        const answer = (data.content || []).map(c => c.text || "").join("").trim();
+        if (!answer) return res.status(500).json({ error: "AI ne khaali jawab diya — phir se try karo" });
+
+        // Log the Q&A.  Fire-and-forget — don't block the response if DB is slow.
+        LMSChat.create({
+          studentId: req.student.id,
+          username: req.student.username,
+          question, answer,
+          model: cfg.tutorModel || "claude-sonnet-4-6",
+          latencyMs,
+        }).catch(e => console.error("LMSChat log failed:", e.message));
+        LMSStudent.findByIdAndUpdate(req.student.id, { $inc: { chatCount: 1 } }).catch(() => {});
+
+        res.json({ answer, latencyMs, dailyUsed: todayCount + 1, dailyLimit: cfg.dailyLimit || 50 });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.get("/api/lms/chats", lmsAuth, async (req, res) => {
+      try {
+        const limit = Math.min(Number(req.query.limit) || 50, 200);
+        const chats = await LMSChat.find({ studentId: req.student.id }).sort({ createdAt: -1 }).limit(limit);
+        res.json(chats);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Student marks an answer helpful / unhelpful — gives Vishal signal
+    // on where the AI is getting things wrong.
+    app.patch("/api/lms/chats/:id/feedback", lmsAuth, async (req, res) => {
+      try {
+        const { helpful } = req.body || {};
+        if (!["yes", "no", ""].includes(helpful)) return res.status(400).json({ error: "Invalid feedback" });
+        const chat = await LMSChat.findOneAndUpdate(
+          { _id: req.params.id, studentId: req.student.id },  // scoped to this student only
+          { helpful },
+          { new: true }
+        );
+        if (!chat) return res.status(404).json({ error: "Not found" });
+        res.json({ ok: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // ── Admin endpoints (CRM-side management) ──
+    // All of these use authMiddleware and gate on role === 'admin'.
+    const requireAdmin = (req, res, next) => {
+      if (req.user?.role !== "admin") return res.status(403).json({ error: "Only admin can manage students" });
+      next();
+    };
+
+    app.get("/api/admin/lms/students", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const q = String(req.query.q || "").trim().toLowerCase();
+        const filter = q ? {
+          $or: [
+            { username: { $regex: q, $options: "i" } },
+            { name: { $regex: q, $options: "i" } },
+            { email: { $regex: q, $options: "i" } },
+            { batchName: { $regex: q, $options: "i" } },
+            { college: { $regex: q, $options: "i" } },
+          ]
+        } : {};
+        const students = await LMSStudent.find(filter, "-password").sort({ createdAt: -1 }).limit(500);
+        res.json(students);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.post("/api/admin/lms/students", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const { username, password, name, email, phone, batchName, college, course, expiresOn } = req.body || {};
+        if (!username || !password || !name) return res.status(400).json({ error: "Username, password aur name zaroori hai" });
+        if (password.length < 6) return res.status(400).json({ error: "Password kam se kam 6 characters ka ho" });
+        const uname = String(username).toLowerCase().trim();
+        const existing = await LMSStudent.findOne({ username: uname });
+        if (existing) return res.status(409).json({ error: `Username '${uname}' already taken` });
+        const hashed = await bcryptLms.hash(password, 10);
+        const student = await LMSStudent.create({
+          username: uname, password: hashed, name: name.trim(),
+          email: (email || "").trim(), phone: (phone || "").trim(),
+          batchName: (batchName || "").trim(), college: (college || "").trim(),
+          course: (course || "Amadeus GDS").trim(),
+          expiresOn: expiresOn || undefined,
+          createdBy: req.user.email || "",
+        });
+        const out = student.toObject(); delete out.password;
+        res.json({ success: true, student: out });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.patch("/api/admin/lms/students/:id", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const patch = { ...req.body };
+        delete patch._id; delete patch.chatCount; delete patch.loginCount;
+        // If a new password is provided, hash it; otherwise leave password untouched.
+        if (patch.password) {
+          if (patch.password.length < 6) return res.status(400).json({ error: "Password kam se kam 6 characters ka ho" });
+          patch.password = await bcryptLms.hash(patch.password, 10);
+        } else {
+          delete patch.password;
+        }
+        if (patch.username) {
+          patch.username = String(patch.username).toLowerCase().trim();
+          const clash = await LMSStudent.findOne({ username: patch.username, _id: { $ne: req.params.id } });
+          if (clash) return res.status(409).json({ error: `Username '${patch.username}' already taken` });
+        }
+        const student = await LMSStudent.findByIdAndUpdate(req.params.id, patch, { new: true, select: "-password" });
+        if (!student) return res.status(404).json({ error: "Student not found" });
+        res.json({ success: true, student });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.delete("/api/admin/lms/students/:id", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        await LMSStudent.findByIdAndDelete(req.params.id);
+        // Also wipe chat history so GDPR-style requests are honoured.
+        await LMSChat.deleteMany({ studentId: req.params.id });
+        res.json({ success: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.get("/api/admin/lms/students/:id/chats", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const chats = await LMSChat.find({ studentId: req.params.id }).sort({ createdAt: -1 }).limit(500);
+        res.json(chats);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // QRG management — one GET (read current), one PUT (replace).
+    // The QRG is held as plain text in LMSConfig; admin uploads the
+    // extracted text from the PDF.  Extraction happens client-side
+    // (or in the CRM) to keep the backend simple — this endpoint just
+    // takes text in and stores it.
+    app.get("/api/admin/lms/qrg", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const cfg = await getLmsConfig();
+        res.json({
+          qrgTitle: cfg.qrgTitle,
+          qrgTextLength: (cfg.qrgText || "").length,
+          qrgUpdatedAt: cfg.qrgUpdatedAt,
+          qrgUpdatedBy: cfg.qrgUpdatedBy,
+          welcomeMsg: cfg.welcomeMsg,
+          tutorModel: cfg.tutorModel,
+          dailyLimit: cfg.dailyLimit,
+          // Return a preview only so the response isn't massive.
+          qrgPreview: (cfg.qrgText || "").slice(0, 2000),
+        });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.put("/api/admin/lms/qrg", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const { qrgText, qrgTitle, welcomeMsg, tutorModel, dailyLimit } = req.body || {};
+        const cfg = await getLmsConfig();
+        if (typeof qrgText === "string") {
+          cfg.qrgText = qrgText;
+          cfg.qrgUpdatedAt = new Date();
+          cfg.qrgUpdatedBy = req.user.email || "";
+        }
+        if (typeof qrgTitle === "string") cfg.qrgTitle = qrgTitle;
+        if (typeof welcomeMsg === "string") cfg.welcomeMsg = welcomeMsg;
+        if (typeof tutorModel === "string") cfg.tutorModel = tutorModel;
+        if (typeof dailyLimit === "number") cfg.dailyLimit = dailyLimit;
+        await cfg.save();
+        res.json({ success: true, qrgTextLength: cfg.qrgText.length });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Admin dashboard counters — one call gives Vishal everything the
+    // panel needs to show at a glance.
+    app.get("/api/admin/lms/stats", authMiddleware, requireAdmin, async (req, res) => {
+      try {
+        const [totalStudents, activeStudents, totalChats, todayChats] = await Promise.all([
+          LMSStudent.countDocuments(),
+          LMSStudent.countDocuments({ status: "active" }),
+          LMSChat.countDocuments(),
+          LMSChat.countDocuments({ createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } }),
+        ]);
+        res.json({ totalStudents, activeStudents, totalChats, todayChats });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
     // ─── AI CHAT PROXY ────────────────────────────────────────────────────────
     // ── /api/chat hardening: open-proxy abuse band ──
     const chatLimiter = makeRateLimiter(5);              // 5/min per IP

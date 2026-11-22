@@ -58,6 +58,10 @@ const NAV_SECTIONS = [
     title: 'Admin',
     items: [
       { key: 'users', label: 'Team Members', icon: '◍', match: /team|user/i },
+      // GDS Students — the Voyage-Ed on-campus Amadeus training vertical.
+      // Admins manage LMS logins + the AI tutor's QRG from here.  The
+      // student-facing chat lives on voyage-ed.com/lms, not inside the CRM.
+      { key: 'lmsStudents', label: 'GDS Students', icon: '◉', match: /gds|lms|student/i },
     ],
   },
 ];
@@ -132,7 +136,7 @@ function Sidebar() {
         dashboard: 'dashboard', leads: 'leads', deals: 'deals',
         live: 'live', travelled: 'travelled',
         clients: 'clients', proposals: 'proposals', vendors: 'vendors',
-        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', flyerstudio: 'flyerstudio', users: 'users',
+        visa: 'visa', tasks: 'tasks', accounts: 'accounts', reports: 'reports', flyerstudio: 'flyerstudio', users: 'users', lmsStudents: 'lmsStudents',
       };
       if (v2Routable[key]) {
         // Primary path: direct imperative call, no event/listener race possible.
