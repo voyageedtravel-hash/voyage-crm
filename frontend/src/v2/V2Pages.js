@@ -5678,19 +5678,8 @@ function buildInvoiceHTML(deal, billing, isProforma) {
         <span>Subtotal${gstRate > 0 ? (gstBasis === 'inclusive' ? ' (incl. GST)' : ' (ex. GST)') : ''}</span><span style="font-weight:600;color:#0d1b3e">₹${subtotal.toLocaleString('en-IN')}</span>
       </div>
       ${gstRate > 0 ? `
-        <div style="padding:6px 0;font-size:10.5px;color:#8894b0;font-style:italic">${gstBasis === 'inclusive' ? 'Of which the following GST is included:' : 'Add GST:'}</div>
-      ` : ''}
-      ${gstRate > 0 && gstType === 'intra' ? `
-        <div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;font-size:12px;color:#5a6b8c">
-          <span>CGST @ ${gstRate / 2}%${gstMarginLabel}</span><span>₹${cgstAmount.toLocaleString('en-IN')}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;font-size:12px;color:#5a6b8c">
-          <span>SGST @ ${gstRate / 2}%${gstMarginLabel}</span><span>₹${sgstAmount.toLocaleString('en-IN')}</span>
-        </div>
-      ` : ''}
-      ${gstRate > 0 && gstType === 'inter' ? `
-        <div style="display:flex;justify-content:space-between;padding:5px 0 5px 12px;font-size:12px;color:#5a6b8c">
-          <span>IGST @ ${gstRate}%${gstMarginLabel}</span><span>₹${gstAmount.toLocaleString('en-IN')}</span>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:12.5px;color:#5a6b8c">
+          <span>GST</span><span style="font-weight:600;color:#0d1b3e">₹${gstAmount.toLocaleString('en-IN')}</span>
         </div>
       ` : ''}
       ${gstRate === 0 ? `
@@ -6117,22 +6106,10 @@ function InvoiceModal({ deal, onClose }) {
                   </div>
                 </div>
               )}
-              {gstRate > 0 && gstType === 'intra' && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 3 }}>
-                    <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} CGST @ {gstRate / 2}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
-                    <span>{fmtINR(Math.round(gstAmount / 2))}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                    <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} SGST @ {gstRate / 2}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
-                    <span>{fmtINR(gstAmount - Math.round(gstAmount / 2))}</span>
-                  </div>
-                </>
-              )}
-              {gstRate > 0 && gstType === 'inter' && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#5a6b8c', marginBottom: 4 }}>
-                  <span>&nbsp;&nbsp;{gstBasis === 'inclusive' ? '↳' : '+'} IGST @ {gstRate}% ({gstBasis === 'inclusive' ? 'within' : 'added'})</span>
-                  <span>{fmtINR(gstAmount)}</span>
+              {gstRate > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#5a6b8c', marginBottom: 4 }}>
+                  <span>GST</span>
+                  <span style={{ fontWeight: 600, color: '#0d1b3e' }}>{fmtINR(gstAmount)}</span>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, fontWeight: 800, color: '#0d1b3e', borderTop: '1px solid #0d1b3e', paddingTop: 6, marginTop: 4 }}>
