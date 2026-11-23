@@ -5768,6 +5768,13 @@ function InvoiceModal({ deal, onClose }) {
   const defaultItems = useMemo(() => buildInvoiceItemsV2(deal), [deal]);
   const [pricingMode, setPricingMode] = useState('components'); // 'components' | 'total'
   const [componentAmounts, setComponentAmounts] = useState(() => defaultItems.map((i) => String(i.amount || '')));
+  // Per-row description and sub-line (date / reference) are now editable
+  // too — so Vishal can override 'Air India — DEL → IXC' or 'Rail Travel'
+  // to anything he wants for a one-off invoice without touching the
+  // deal's stored vendor data. Default-seeded from the auto-generated
+  // items; stays in sync with the array as items are added/removed.
+  const [componentDescs, setComponentDescs] = useState(() => defaultItems.map((i) => i.desc || ''));
+  const [componentSubs, setComponentSubs] = useState(() => defaultItems.map((i) => i.sub || ''));
   const [totalDesc, setTotalDesc] = useState(() => `${destination(deal) || 'Travel'} Package — ${deal.travelDates || ''}`.trim());
   const [totalAmount, setTotalAmount] = useState(() => String(sellINR(deal) || ''));
 
@@ -5867,7 +5874,15 @@ function InvoiceModal({ deal, onClose }) {
   const generate = (isProforma) => {
     const customItems = pricingMode === 'total'
       ? [{ desc: totalDesc || 'Package Cost', sub: `${(Number(deal.adults) || 0) + (Number(deal.children) || 0)} pax`, amount: Number(totalAmount) || 0 }]
-      : defaultItems.map((i, idx) => ({ desc: i.desc, sub: i.sub, paxCount: i.paxCount, amount: Number(componentAmounts[idx]) || 0 }));
+      // Per-item: use the user's edited desc/sub if provided, else fall
+      // back to the auto-generated default. Empty descriptions are
+      // preserved (user may have intentionally blanked a sub line).
+      : defaultItems.map((i, idx) => ({
+          desc: componentDescs[idx] !== undefined ? componentDescs[idx] : i.desc,
+          sub: componentSubs[idx] !== undefined ? componentSubs[idx] : i.sub,
+          paxCount: i.paxCount,
+          amount: Number(componentAmounts[idx]) || 0,
+        }));
     const w = window.open('', '_blank');
     if (!w) { window.veToast && window.veToast('Popup blocked', 'warning'); return; }
     try { w.document.write(buildInvoiceHTML(deal, { ...billing, customItems, gstRate, gstType, cp: cpNum, gstBasis }, isProforma)); w.document.close(); }
@@ -5960,22 +5975,52 @@ function InvoiceModal({ deal, onClose }) {
             </div>
           ) : (
             <div style={{ background: '#f9fafc', border: '1px solid #e8ecf5', borderRadius: 10, padding: '10px 12px' }}>
-              <div style={{ fontSize: 10.5, color: '#6b7a99', marginBottom: 8 }}>Editing here only changes what shows on THIS invoice — it doesn't touch the deal's actual selling prices.</div>
+              <div style={{ fontSize: 10.5, color: '#6b7a99', marginBottom: 8 }}>
+                Click any description, date, or amount to edit it. Changes apply to THIS invoice only — nothing on the deal itself is touched.
+              </div>
               {defaultItems.length === 0 ? (
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>No components found on this deal yet.</div>
               ) : (
                 <>
                   {defaultItems.map((item, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px dashed #e3eaf7' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#0d1b3e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.desc}</div>
-                        {item.sub && <div style={{ fontSize: 10, color: '#94a3b8' }}>{item.sub}</div>}
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px dashed #e3eaf7' }}>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {/* Description — fully editable; borderless text input styled to read like a label until the user clicks in */}
+                        <input
+                          type="text"
+                          value={componentDescs[idx] !== undefined ? componentDescs[idx] : item.desc}
+                          onChange={(e) => setComponentDescs((arr) => arr.map((v, i) => i === idx ? e.target.value : v))}
+                          placeholder="Description"
+                          style={{
+                            width: '100%', border: '1px solid transparent', borderRadius: 5,
+                            padding: '3px 6px', fontSize: 12, fontWeight: 600, color: '#0d1b3e',
+                            background: 'transparent', outline: 'none', fontFamily: 'inherit',
+                            transition: 'all 0.12s',
+                          }}
+                          onFocus={(e) => { e.target.style.border = '1px solid #c9961a'; e.target.style.background = '#fff'; }}
+                          onBlur={(e) => { e.target.style.border = '1px solid transparent'; e.target.style.background = 'transparent'; }}
+                        />
+                        {/* Sub-line (date/reference) — also editable */}
+                        <input
+                          type="text"
+                          value={componentSubs[idx] !== undefined ? componentSubs[idx] : item.sub}
+                          onChange={(e) => setComponentSubs((arr) => arr.map((v, i) => i === idx ? e.target.value : v))}
+                          placeholder="Date / sub-line (optional)"
+                          style={{
+                            width: '100%', border: '1px solid transparent', borderRadius: 5,
+                            padding: '2px 6px', fontSize: 10.5, color: '#94a3b8',
+                            background: 'transparent', outline: 'none', fontFamily: 'inherit',
+                            transition: 'all 0.12s',
+                          }}
+                          onFocus={(e) => { e.target.style.border = '1px solid #c9961a'; e.target.style.background = '#fff'; e.target.style.color = '#0d1b3e'; }}
+                          onBlur={(e) => { e.target.style.border = '1px solid transparent'; e.target.style.background = 'transparent'; e.target.style.color = '#94a3b8'; }}
+                        />
                       </div>
                       <input
                         type="number"
                         value={componentAmounts[idx]}
                         onChange={(e) => setComponentAmounts((arr) => arr.map((v, i) => i === idx ? e.target.value : v))}
-                        style={{ width: 110, border: '1px solid #d4e0f5', borderRadius: 7, padding: '6px 8px', fontSize: 12, textAlign: 'right', outline: 'none' }}
+                        style={{ width: 110, border: '1px solid #d4e0f5', borderRadius: 7, padding: '6px 8px', fontSize: 12, textAlign: 'right', outline: 'none', marginTop: 2 }}
                       />
                     </div>
                   ))}
