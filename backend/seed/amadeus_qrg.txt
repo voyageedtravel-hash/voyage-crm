@@ -1,0 +1,1631 @@
+Quick Reference Guide
+         Trianing and Support
+                     ADVANTAGE                           1
+
+
+
+CONTENTS
+SIGN IN & SIGN OUT 		 5
+AIS PAGES		 5
+OFFICE BRIEFING PAGE		 6
+HELP		6
+TIMATIC		6
+CRYPTIC COMMANDS		 6
+ENCODE/DECODE		7
+DATE AND TIME CONVERSIONS		 7
+MATHEMATICAL CALCULATIONS		 8
+AVAILABILITY		8
+SCROLLING ENTRIES		 9
+DUAL CITY PAIR AVAILABILITY		 9
+SCROLLING IN DUAL CITY PAIR AVAILABILITY		 9
+DIRECT ACCESS		 9
+TIME TABLE ENTRIES		 9
+SCHEDULE ENTRIES                                        10
+AVAILABILITY CHANGE ENTRIES                             10
+EXPLANATION OF AMADEUS ACCESS LEVELS...                 10
+STATUS CODE SEEN AT SELL TIME                           12
+FLIGHT INFORMATION                                      12
+MINIMUM CONNECTING TIME                                 12
+DISPLAY CONNECTION POINTS                               13
+SEGMENT SELL                                            13
+MANDATORY PNR ELEMENTS                                  14
+NAME ELEMENT                                            14
+PHONE FIELD                                             14
+TICKETING ARRANGEMENT                                   14
+
+
+                                          GPROT05/JAN14/VER7
+                      ADVANTAGE                                2
+
+
+
+REFERENCE                                                     15
+END TRANSACTION                                               15
+OPTIONAL ELEMENTS                                             15
+OTHER SERVICE INFORMATION                                     15
+SPECIAL SERVICE REQUEST                                       16
+APIS TRAVEL DETAILS                                           16
+APIS PASSPORT INFORMATION WITH PARTIAL DATA                   17
+APIS VISA INFORMATION                                         17
+APIS ADDRESS INFORMATION                                      18
+ADVANCE SEATING THROUGH SEAT MAP                              18
+OPEN SEGMENT                                                  18
+INFORMATION SEGMENT                                           18
+GHOST SEGMENT                                                 18
+FREQUENT FLYER NUMBER                                         19
+EXTENDED SECURITY                                             19
+TICKET NUMBER TRANSMISSION                                    19
+WORKFLOW TO CREATE TICKETLESS AIRLINE BOOKING                 20
+PRICING ENTRIES                                               20
+POINTS TO REMEMBER                                            20
+PNR RETRIEVAL & DISPLAY                                       21
+PNR CLAIM                                                     22
+PNR MODIFICATIONS                                             22
+PNR AND ITINERARY PRINTING                                    22
+SPLIT BOOKINGS                                                23
+HANDLING NON HOMOGENEOUS PNR CONDITION                        23
+COPY PNR                                                      23
+PNR HISTORY                                                   24
+PNR RECALL ENTRIES                                            24
+MULTI LIST-SEARCH BY FLIGHT                                   24
+
+                                                GPROT05/JAN14/VER7
+                       ADVANTAGE                                   3
+
+
+
+SEARCH BY OFFICE                                                  25
+QUEUES                                                            25
+SEND FREE FLOW TEXT MESSAGE                                       25
+QUEUE NICKNAMES                                                   26
+QUEUE SORTATION                                                   26
+QUEUE VIEW                                                        26
+QUEUE PLANNER                                                     26
+QUEUE MONITOR                                                     26
+AMADEUS E MAIL                                                    27
+E MAIL STATS                                                      27
+FARES                                                             28
+FARE QUOTE RATE OF EXCHANGE                                       28
+FARE QUOTE EXCESS BAGGAGE                                         28
+CREDIT CARD APPROVAL                                              28
+FARE QUOTE CURRENCY                                               28
+FARE QUOTE DISPLAY                                                28
+HISTORICAL FARES                                                  29
+FARE DISPLAY FOR INDIAN AIRLINES’ CORPORATE FARES                 29
+FARE QUOTE DISPLAY CHANGE ENTRIES                                 29
+FARE QUOTE NOTES                                                  30
+FARE QUOTE BOOKING CLASS                                          30
+FARE QUOTE ROUTING                                                30
+FARE QUOTE PRICING                                                30
+FARE QUOTE MILEAGE                                                31
+ITINERARY PRICING                                                 31
+FARE DIAGNOSTIC                                                   32
+BEST PRICER                                                       32
+HOTELS                                                            32
+ACCESS LEVEL                                                      32
+
+                                                    GPROT05/JAN14/VER7
+                     ADVANTAGE                                                   4
+
+
+
+BEST AVAILABLE RATE (BAR) GUARANTEE                                             33
+HOTEL AIS AND HELP PAGES                                                        33
+HOTEL LIST DISPLAY                                                              33
+HOTEL AVAILABILITY                                                              34
+MOVE TO HOTEL SINGLE COMPANY DISPLAY FOR LINE 3 OF AVAILABILITY                 35
+SCROLLING ENTRIES                                                               35
+HOTEL SELL                                                                      35
+HOTEL FEATURES                                                                  35
+HOTEL POLICY INFORMATION                                                        36
+HOTEL PRICING                                                                   36
+HOTEL RATE CHANGE                                                               36
+HOTEL TERMS                                                                     36
+HOTEL POINTS OF REFERENCE                                                       37
+HOTEL MODIFICATIONS / CANCELLATION                                              37
+CARS                                                                            38
+ACCESS LEVELS DESCRIPTION                                                       38
+CAR LIST DISPLAY                                                                38
+CAR AVAILABILITY DISPLAY                                                        39
+CAR RATE FEATURES, CAR TERMS                                                    39
+CAR SCROLLING ENTRIES                                                           39
+CAR SELL                                                                        39
+CAR MODIFICATIONS                                                               40
+CUSTOMER PROFILE                                                                40
+AMADEUS SITES                                                                   42
+LIVE CHAT                                                                       42
+AMADEUS LEARNING CITY                                                           42
+GENERAL DOS AND DONTS FOR RESERVATIONS                                          42
+
+
+
+
+                                                                  GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                 5
+VISIT AMADEUS ONLINE LEARNING AT www.alc.amadeus.com
+
+
+
+
+ SIGN IN & SIGN OUT                                    HE SIGN
+ SIGN IN TO ONE WORK AREA                              JI 1234AA/AS
+ SIGN IN TO ONE WORK AREA WITH PASSWORD                JI 1234 AA/AS-PASSWORD
+ PROTECTION
+ SIGN IN TO ALL WORK AREAS                             JI*1234AA/AS
+ SIGN IN TO ANOTHER WORK AREA “C”                      JXC
+ JUMP MOVE TO WORK AREA “B”                            JMB
+ JUMP DISPLAY                                          JD
+ REDISPLAY SIGN MESSAGE FOR THE DAY                    JB
+ JUMP OUT FROM CURRENT AREA/ALL SIGNED AREAS/          JO / JO* / JOC
+ PARTICULAR WORK AREA
+ SIGN OUT OF SPECIFIC WORK AREA                        JOB
+ AIS PAGES                                             HE AIS
+ VIEW AIS MAIN MENU                                    GG AIS
+ PRODUCT ANNOUNCEMENTS IN AMADEUS                      GG NEWS
+ INFORMATION ON AN AIRLINE, FOR EX, UL                 GG AIR UL
+ AIRLINE LOCAL CONTACT NUMBERS                         GG AMA IN LCL
+ USEFUL INFORMATION PAGES WITH I N AMADEUS             GG AMA IN USE
+ INFORMATION ON A PARTICULAR COUNTRY                   GG COU FR
+ INFORMATION ON A SPECIFIC AIRPORT                     GG APT NRT
+ INFORMATION ABOUT THE CONTACT NUMBERS OF GG AIR LH GB 6 (GGAIRLH is the default format
+ AIRLINES IN ANOTHER COUNTRY (PAGE MAINTAINED for the Lufthansa system pages followed by the
+ BY LH)                                       2 letter country code and 6 is the default page
+                                              for the airline contact numbers)
+ INFORMATION ABOUT THE CONTACT NUMBERS OF              GG AIR LH GB 0 (GGAIRLH is the default format
+ CONSULATES & EMBASSIES IN ANOTHER COUNTRY             followed by the 2 letter country code and 0
+ (PAGE MAINTAINED BY LH)                               is the default page for the embassies and
+                                                       counsulates numbers)
+ CURRENT WEATHER FORECAST FOR A CITY                   GG WEA LAX
+ PARTICIPATING CARRIER ACCESS & FUNCTION LEVEL         GG PCA xx (xx=carrier code)
+ TO SEE THE LIST OF CARRIERS STARTING WITH FIRST       GG PCAL AIR x (X=first letter of the airline name)
+ LETTER OF CARRIER CODE
+ TO SEE THE LIST OF CARRIERS SORTED BY ORIGIN          GG PCAL COU x (X=first letter of the country
+ COUNTRY                                               name)
+ INFORMATION ON A SPECIFIC CAR COMPANY                 GG CAR ZE
+ INFORMATION ON A SPECIFIC HOTEL CHAIN                 GG HTL RD
+
+                                                                                        GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                     6
+DOWNLOAD THE ONLINE QRG /QRT from www.amadeus.co.in
+
+
+
+
+ INFORMATION ON TRAINING SCHEDULES                        GG AMA IN TRx (where x = region code, for ex,
+                                                          for Delhi(North), the page would be GG AMA
+                                                          IN TRN) (Where N=North, W=West, E=East,
+                                                          S=South, A=ALL)
+ INFORMATION ON AMADEUS LEARNING CITY                     GG AMA IN ALC
+ INFORMATION ABOUT ETKT LOCAL GUIDELINES                  GG AMA IN ETT
+ INFORMATION ON INDIAN (AIRLINES) BOOKING                 GG AMA IN IND
+ GUIDELINES
+ AMADEUS INDIA INFORMATION PAGE ON                        GG AMA IN TKT
+ RESERVATION AND TICKETING GUIDELINES
+ TO SEE A LIST OF INPUT AND OUTPUT ACTION CODES           GG CODE
+ TO SEE A LIST OF ALL CODES STARTING WITH W               GG CODE W
+ AMADEUS INPUT AND OUTPUT ACTION CODES                    GGCODE.64
+ TO SEE THE AIR ALLIANCES LIST                            GG ALLIANCE
+ OFFICE BRIEFING PAGE                                     HE GD
+ DISPLAY YOUR OFFICE BRIEFING PAGE                        GD
+ EDIT OFFICE BRIEFING PAGE                                GMD
+ HELP                                                     HE HE
+ HELP INDEX BY LETTER                                     HE A
+ HELP ON NAME ELEMENT                                     HE NM
+ STEP BY STEP INSTRUCTIONS FOR COMMON TASKS               HE STEPS
+ HELP ON MEALS                                            HE MEAL CODES
+ HELP ON THE LAST TRANSACTION ENTERED                     HE/
+ HELP ON TICKETLESS ACCESS                                HE TLA
+ TIMATIC                                                  HE TI
+ In Amadeus Selling Platform, follow the following steps: 1.Verify you are in the command page or click on
+ the command page icon 2.Click on the Scripts tab 3.The information icon on the extreme right under the
+ Scripts tab refers to Timatic (it says Travel Information). Use a mouseover to conﬁrm.4.Click on the icon.
+ This will open up the Timatic window where you can check Visa /Health information / information regarding
+ Customs, taxes to be paid at the airport etc. 4.To send this information as an email, click on the FAX/Email
+ icon and then click on Send. Enter email address of receiver and click on Send. 5. In case your email setup
+ is not conﬁgured, do that ﬁrst. There is a seperate handout available for the steps.
+ CRYPTIC COMMANDS:                                        HE TI
+ MASK FOR VISA INFORMATION                                TIFV
+ MASK FOR HEALTH INFORMATION                              TIFH
+ MASK FOR VISA AND HEALTH INFORMATION                     TIFA
+                                                                                            GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                        7
+CONTACT AMADEUS HELP DESK THROUGH LIVE CHAT, SUPPORTED AS A SMART TAB IN AMADEUS SELLING PLATFORM
+
+
+
+
+ REFRENCING TIMATIC FROM A PNR                              TIRV/NAIN/S2-3
+ INDEX FOR NEWS ITEMS                                       TINEWS
+ INDEX FOR RULES,TERMS AND DEFINITIONS                      TIRULES
+ LIST OF AIRPORTS FOR A SPECIFIC COUNTRY                    TILCC/GERMANY
+ TO CHECK CUSTOMS                                           TIDFT/IN/CS
+ LIST OF COUNTRY GROUP CODES AND GROUP NAMES                TIRGL
+ DISPLAY MEMBER COUNTRIES FROM GROUP CODES                  TIRGL/SCHS
+ (where SCHS is the group code for Schengen states)
+ Note: The information provided in the TIMATIC display is not guaranteed by Amadeus.
+ ENCODE/DECODE                                              HE CONVERT
+
+ ENCODE CITY / AIRPORT NAME                                 DAN ROME
+ ENCODE FROM PART OF CITY NAME                              DAN CIN*
+ ENCODE ANY LOCATION CALLED LONDON, BRITAIN                 DAN LONDON/GB
+ ONLY
+ TO DISPLAY THE TEN NEAREST AIRPORTS TO A CITY              DAN DELHI/N
+ DECODE CITY / AIRPORT NAME                                 DAC TYO
+ TO LIST THE CODES ASSOCIATED TO A CITY                     DB NYC or DB NEWYORK
+ ENCODE AIRLINE NAME                                        DNA SABENA
+ DECODE AIRLINE NAME                                        DNA SN
+ ENCODE COUNTRY NAME                                        DC FRANCE
+ DECODE COUNTRY NAME                                        DC FR
+ ENCODE A HOTEL                                             DNH BEST WESTERN
+ DECODE A HOTEL                                             DNH BW
+ ENCODE A CAR COMPANY                                       DNC AVIS
+ DECODE A CAR COMPANY                                       DNC ZI
+ ENCODE A STATE                                             DNS FLORIDA
+ DECODE A STATE                                             DNS US FL
+ LIST STATES FOR A COUNTRY                                  DNS US
+ DECODE AN AIRCRAFT TYPE                                    DNE IL9
+ DECODE A HOTEL RATE CODE (EX SUM)                          DNN SUM
+ DECODE CAR EQUIPMENT                                       CE PHN
+ DATE AND TIME CONVERSIONS                                  HE DD
+ CURRENT TIME IN SINGAPORE                                  DD SIN
+ TIME DIFFERENCE BETWEEN TWO CITIES                         DD LON/LAX
+
+                                                                                              GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                     8
+ACCESS AN ONLINE SELF-PACED, SELF-HELP SEARCH THROUGH E-SUPPORT CENTRE SMART TAB ON ASP
+
+
+
+
+ COMPARE TIME IN OTHER CITY                                  DD LON1500/LAX
+ TO CHANGE THE UTC TIME TO LOCAL TIME                        DD ZZZ1500/DEL
+ DISPLAY DAY OF WEEK                                         DD25DEC08
+ DAYS                                                        DD22APR13/30
+ MATHEMATICAL CALCULATIONS                                   HE DF
+ ADD VALUES                                                  DF 889; 1733; 669
+ SUBTRACT VALUES                                             DF 1955-889
+ MULTIPLY                                                    DF1604*33
+ DIVIDE                                                      DF1509/34
+ AVAILABILITY                                                HE AN
+ NEUTRAL AVAILABILITY                                        AN10DECDELLON
+ AVAILABILITY FOR SPECIFIC AIRLINE                           AN10DECDELSIN/ASQ
+ AVAILABILITY FOR SPECIFIC AIRLINES (upto 6 carriers)        AN10DECDELSIN/ASQ,AI,TG
+ EXCLUDE SPECIFIC AIRLINE (up to 6 airlines can be           AN23DECDELLON/A-AI,IT
+ excluded)
+ AVAILABILITY WITH DEPARTURE TIME                            AN10DECLONBRU1600/ASN
+ AVAILABILITY WITH SPECIFIC BOOKING CLASS (RBD)              AN20DECDELBKK/ATG/CM
+ (max3 can be added)
+ AVAILABILITY WITH SPECIFIC CABIN CLASS                      AN20DECDELLON/ABA/KY
+ AVAILABILITY AS PER NUMBERS OF SEATS                        AN23DECDELLON/B4
+ AVAILABILITY WITH CARRIER CODE, NUMBER OF                   AN23DECDELBKK/ATG/CM/B4
+ SEATS AND RBD CLASS SPECIFIED
+ AVAILABILITY WITH TRANSIT POINTS                            AN28JUNDELLAX/XBKK
+ AVAILABILITY WITH 2 TRANSIT POINTS                          AN28JUNDELSFO/XBKKLAX
+ AVAILABILITY WITH TRANSIT POINT & AIRLINE                   AN10DECDELSFO/ALH/XMUC
+ EXCLUDE A CONNECTING POINT                                  AN19SEPDELLON/X-FRA/ALH
+ ONLINE CONNECTIONS                                          AN26DECDELLAX/O
+ CARRIER-PREFERRED DISPLAY                                   ANTG15SEPDELBKK
+ ALLIANCE AVAILABILITY                                       AN*A15SEPDELLON (Star Alliance)
+ ALLIANCE AVAILABILITY                                       AN*O18DECBKKSYD (One World)
+ ALLIANCE AVAILABILITY                                       AN*S12JULDELNCE (Sky Team)
+ AVAILABILITY BY ARRIVAL TIME                                AA12DECLONNYC1500
+ SEVEN DAY SEARCH ENTRY                                      AN/17DECBOMNBO/AKQ
+ AIR ASIA AVAILABILITY                                       AN12APRTRZKUL/AAK
+
+                                                                                           GPROT05/JAN14/VER7
+                              ADVANTAGE                                                                       9
+LAUNCH NEW AMADEUS TRAINING (SKL) MODE BY http://training.amadeusvista.com
+
+
+
+
+ CHANGE TO TICKETLESS ACCESS AIRLINE DISPLAY                    ACW1/B1(where first 1 is the line number and
+                                                                second 1 is the number of seats)
+ SCROLLING ENTRIES
+ TO MOVE UP TO THE PREVIOUS SCREEN                              MU
+ TO MOVE DOWN TO THE NEXT SCREEN                                MD
+ TO MOVE TO TOP OF THE DISPLAY                                  MT
+ TO MOVE TO THE DISPLAY FOR THE NEXT DAY                        MN
+ TO MOVE TO THE DISPLAY FOR THE PREVIOUS DAY                    MY
+ DUAL CITY PAIR AVAILABILITY                                    HE AN
+ WITH RETURN ON SAME DAY                                        AN12DECFRALON/ABA*
+ WITH RETURN DATE SPECIFIED                                     AN12DECFRALON/ABA*16DEC
+ WITH ONWARD DATE , SECTOR AND AIRLINE SPECIFIED AN12DECFRALON/ABA*25DECLONNYC/AAA
+ SCROLLING IN DUAL CITY PAIR AVAILABILITY
+ MOVE UP/DOWN/NEXT/YESTERDAY IN FIRST CITY PAIR                 MUF/ MDF/ MNF/ MYF
+ MOVE UP/DOWN/NEXT/YESTERDAY IN SECOND CITY MUS/ MDS/ MNS/ MYS
+ PAIR
+ DIRECT ACCESS                                                  HE DIR XX (where XX = Airline Code)
+ TO SEE WHAT ALL DIRECT ACCESS FUNCTIONALITIES                  HE DIR 9W (FOR JET AIRWAYS)
+ ARE SUPPORTED BY AN AIRLINE
+ DIRECT ACCESS AVAILABILITY FOR AIRLINE                         19WAD23DECSINJKT
+ SCROLLING IN DIRECT ACCESS AVAILABILITY                        19W MN (MOVE NEXT)
+ SCROLLING IN DIRECT ACCESS AVAILABILITY                        19W MY(MOVE YESTERDAY)
+ SCROLLING IN DIRECT ACCESS AVAILABILITY                        19W MD(MOVE DOWN)
+ SCROLLING IN DIRECT ACCESS AVAILABILITY                        19W MU(MOVE UP)
+ DIRECT ACCESS PNR RETRIEVAL BY RECORD LOCATOR                  1AIRT H55PW (Where AI is the carrier supporting
+                                                                direct access PNR Display)
+ DIRECT ACCESS FARE DISPLAY FOR AIRLINE (EX 9W)                 19WFQDDELLON
+ TIME TABLE ENTRIES                                             HE TN
+ NEUTRAL TIME TABLE                                             TNDELSIN
+ NEUTRAL TIME TABLE FOR AN AIRLINE (this displays               TN DELPBH/AKB
+ the timetable for non-participating carriers as well)
+ NEUTRAL TIME TABLE WITH DATE AND AIRLINE                       TN10DECDELSIN/ASQ
+ TO DISPLAY THE TIMETABLE FOR ALL THE YY                        TN01MAYDELLON/AYY
+ CARRIERS (including the non-participating carriers)
+
+                                                                                               GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                         10
+AMADEUS SELLING PLATFORM, THE WORLD’S MOST USED RETAILING APPLICATION FOR TRAVEL PROFESSIONALS
+
+
+
+
+ SCHEDULE ENTRIES                                            HE SN
+ NEUTRAL SCHEDULE                                            SNDELLON
+ NEUTRAL SCHEDULE WITH DATE AND AIRLINE (this                SN15DECCCUPBH/AKB
+ displays the schedule for non-participating carriers as
+ well, however without the posting levels)
+ TO DISPLAY THE SCHEDULE FOR ALL THE YY                      SN01MAYDACPBH/AYY
+ CARRIERS(including the non-participating carriers)
+ DUAL CITY PAIR SCHEDULES                                    SN23SEPMADLIS*BCNCDG
+ ROUND TRIP SCHEDULE DISPLAY                                 SN23SEPCDGLHR*25SEP
+ AVAILABILITY CHANGE ENTRIES                                 HE AC/HE ACR
+                                                             (For schedule change replace AC in the entries
+                                                             below with SC)
+ AVAILABILITY CHANGE TO SPECIFIC DATE                        AC 15DEC
+ AVAILABILITY CHANGE TO 5 DAYS AHEAD                         AC 5
+ AVAILABILITY CHANGE TO 3 DAYS PREVIOUS                      AC -3
+ AVAILABILITY CHANGE TO SPECIFIC AIRLINE                     AC/ABA
+ AVAILABILITY CHANGE TO YY DISPLAY                           AC/AYY
+ AVAILABILITY CHANGE TO FARE DISPLAY                         AC FQ
+ AVAILABILITY CHANGE TO SCHEDULE                             AC SN
+ CHANGE CITY OF ORIGIN                                       AC BOM
+ CHANGE CITY OF DESTINATION                                  AC // KUL
+ AVAILABILITY CHANGE TO RETURN                               ACR20DEC
+ AVAILABILITY CHANGE TO RETURN WITH DATE AND                 ACR20DEC/ABA
+ AIRLINE
+ CHANGE TO DIRECT ACCESS DISPLAY (where applicable) ACLx(where X=line no of availability display)
+ EXPLANATION OF AMADEUS ACCESS LEVELS FOR INFORMATION ON ACCESS AND FUNCTION
+ LEVELS BY AN AIRLINE, REFER TO GG PCA XX
+ AMADEUS COMPLETE ACCESS ( / )                               Amadeus Complete Access gives the highest level
+                                                             of connectivity between an airline and Amadeus,
+                                                             including last-seat availability and immediate
+                                                             conﬁrmation. Example of airlines supporting this
+                                                             feature are BA, AF, The access level is represented
+                                                             by a (/) in the Amadeus availability displays. Note:-
+                                                             But If the airline is not the Altea airline then we
+                                                             can still perform ACL or 1XXad entry if supported
+                                                             by the airline.
+
+
+
+                                                                                                 GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                         11
+WORK SMARTER AND FASTER WITH NON - HOMOGENOUS PNR CREATION
+
+
+
+
+AMADEUS ACCESS SELL ( . )                                    Amadeus Access Sell offers a fully secured sale
+                                                             for each seat. When a seat sell request is made,
+                                                             Amadeus checks the ﬂight in the airline’s own
+                                                             inventory system. According to the status, the sale
+                                                             is conﬁrmed, waitlisted, or rejected immediately.
+                                                             If the airline conﬁrms the booking at segment
+                                                             sell time, a HK status is returned.The Airline’s
+                                                             own record locator is automatically appended to
+                                                             the Amadeus PNR after EOT.If the airline does not
+                                                             conﬁrm the booking, a UC or HL status code is
+                                                             returned. Note: Agents may use direct access to
+                                                             get last seat availability Ex JL
+DIRECT ACCESS (DIR) ( * )                                    Direct Access provides a real-time link to the
+                                                             airline’s own system to display an accurate
+                                                             availability at the time the request is made. This
+                                                             link is created through the use of Direct Access
+                                                             entries (ACL or 1xxAD entries).This functionality
+                                                             provides last seat availability of the airline on a
+                                                             secondary display. Seats sold on this real time
+                                                             link carry a LK status code. The airline may have
+                                                             the record locator return option supported. It is
+                                                             important that the sell entry be made within 3
+                                                             minutes of accessing the direct access display.
+STANDARD ACCESS                                              Schedules are updated on a weekly basis.When
+                                                             you book a seat on a standard access airline,
+                                                             the airline may revert with the conﬁrmation or
+                                                             rejection of sale within 12 hours. If the airline
+                                                             supports Record Return option, its own record
+                                                             locator is appended to the PNR. Seats sold are in
+                                                             SS status code.
+AMADEUS TICKETLESS ACCESS ( - )                              Amadeus Ticketless Access is a new type of
+                                                             access that enables end users to get availability
+                                                             and schedules from the low cost carriers in the
+                                                             Amadeus principal displays. Ticketless Airlines are
+                                                             identiﬁed by a ‘ - ’ in the Access indicator ﬁeld and
+                                                             by the letter “Y” in the Ticketless Access ﬁeld of
+                                                             the carrier’s GG PCA page. For more information
+                                                             refer to HE TLA. Ex AK
+
+
+
+
+                                                                                                GPROT05/JAN14/VER7
+                              ADVANTAGE                                                                  12
+DISPLAY AND PRINT PASSENGER LISTS THROUGH LP / LPO ENTRIES
+
+
+
+
+ Related Topics: AMADEUS LAST SEAT AVAILABILITY              A Slash indicator, (/), displayed before the
+ INDICATOR                                                   Departure (/ PLACED BEFORE THE DEPARTURE
+                                                             CITY) city indicates that the seat count you
+                                                             see is obtained in real time from the airline’s
+                                                             inventory. The seat count shown for a class is
+                                                             the true number of seats left in that class.Ex
+                                                             MK, QF, SA, VS
+ STATUS CODE SEEN AT SELL TIME                               DESCRIPTION / ACCESS TYPE
+ Note: The segment status that is displayed at segment sell time reﬂects the type of access used by the
+ airline
+                                                             HOLDING CONFIRMED/AMADEUS ACCESS,
+                                                             ACCESS SELL
+ HN                                                          HOLDING NEED/AMADEUS ACCESS, ACCESS SELL
+ HL                                                          WAITLISTED/AMADEUS ACCESS, ACCESS SELL
+ LK                                                          HOLDING CONFIRMED/DIRECT ACCESS
+ NK                                                          HOLDING CONFIRMED / DIRECT ACCESS,
+                                                             PENDING RECORD LOCATOR RETURN
+ SS                                                          SOLD / ACCESS UPDATE, STANDARD ACCESS
+ NN                                                          NEED SEGMENT/ON REQUEST
+ In newly sold extended air segments, before end of transaction, additional status codes are used (list
+ below). After end of transaction, these codes are changed to HK, HN or HL
+ DK                                                          CONFIRMED / AMADEUS ACCESS, ACCESS SELL
+ DN                                                          ON REQUEST / AMADEUS ACCESS, ACCESS SELL
+ DW                                                          WAITLISTED / AMADEUS ACCESS, ACCESS SELL
+ FLIGHT INFORMATION                                          HE DO
+ DISPLAY FLIGHT INFORMATION BY FLIGHT NUMBER,                DO TG774 /23DEC /BKKLAX
+ DATE AND SECTOR
+ DISPLAY FLIGHT INFORMATION FROM A PNR SEGMENT DO 2 (where 2 is the segment No. of PNR or
+ OR AVAILABILITY                               the line no. of availability display
+ DISPLAY FLIGHT INFORMATION FROM A DIRECT                    DO 21
+ ACCESS DISPLAY
+ Note : On the cryptic screen, if you right click on the highlighted flight number, you can see the DO
+ information
+ MINIMUM CONNECTING TIME                                     HE DM
+ DISPLAY MINIMUM CONNECTING TIME FOR CITY                    DM FRA
+ DISPLAY MCT FOR INTER-AIRPORT CONNECTION                    DM LHR-LGW
+
+                                                                                            GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                 13
+ENHANCE YOUR PRODUCTIVITY WITH AMADEUS COPY PNR FUNCTIONALITY
+
+
+
+
+ DISPLAY MCT FOR INTER-AIRPORT CONNECTION WITH             DM ORYW-CDG2B
+ THE TERMINALS SPECIFIED AS WELL
+ DISPLAY MCT FOR CARRIER                                   DM BA/ LHR /AA
+ DISPLAY MCT FOR CARRIER AND AIRPORT                       DM BA/ LHR-LGW /AA
+ DISPLAY MCT FROM AN AVAILABILITY OR SCHEDULE              DM 1
+ DISPLAY
+ DISPLAY MCT FROM A PNR DISPLAY (for segment 2             DM 2/4
+ and 4 of the PNR)
+ CHECK MCT AND SEGMENT CONTINUITY IN A PNR                 DMI
+ DISPLAY CONNECTION POINTS                                 HE DRT
+ TO DISPLAY NEUTRAL CONNECT POINTS                         DRT DEL BJS
+ TO DISPLAY CONNECT POINTS WITH DATE AND                   DRT 19AUG DELBJS / ATG
+ SPECIFIC AIRLINE
+ TO DISPLAY CONNECT POINTS WITH SPECIFIC AIRLINE DRT 19AUG DELBJS / A-TG
+ EXCLUDED
+ TO DISPLAY CONNECT POINTS WITH A CONNECT                  DRT 19AUG DEL BJS / XHKG
+ POINT OPTION
+ TO DISPLAY CARRIER PREFERRED CONNECT POINTS               DRT QF 15AUG DEL HNL
+ SEGMENT SELL                                              HE SS
+ SELL ONE SEAT (Y CLASS) FROM LINE 3 OF AVAILABILITY SS1Y3
+ OR SCHEDULE DISPLAY
+ SELL ONE SEAT (MULTIPLE CLASS) FROM LINE 4                SS1YM4
+ SELL TWO SEATS Y CLASS FROM DUAL CITY PAIR                SS2Y1*11
+ AVAILABILITY DISPLAY
+ SELL IN DIFFERENT CLASSES OF TRAVEL OR IN                 SS1Y1*F13
+ DIFFERENT RBDs FROM DUAL CITY PAIR DISPLAY
+ SHORT SELL ONE SEAT FOR WAITLISTED SEGMENT                SS1Y1/PE
+ LONG SELL ONE SEAT                                        SSTG316M03AUGDELBKK1
+ LONG SELL FOR WAITLISTED SEGMENT                          SSTG316C03AUGDELBKKPE1
+ SELL FROM DIRECT ACCESS DISPLAY                           SS1K21
+ SELL FOR SELECTED PASSENGERS                              SS2C1/P1,3
+ SELLING SEATS FOR A UMNR FOR A SINGLE CITY PAIR           SS1C3 /UM5 (Where 5 is the age of the UMNR )
+ SELLING SEATS FOR A UMNR FOR A DUAL CITY PAIR             SS1C1 /UM6*11/UM6 (where 6 is the age of
+                                                           the UMNR)
+ WHEN THERE IS MORE THAN ONE UMNR IN THE SAME SS2C3 /UM5,7
+ PNR
+
+                                                                                        GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                14
+MAXIMISE YOUR EFFICIENCY WITH SIX WORK AREAS
+
+
+
+
+ SPACE SELLING FOR STRETCHER PASSENGER FOM               SS1Y1/ST
+ AVAILIBILITY (eg. LH airline)
+ MANDATORY PNR ELEMENTS                                  HE PNR
+ NAME ELEMENT                                            HE NM
+ BASIC ENTRY                                             NM1ROY/ASHOK MR
+ COMMON SURNAME                                          NM2SEN/RAHUL MR/JAYA MRS
+ DIFFERENT SURNAME                                       NM1SEN/JAYA MS 1SETH/RADHA MS
+ ACCOMPANIED INFANT                                      NM1SINGH/NISHA MRS(INF/ANU/02FEB09)
+ INFANT WITH DIFFERENT SURNAME                           NM1SINGH/NISHA MRS(INFSEN/ALKA/06JUN09)
+ CHILD PASSENGER                                         NM1JAIN/RADHA MISS(CHD/06APR03)
+ INFANT WITH A SEAT                                      NM1BROWN/JANE(INS)
+ NAME ELEMENT FOR A STRETCHER PASSENGER                  NM1LEWIS/JOHN MR (IDSTCR)
+ Note 1 : SSR element automatically generates with the child’s and infant’s name and age. If the infant’s
+ DOB is not provided the system will take the PNR creation date as the infant’s DOB. Note 2 : Do not use
+ the Child (CHD) passenger type in the name when booking an unaccompanied minor
+ PHONE FIELD                                             HE AP
+ CONTACT INFORMATION AS PER OFFICE PROFILE               AP
+ ENTER CONTACT INFORMATION                               AP BOM CTCH45644455 CTCB646446
+                                                         CTCT45665657
+ ENTER MOBILE NUMBER                                     APM - DEL 9818568329
+ ENTER E-MAIL ADDRESS                                    APE - ABC@YAHOO.COM
+ *Remember to transmit the data in the phone ﬁeld to the airline under OSI as well
+ TICKETING ARRANGEMENT                                   HE TK
+ TICKETING IN ORDER                                      TKOK
+ TICKETING TIME LIMIT DATE                               TKTL05OCT
+ TICKETING TIME LIMIT DATE AND TIME                      TKTL05OCT/1200
+ AUTOMATIC CANCELLATION OF THE ITINERARY ( Use           TKXL/06APR
+ with caution as this generates auto cancellation of
+ the PNR as per the date and time specified )
+ PASSENGER SPECIFIC TK ELEMENT                           TKTL05OCT/1200/P1,4
+ TICKETING FOR DOMESTIC ITINERARY                        TKDO01JAN (automatic queue placement to Q8C3)
+ TICKETING FOR INTERNATIONAL ITINERARY                   TKIN05JAN (automatic queue placement to Q8C5)
+ *Remember to transmit the time limit to the airline under OSI as well
+
+
+
+                                                                                         GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                 15
+ENHANCE CUSTOMER SATISFACTION WITH INTERACTIVE SEAT MAPS
+
+
+
+
+REFERENCE                                                  HE RF
+REFERENCE OF PERSON ACTIONING BOOKING                      RF GEORGE
+END TRANSACTION                                            HE ER / HE ET
+END AND REDISPLAY PNR                                      ER
+END AND IGNORE PNR                                         ET
+END TRANSACTION, CHANGE ADVICE CODES AND                   ERK
+REDISPLAY
+Note : You can enter all the mandatory elements together by combining them with a “;” (semi colon)
+Ex NM1SEN/SUSHMITA MS;SSLH761H23DECDELFRA1;AP BOM CTCH23345511;TKOK;RFDAISY;ER
+OPTIONAL ELEMENTS                                          HE AB/HE AM/HE RM/HE RC/HE OP/HE RIR
+BILLING ADDRESS                                            AB 2115 HOTEL SHERATON,DELHI
+BILLING ADDRESS (STRUCTURED FORMAT)                        AB//CY-AMADEUS/A1-156 SECTOR 24/A2-
+                                                           GREENPARK AVENUE/CI-NEWDELHI/ZP-110070/
+                                                           CO-INDIA
+                                                           (Where CY=company, CI=city,CO=country)
+MAILING ADDRESS                                            AM 1198 BASANT LOK,DELHI
+MAILING ADDRESS (STRUCTURED FORMAT)                        AM//CY-AMADEUS/A1-156 SECTOR 24/A2-
+                                                           GREENPARK AVENUE/CI-NEWDELHI/ZP-110070/
+                                                           CO-INDIA
+                                                           (Where CY=company, CI=city,CO=country)
+GENERAL REMARK ELEMENT                                     RM PAX WILL COLLECT TICKETS COPY
+CONFIDENTIAL REMARK                                        RC PAX PAYS BY CCVI33333553/1009
+CORPORATE REMARK                                           RX VIP PAX TAKE CARE/S4/P1
+ITINERARY REMARK                                           RIR HAVE A PLEASANT FLIGHT
+ITINERARY REMARK PLACED AFTER PARTICULAR RIR COMPLIMENTARY CAR TRANSFER ON
+SEGMENT OF PNR                           ARRIVAL/S4
+OPTION ELEMENT FIELD (automatic queue placement            OP12DEC/US VISA TO BE APPLIED
+to Q3)
+OTHER SERVICE INFORMATION                                  HE OSI
+ADD OSI MESSAGE FOR CONTACT INFORMATION                    OS EK PAX DEL CTCH 57775777
+ADD OSI MESSAGE FOR CIP PASSENGER                          OS EK PAX CIP MD ASIA TYRES/P1
+ADD OSI MESSAGE FOR TIME LIMIT                             OS EK TIMELIMIT 12DEC 1200HRS
+ADD OSI MESSAGE FOR ALL THE AIRLINES IN THE PNR OS YY PAX CTCH DEL 5191912
+ADD OSI MESSAGE FOR MOBILE TRANSMISSION                    OS BA CTCM DEL 9818568329
+
+
+                                                                                         GPROT05/JAN14/VER7
+                             ADVANTAGE                                                        16
+AMADEUS SELLING PLATFORM NOW AVAILABLE ON MOBILE
+
+
+
+
+ SPECIAL SERVICE REQUEST                           HE SSR
+ MEAL REQUEST                                      SR AVML
+ MEAL REQUEST WITH PASSENGER & SEGMENT             SR SFML/P2/S4-5
+ SEAT REQUEST (SEAT WISH)                          ST/A (NON SMOKING AISLE)
+                                                   ST/W (NON SMOKING WINDOW)
+                                                   ST/E ( EXIT ROW SEAT)
+ SPECIFIC SEAT NUMBER REQUEST                      ST/21A/P2
+ FOLLOW UP ENTRY TO VIEW THE SEAT                  RTSTR
+ CHARCTERSTICS DETAILS
+ WHEELCHAIR REQUEST                                SRWCHR/ P3/ S5
+ BASINETTE REQUEST                                 SRBSCT/P1
+ SSR MESSAGE WITH FREE FLOW TEXT:
+ (Special Meal request)                            SRSPML - ANNIVERSARY CAKE/ P1/ S7
+ (Meet and assist request)                         SRMAAS - PAX WITH INFANT/P2
+ (Other services)                                  SROTHS UL-PLS DAPO CNFM ASAP
+ FORM OF IDENTIFICATION-FOID                       SR FOID IB HK1-DL12345678/P1 (Please refer
+                                                   to HE FOID for more details)
+ TO MANUALLY CREATE AN SSR FOR UMNR                SRUMNR-UM06 (where 6 the age of the UMNR)
+ TO CREATE THE SSR WHERE THERE ARE MULTIPLE        SRUMNR-UM06/07/08
+ UMNRS IN THE PNR
+ TO SEE THE LIST FOR ALL THE SSR CODES             HESSR.480
+ APIS TRAVEL DETAILS                               HE APIS
+ APIS PASSPORT INFORMATION                         SRDOCSBAHK1-P-GBR-012345678-GBR-
+                                                   30JUN73-M-14APR09-JOHNSON-SIMON-PAUL-
+                                                   H/P1/S3
+                                                   where SR=PRIMARY TRANSACTION CODE
+                                                   DOCS=SSR CODE FOR APIS PRIMARY TRAVEL
+                                                   DOCUMENT
+                                                   BA=AIRLINE CODE
+                                                   HK1=ACTION CODE AND NUMBER OF SERVICES
+                                                   REQUESTED (MANDATORY)
+                                                   P=TRAVEL DOCUMENT TYPE
+                                                   GBR=TRAVEL DOCUMENT ISSUING COUNTRY /
+                                                   STATE USE THE THREE LETTER AIRIMP COUNTRY
+                                                   CODE
+
+
+                                                                                 GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                 17
+SEND PASSENGER ITINERARIES IN CUSTOMIZED FORMAT THROUGH BIRD RES ITINERARY
+
+
+
+
+                                                              12345678=TRAVEL DOCUMENT NUMBER (UPTO
+                                                              15 DIGITS INCLUDING SPACES)
+                                                              GBR=PASSENGER NATIONALITY IN THE THREE
+                                                              LETTER AIRIMP CODE
+                                                              30-JUN-73=DATE OF BIRTH OF THE PASSENGER
+                                                              M=GENDER OF THE PAX
+                                                              14-APR-12=DATE OF EXPIRY OF THE PASSPORT
+                                                              JOHNSON=LAST NAME OF THE PASSENGER
+                                                              SIMON=FIRST NAME OF THE PASSENGER
+                                                              PAUL=MIDDLE NAME OF THE PASSENGER (IF
+                                                              ANY)
+                                                              HK1=PASSPORT HOLDER INDICATOR
+                                                              /P1=PASSENGER ASSOCIATION
+                                                              /S3=SEGMENT ASSOCIATION
+ APIS PASSPORT INFORMATION WITH PARTIAL                       SR DOCS BA HK1-----30JUN73-M--SMITH-
+ DATA                                                         DAVE/P1
+ Note:The minimum information for the partial entry contains-Full Name, Date of Birth, Gender. The system
+ error will be created when the above information is not provided.
+ APIS VISA INFORMATION                                        SRDOCO BA HK1-MANCHESTER GBR-V-
+                                                              17317323-LONDON GBR-18JUN04-USA/P1/S3
+                                                              where SR=PRIMARY TRANSACTION CODE
+                                                              DOCO=SSR CODE(MANDATORY)
+                                                              BA=AIRLINE CODE
+                                                              HK1=ACTION CODE AND NUMBER OF SERVICES
+                                                              REQUESTED (MANDATORY)
+                                                              MANCHESTER GBR=PASSENGER PLACE OF BIRTH
+                                                              V=TRAVEL DOCUMENT TYPE
+                                                              17317323=VISA NUMBER
+                                                              LONDON GBR=VISA PLACE OF ISSUE
+                                                              18-JAN-10=DATE OF ISSUE FOR VISA
+                                                              USA=COUNTRY / STATE WHERE THE VISA
+                                                              APPLIES
+                                                              /P1=PASSENGER ASSOCIATION
+                                                              /S3=SEGMENT ASSOCIATION
+
+
+
+                                                                                          GPROT05/JAN14/VER7
+                              ADVANTAGE                                                                     18
+USE FARE DIAGNOSTIC TO TARGET SPECIFIC FARES. HE FARE DIAGNOSTIC
+
+
+
+
+ APIS ADDRESS INFORMATION                                          SRDOCA BA HK1-D-USA-301 PARK AVENUE-
+                                                                   NEWYORK-NY-10022/P1/S3
+                                                                   where SR=PRIMARY TRANSACTION CODE
+                                                                   DOCA=SSR CODE(MANDATORY)
+                                                                   BA=AIRLINE CODE
+                                                                   HK1=ACTION CODE AND NUMBER OF SERVICES
+                                                                   REQUESTED (MANDATORY)
+                                                                   D=TYPE OF DESTINATION (D FOR DESTINATION
+                                                                   & R FOR RESIDENCE)
+                                                                   USA=COUNTRY (OPTIONAL)
+                                                                   301 PARK AVENUE=ADDRESS DETAILS
+                                                                   NEW YORK=CITY (OPTIONAL)
+                                                                   NY=STATE/ PROVINCE/COUNTRY AS FREE TEXT
+                                                                   (OPTIONAL)
+                                                                   10022=ZIP CODE / POSTAL CODE
+                                                                   /P1=PASSENGER ASSOCIATION
+                                                                   /S3=SEGMENT ASSOCIATION
+ Note 1 : Use MI to signify male infant and FI for female infant
+ Note 2 : For 3 letter nationality codes, refer to DC COUNTRY CODE or DC COUNTRY NAME Example : DC IN
+ OR DC INDIA
+ ADVANCE SEATING THROUGH SEAT MAP                                  HE SM
+ DISPLAY SEAT MAP FOR FLIGHT DETAILS                               SMLH761/C/03SEPDELFRA
+ DISPLAY SEAT MAP FOR A PNR SEGMENT 4                              SM4
+ OPEN SEGMENT                                                      HE SO
+ OPEN SEGMENT FOR A SPECIFIC CARRIER                               SOLHCFRABOM
+ OPEN SEGMENT FOR A SPECIFIC DATE                                  SOLHC24DECFRABOM
+ OPEN SEGMENT WITH NO CARRIER SPECIFICATION                        SOYYCFRABOM
+ INFORMATION SEGMENT                                               HE SI
+INSERT SURFACE SEGMENT TO INDICATE BREAK IN                        SI ARNK
+SEGMENT CONTINUITY
+ INSERT FLIGHT SEGMENT FOR INFORMATION ONLY                        SISV219Y20MAYJEDISTHK1/0815 1645
+ GHOST SEGMENT                                                     HE SS
+ ADD GHOST SEGMENT INTO PNR                                        SSSQ401Y20DECDELSINGK1/YKABH (where
+                                                                   YKABH is the airline record locator)
+
+
+                                                                                               GPROT05/JAN14/VER7
+                             ADVANTAGE                                                        19
+REGISTER FOR TRAINING ONLINE ON www.amadeus.co.in
+
+
+
+
+FREQUENT FLYER NUMBER                               HE FFN
+CHECK IF THE AIRLINE USES AMADEUS FREQUENT GG PCA XX (where XX = carrier code)
+FLYER DATABASE
+PNR CREATION FROM FREQUENT FLYER NUMBER               FFAAF-01234509876
+(This entry works for airlines using Amadeus Frequent
+Flyer Database
+DISPLAY FREQUENT FLYER NAME FROM AIRLINE            FFDAF-01234509876
+DATABASE (This entry works for airlines using
+Amadeus Frequent Flyer Database)
+ADD FREQUENT FLIER NUMBER INTO PNR                  FFNAF-01234509876/P1
+CHECK FREQUENT FLIER AGREEMENTS FOR BA              VFFD BA
+PASS KL FREQUENT FLIER NUMBER TO PARTNER            FFNAF-01234509876,KL,AY,9W
+CARRIERS NW AND UK AS WELL
+FREQUENT FLIER THROUGH SSR                          SR FQTV BA-FF22115
+EXTENDED SECURITY                                   HE ES
+SET UP A READ ONLY SECURITY (on the retrieved PNR) ES DELI22133-R
+SET UP A READ AND WRITE SECURITY (on the retrieved ES DELI22134-B
+PNR)
+SET UP READ AND TICKET SECURITY                     ES DELI22134-T
+DISPLAY PNR EXTENDED SECURITY AGREEMENT (on the ESD
+retrieved PNR)
+CANCEL PNR EXTENDED SECURITY AGREEMENT (on the ESX
+retrieved PNR)
+RETRIEVE A PNR ON WHICH EXTENDED SECURITY HAS       RT/DELI22123-SMITH (where DELI22123 is the
+BEEN RECEIVED                                       ofﬁce that has extended the security)
+TO RETRIEVE THE SECURITY ELEMENT FOR THE            RTE
+CURRENT PNR, ENTER
+TO RETRIEVE THE SECURITY ELEMENT HISTORY FOR        RHE
+THE CURRENT PNR,
+Note: The ES in the PNR can be given to maximum 5
+receivers
+TICKET NUMBER TRANSMISSION                          HE FH/HE OS
+CHECK THE GGPCAxx PAGE ON THE SYSTEM TO SEE THE CORRECT FORMAT FOR TKT NO. TRANSMISSION
+(where xx=carrier code) IF THE TKT NO TRANSMISSION BOX READS “ALL” TICKET NUMBERS ARE ALWAYS
+TRANSMITTED, AUTOMATICALLY VIA FA ENTRY OR MANUALLY VIA FHE ENTRY. “FA ONLY” : TICKET NUMBERS
+ARE ONLY TRANSMITTED VIA FA ENTRY, NOT FHE.
+
+
+                                                                                 GPROT05/JAN14/VER7
+                              ADVANTAGE                                                                  20
+DISPLAY AND PRINT PASSENGER LISTS THROUGH LP / LPO ENTRIES
+
+
+
+
+ TKT NO. TRANSMISSION UNDER FHM (for manually                FHM 125-3114500908
+ issued tickets)
+ AUTOMATED TKT NO TRANSMISSION UNDER FH                      FHA 125-3116400908
+ ELECTRONIC TICKET NUMBER TRANSMISSION                       FHE 125-3114500900
+ ELECTRONIC TICKET NUMBER TRANSMISSION FOR                   FHE INF 125-3114500911
+ INFANT TICKET
+ ELECTRONIC TICKET NUMBER TRANSMISSION FOR                   FHE 125-3114500912/P2
+ ADULT PASSENGER (WITH ACCOMPANYING INFANT)
+ ELECTRONIC TICKET NUMBER TRANSMISSION FOR                   FHE 125-3114500909-10/P2
+ CONJUCTION TICKETS
+ WORKFLOW TO CREATE TICKETLESS AIRLINE                       HETLA / HE TICKETLESS
+ BOOKING (Example AIR ASIA PNR)
+ 1. TO CHECK THE NEUTRAL AVAILABILLITY OF AIR ASIA AN12JUNTRZKUL/AAK
+ 2. TO CHANGE THE DISPLAY TO TICKETLESS DISPLAY              ACW1/B1(where first 1 is the line number and
+                                                             second 1 is the number of seats)
+ 3. TO SELL THE SEATS FROM THE TICKETLESS DISPLAY SS1V1
+ 4. PNR CREATION WITH MANDATORY ELEMENTS
+ a. Name Element                                             NM1WILLIAMS/ANNIE MS
+ b. Phone Element                                            AP PAX CTC DEL 91 9865621231
+ c. E Mail Address                                           APE AWIILLIAMS@BINGO.COM
+ d. Ticketing Element                                        TKOK
+ e.Pricing the PNR through FXP entry                         FXP
+ View the stored fare                                        TQT
+ f. Form of Payment (Either Credit Shell or Credit Card)     FPAG
+                                                             FPCCVI4111111111111111/1212/*CV123/
+                                                             HOLDER NAME
+ g. End the transaction and retrieve the PNR                 RFAGENT;ER
+ 5.TO SYNCHRONISE THE AIR ASIA BOOKINGS                      RTLC
+ Note: Once the PNR is saved the FOP in the PNR gets utilized.
+ PRICING ENTRIES
+ FXP Entry is used to store the fare in the PNR
+ TQT entry can be used for the breakup of fare and taxes
+ POINTS TO REMEMBER
+ Air Asia accepts point to point and round trip bookings
+ No waitlist bookings are done for Air Asia
+ Passenger needs to pay for the excess baggage charges at the airport directly
+                                                                                            GPROT05/JAN14/VER7
+                           ADVANTAGE                                                          21
+USE AMADEUS QUEUES TO WORK MORE EFFICIENTLY
+
+
+
+
+ PNR RETRIEVAL & DISPLAY                             HE RT
+ RETRIEVAL BY PNR                                    RT QVH1A5
+ RETRIEVAL BY SURNAME                                RT/SINGH
+ RETRIEVAL BY SURNAME AND INITIAL                    RT/SINGH/J
+ RETRIEVAL OF ACTIVE PNRS ONLY                       RT/SINGH/J*A
+ RETRIEVE PNR AT LINE 4 OF LIST                      RT4
+ RETURN TO LIST                                      RT0
+ RETRIEVAL BY FLIGHT                                 RTLH761/14SEPDELFRA-SEN
+ RETRIEVE PNR BY TICKET NUMBER (contained in FA or   RTTKT/016-1234567890
+ SSR element)
+ REDISPLAY CURRENT PNR                               RT
+ DISPLAY ONLY ITINERARY SEGMENTS                     RTI
+ DISPLAY GENERAL FACTS INCLUDING OSI / SSR           RTG
+ ELEMENTS
+ DISPLAY REMARKS ONLY                                RTR
+ DISPLAY PNR ELEMENTS RELATED TO FARE,TICKETING      RTF,K,I
+ AND ITINERARY ONLY
+ DISPLAY ELEMENTS FOR ONE PASSENGER ONLY             RT/P2
+ DISPLAY AIRLINE RECORD LOCATOR IN PNR               RL
+ DISPLAY AIRLINE RECORD LOCATOR IN NUMERIC           RLN
+ FORMAT
+ DISPLAY NUMERIC RECORD LOCATOR WHILE                RLN YBH22M
+ RETIEVING PNR
+ RETRIEVE PNR BY NUMERIC RECORD LOCATOR              RT 123456789012
+ RETRIEVE PNR ON WHICH EXTENDED SECURITY HAS         RT/DELI22123-SMITH (where DELI22123 is the
+ BEEN RECEIVED                                       ofﬁce that has extended the security)
+ DISPLAY FLIGHT INFORMATION FROM RETRIEVED PNR       RTSVI3 (Segment3)
+ RETRIEVE PNR FROM CUSTOMER PROFILE DISPLAY          RTU
+ RETRIEVE PNR FROM DISPLAYED E-TICKET RECORD         RT*E
+ DISPLAY ALL QUEUES WHERE PNR IS PLACED              RTQ
+ TO SYNCHRONISE THE AIR ASIA BOOKINGS                RTLC
+ RETRIEVAL OF THE PNR WITH NUMERIC RECORD            RT1234569778
+ LOCATOR
+ TO RETRIEVE THE NUMERIC RECORD LOACTOR IN THE       RLN
+ PNR
+
+
+                                                                                 GPROT05/JAN14/VER7
+                             ADVANTAGE                                                              22
+CHECK YOUR ITINERARY ONLINE ON www.checkmytrip.com
+
+
+
+
+ TO RETIEVE THE NUMERIC RECORD LOCATOR WITH              RLN ZSD3WS
+ ALPHA NUMERIC RECORDLOCATOR
+ TO RETIEVE THE ALPHA NUMERIC RECORDLOCATOR              RLN 12345666655
+ WITH NUMERIC RECORD LOCATOR
+ PNR CLAIM                                               HE RO
+ PNR CLAIM IS A 2 STEP PROCESS.THE INITIAL STEP CAUSES THE PNR TO BE DISPLAYED IN ITS ORIGINAL
+ FORMAT. THE SECOND STEP CONSISTS OF PERFORMING AN END OF TRANSACTION ENTRY
+ STEP 1
+ RETRIEVING THE PNR CREATED IN ANOTHER OFFICE       RO CO ABC123 (where CO is the airline and
+ (BY RECORD LOCATOR)                                ABC123 is the airline record locator)
+ RETRIEVAL BY FLIGHT NUMBER, DATE AND NAME               RO AA 042/23AUGDELCHI-SHARMA
+ RETRIEVAL FROM A SIMILAR NAME LIST                      RO 3 (where 3 is the line number of the PNR on
+                                                         the list)
+ RETURNING TO THE SIMILAR NAME LIST                      RO 0
+ STEP 2
+ CLAIMING RESPONSIBILITY FOR THE PNR                     ER or ET
+ PNR MODIFICATIONS                                       HE XE/HE XI/HE DL/HE RR/HE SB
+ CANCEL SPECIFIED SEGMENT                                XE 4
+ CANCEL RANGE OF SEGMENTS                                XE 4-8
+ CANCEL NON-CONSECUTIVE SEGMENTS                         XE 4,6
+ DELETE ELEMENT (TO REMOVE INACTIVE STATUS               DL4
+ CODES SUCH AS HX, UC FROM THE PNR FACE)
+ ACCEPT STATUS AS HK FOR SEGMENT                         8/HK
+ ADD OR CHANGE PASSENGER ASSOCIATION                     7/P1,4
+ CANCEL ITINERARY                                        XI
+ ACCEPT ALL STATUS UPDATES AND REDISPLAY PNR/            ERK or ETK
+ END TRANSACTION
+ CHANGE CLASS TO Y FOR SEGMENT 6 OF PNR                  SBY6
+ CHANGE CLASS TO Y FOR ALL SEGMENTS                      SBY
+ CHANGE DATE FOR SEGMENT 7 OF PNR                        SB25DEC7
+ Note: For Standard access carriers, do not use the SB
+ entries
+ PNR AND ITINERARY PRINTING                              HE IED/HE IEP
+ ITINERARY BASIC DISPLAY FOR PASSENGER1                  IBD/P1
+ ITINERARY BASIC PRINT FOR ALL PASSENGERS                IBP
+
+                                                                                       GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                23
+VIEW BACKDATED FARES UPTO TWO YEAR IN THE PAST
+
+
+
+
+ ITINERARY EXTENDED DISPLAY FOR PASSENGER 2              IED/P2
+ ITINERARY EXTENDED PRINT FOR PASSENGER 2                IEP/P2
+ ITINERARY EXTENDED PRINT FOR PASSENGER 2 IN             IEP/LP FR/P2
+ FRENCH LANGUAGE
+ PRINT SINGLE JOINT ITINERARY FOR ALL PASSENGERS IEPJ
+ PRINT ENTIRE ITINERARY (NORMAL SCREEN VIEW)             WRA/RT
+ PRINT ENTIRE HISTORY                                    WRA/RH
+ SPLIT BOOKINGS                                          HE SP
+ MANUAL SPLIT IS A 3 STEP PROCESS. RETRIEVE THE
+ PNR AND
+ 1/SPECIFY PASSENGERS TO BE SPLIT                        SP 1,4
+ 2/END AND FILE NEW PNR BEING CREATED                    RF AMIT; EF
+ 3/END TRANSACTION IN PARENT PNR                         RF AMIT;ET
+ RETRIEVE SPLIT PNR RECORDS                              RT AXR (in the retrieved parent PNR)
+ Note: Action changes in the new PNR only after airline record locator has been received in the PNR
+ HANDLING NON HOMOGENEOUS PNR CONDITION                  HE NHP
+ (AUTOMATIC SPLIT)
+ NHP is a unique feature of Amadeus provided to the user wherein the system performs an automatic split
+ at PNR creation stage. This happens when the number of services requested does not match the number
+ of passengers in the PNR
+ INCREASING/DECREASING THE SEATS WITH SEGMENT            3/2
+ ASSOCIATION (segment number/number of seats
+ required)
+ ASSOCIATING THE SEGMENT SOLD WITH THE                   3 / P2 OR 4-5/P1-2
+ PASSENGER
+ END AND RECEIVE THE PNR FILE                            RFSC;ER
+ RETRIEVE SPLIT PNR RECORDS                              RT AXR
+ Note: Automated Split cannot be performed on the saved PNRs, it only happens when PNR is in the creation
+ stage
+ COPY PNR                                                HE RRN
+ COPY THE WHOLE PNR                                      RRN
+ COPY PNR FOR FOUR PASSENGERS                            RRN/4
+ COPY PNR FOR 7 DAYS LATER THAN ORIGINAL                 RRN/DP7
+ BOOKING
+ COPY PNR FOR 3 DAYS EARLIER THAN ORIGINAL               RRN/DM3
+ BOOKING
+                                                                                         GPROT05/JAN14/VER7
+                              ADVANTAGE                                                                      24
+USE FARE DIAGNOSTIC TO TARGET SPECIFIC FARES. HE FARE DIAGNOSTIC
+
+
+
+
+ COPY FOR SPECIFIC SEGMENTS ONLY                                   RRN/S2,6
+ COPY PNR WITH DIFFERENT DATE ON PARTICULAR                        RRN/S5D12SEP
+ SEGMENT
+ COPY PNR AND CHANGE CLASS OF SERVICE                              RRN/CY
+ COPY PNR TO CREATE LINKED “AXR”                                   RRA
+ COPY PASSENGER DATA ONLY                                          RRP/P2
+ COPY PNR AND CHANGE CLASS OF SERIVICE FOR A                       RRN/S2CY/S3CJ
+ SPECIFIC SEGMENT
+ COPY ITINERARY SEGMENTS ONLY                                      RRI
+ PNR HISTORY                                                       HE RH
+ TO SEE THE LIST OF PNR HISTORY DISPLAY OPTIONS                    HE RH
+ FOR A LIST OF PNR HISTORY CODES, REFER TO HE RH                   HERH.148
+ and then GP CODE
+ DISPLAY PNR HISTORY                                               RH
+ DISPLAY PARTIAL PNR HISTORY FOR AIR SEGMENTS                      RHA
+ ONLY
+ DISPLAY HISTORY OF GENERAL FACTS (SSR, OSI)                       RHG
+ RETRIEVE SEGMENT HISTORY (SEGMENT 1)                              RHS1
+ DISPLAY QUEUE HISTORY                                             RHQ
+ DISPLAY PNR HISTORY WITH QUEUE HISTORY                            RH/ALL
+ PNR RECALL ENTRIES                                                HE RPD
+ RECALL PURGED PNR BY AMADEUS RECORD LOCATOR                       RPD/RLC-A123B4/03JUL09 (any date between
+                                                                   PNR creation and PNR purge)
+ RECALL PURGED PNR BY FLIGHT/DATE SEGMENT                          RPD/AF7708/16JUL09 (ﬂight date)
+ Note: The purged amadeus pnr data can be retrieved for past 3 years.
+ MULTI LIST-SEARCH BY FLIGHT                                       HE LP
+ MULTI LIST PNR RETRIEVAL                                          LP/TG316/12FEB/DELBKK
+ MULTI LIST FOR WAITLIST SEGMENTS                                  LP/W/TG316/12FEB/DELBKK
+ Note: For a list of Search Option codes, go to HE LP
+ and then GPLP2
+ PLACE LIST ON QUEUE                                               LP/W/TG316/12FEB/DELBKK-Q25C0
+ SEND LIST TO PRINTER                                              LP/W/TG316/12FEB/DELBKK-P
+ MULTI LIST FOR RECONFIRMED SEGMENTS                               LP/R/TG316/12FEB/DELBKK
+ MULTI LIST FOR SPECIFIC SSR                                       LP/S(FQTV)/TG316/12FEB/DELBKK
+ RETRIEVE PNR AT LINE 4 OF LIST                                    LP4
+
+                                                                                                GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                      25
+USE AMADEUS BEST PRICER TO FIND THE LOWEST FARES. HE BEST BUY
+
+
+
+
+ RETURN TO LIST                                                 LP0
+ SEARCH BY OFFICE                                               HE LPO
+ TO SEE THE LPO SEARCH CODES                                    HELPO.358
+ SEARCH BY CRITERIA                                             LPO/A(AF,BA)B(CPH)
+ SEARCH BY CRITERIA AND PLACE SEARCH RESULTS                    LPO/A(AF,BA)B(CPH) - Q29C2
+ ON SPECIFIC QUEUE
+ Under LPO command we need to highlight this command LPO/W(*X)
+ SEARCH BY CRITERIA FOR HOTEL SEGMENTS                          LPO/N(HTL)
+ SEARCH BY CRITERIA FOR INSURANCE SEGMENTS                      LPO/N(INS)
+ SEARCH BY CRITERIA FOR CAR SEGMENTS                            LPO/N(CCR)
+ DISPLAY THE PASSENGER LIST STATUS TABLE                        LPS/PS
+ DISPLAY THE SEARCH RESULTS                                     LPS/D3
+ RETRIEVE A PNR FROM THE LIST                                   LPS23
+ RETURN TO LIST                                                 LPS0
+ REMOVE A SEARCH FROM THE TABLE                                 LPX/3-5,7
+ QUEUES
+ DISPLAY TOTAL QUEUE COUNT                                      QT
+ DISPLAY ALL EXISTING QUEUES FOR AN OFFICE                      QTQ
+ START QUEUE PROCESSING                                         QS97C0D1
+ REMOVE ITEM FROM QUEUE, DISPLAY NEXT ONE                       QN
+ DELAY ITEM, DISPLAY NEXT ONE                                   QD
+ DELAY PNR TO SPECIFIC DATE AND TIME                            QD09DEC/1200
+ EOT AND EXIT QUEUE MODE                                        QF
+ IGNORE PNR AND EXIT QUEUE MODE                                 QI
+ REDISPLAY QUEUE MESSAGE                                        QU
+ PLACE PNR TO QUEUE CATEGORY OF OWN OFFICE                      QE8C1
+ PLACE PNR TO ANOTHER OFFICE QUEUE                              QE/DEL1A0900/0C0
+ INFORMATION PAGE TO SEE THE QUEUE ADDRESSES                    GGAMAINUSE.161
+ OF THE AIRLINES
+ SEND FREE FLOW TEXT MESSAGE                                    QE/DELA0900/97 (ctrl+enter for new line)
+                                                                WRITE TEXT OF MESSAGE (ctrl+enter)
+                                                                REGARDS// (END Message with //) (enter)
+
+
+
+                                                                                               GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                        26
+DISPLAY COMBINED CONTENT OF GDS AND NON GDS HOTEL AVAILABILITY AND RATES THROUGH AMADEUS HOTEL MULTISOURCE
+
+
+
+
+ QUEUE NICKNAMES                                            HE QUEUE and then GP NIC
+ ADD A NICKNAME TO A QUEUE                                  QLAJANE/30C1
+ DISPLAY NICKNAME LIST                                      QLD
+ PLACE PNR ON QUEUE SPECIFIED BY NICKNAME                   QE.JANE
+ QUEUE SORTATION                                            HE QUEUE and then GP SOR
+ ACTIVATE THE SIGN-ASSOCIATED CATEGORY                      QAC6C21-21
+ NAME THE CATEGORY                                          QAR6C21NAME or QAN6C21NAME
+ QUEUE VIEW                                                 HE QV
+ TO DISPLAY A LIST OF PNRS ON A SPECIFIC QUEUE              QV/8 or QV/8C41D1
+ SCROLLING DOWN IN THE DISPLAY                              QVMD
+ TO OPEN A PNR FROM THE LIST                                QV2
+ QUEUE PLANNER                                              HE QVR
+ QUEUE SUMMARY PLANNER - DISPLAY BY RECORD                  QVR
+ LOCATOR
+ QUEUE TICKETING PLANNER - DISPLAY BY RECORD                QVRT
+ LOCATOR
+ QUEUE TICKETING PLANNER BY SPECIFIC DATE                   QVRT/12AUG
+ QUEUE OPTION PLANNER                                       QVRO/12APR
+ QUEUE MONITOR                                              HE QO
+ ADD QUEUE MONITOR FOR A SPECIFIC QUEUE                     QOA2
+ ADD QUEUE MONITOR FOR A SPECIFIC QUEUE, ALL                QOA97CADA
+ CATEGORIES AND DATE RANGES
+ There is a functionality known as “Automated Ticketing Timelimit”. This functionality enables the airlinesto
+ automatically assign and manage the timelimts for ticket issuance in Amadeus. The PNR contains two
+ elements “OPW” and “OPC”. OPW element notifies your office by queue placement 24 hours prior to the
+ automatic cancellation of the AIR segments that are associated to an ATL.The “OPC”element is used to
+ track the ticketing time limit, to initiate automatic cancellation of ATL associated segments and to queue
+ place the PNR after cancellation. The que catagory associated with Automated Ticketing Timelimit is Queue
+ 1 and Catagory 7 and 8
+ AIRLINE OFFICES CAN ADD AN OPQ OPTION ELEMENT TO THE PNR SO THAT ON A SPECIFIED DATE, THE
+ PNR IS PLACED ON THE QUEUE OF A DESIGNATED OFFICE. THE OPQ ELEMENT CAN ONLY BE ENTERED BY
+ AUTHORIZED ATO/CTOS. IF YOU ENTER AN OPQ ELEMENT, THE PNR WILL BE SENT TO THE QUEUE PLANNER
+ OF THE DESIGNATED OFFICE AT END OF TRANSACTION. ON THE SCHEDULED DATE, DURING THE NIGHTLY
+ FILE MAINTENANCE PROCESS, THE PNR WILL BE PLACED ON THE QUEUE OF THE DESIGNATED OFFICE.
+
+
+
+                                                                                              GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                          27
+AMADEUS LCC SMART IS AN EASY TO USE, SMART-TAB BASED GRAPHICAL INTERFACE FOR BOOKING SELECT LOW COST CARRIERS
+
+
+
+
+ AMADEUS E MAIL                                               HE EMAIL
+ TO REGISTER THE TERMINAL FOR THE FIRST TIME FOR              WM/
+ AMADEUS E-MAIL
+ SEND ITINERARY MAIL (Perform this entery on retrieved IEP-EML-ABC@YAHOO.COM
+ PNR)
+ SEND ITINERARY MAIL USING CONTACT INFORMATION IEP-EMLA
+ FROM APE ELEMENT OF THE PNR
+ SEND FREE FLOW TEXT EMAIL                                    WMP (ctrl+enter)
+                                                              EML ABC@YAHOO.COM; (ctrl+enter)
+                                                              FREE FLOW TEXT (ctrl+enter)
+                                                              LLLL / SEND (enter)
+ SEND FREE FLOW TEXT EMAIL TO MULTIPLE EMAIL                  WMP (ctrl+enter)
+ ADDRESSES
+                                                              EML ABC@YAHOO.COM;(ctrl+enter)
+                                                              EML XYZ@YAHOO.COM;(ctrl+enter)
+                                                              EML LMN@YAHOO.COM; (ctrl+enter)
+                                                              FREE FLOW TEXT (ctrl+enter)
+                                                              LLLL / SEND (enter)
+ FORWARD A TIMETABLE                                          WM/FWD/EML ABC@YAHOO.COM/
+                                                              TN15AUGDELBOM
+ DEFINE NICKNAME                                              WM / ADD / NIC / EML / JOHN / JOHNM@YAHOO.
+                                                              COM
+ USE A NICKNAME                                               WMP (ctrl+enter)
+                                                              EMLN JOHN ; (ctrl+enter)
+                                                              FREE FLOW TEXT (ctrl+enter)
+                                                              FREE FLOW TEXT (ctrl+enter)
+                                                              FREE FLOW TEXT (ctrl+enter)
+                                                              LLLL / SEND / APPEND-MSG NO. (enter)
+ TO VIEW THE E-MAIL QUEUE                                     WM / MSG
+ TO VIEW E-MAIL QUEUE FOR OFFICE                              WM / MSG /O
+ DISPLAY AGENT MESSAGE FROM QUEUE                             WM / MSG-2
+ DISPLAY OFFICE MESSAGE FROM QUEUE                            WM / MSG-2/O
+ DISPLAY MESSAGE LOG                                          WM / LOG
+
+
+
+
+                                                                                                 GPROT05/JAN14/VER7
+                           ADVANTAGE                                                                      28
+USE AMADEUS MASTER PRICER EXPERT FOR SEARCHING LOW FARE AVAILABLE RECOMMENDATIONS WITH/WITHOUT PNR
+
+
+
+
+E MAIL STATS                                               HE EMAIL
+TO SEE THE NUMBER OF E MAILS SENT FROM YOUR                WM / HST
+TERMINAL
+TO SEE THE NUMBER OF E MAILS SENT FROM ALL                 WM/HST/O
+TERMINALS IN THE OFFICE
+FARES
+
+FARE QUOTE RATE OF EXCHANGE                                HE FQA
+DISPLAY ROE FOR COUNTRY OR CURRENY                         FQAINDIA or FQA INR
+DISPLAY BACK DATE ROE                                      FQAINDIA/23AUG09
+FARE QUOTE EXCESS BAGGAGE                                  HE FQX
+EXCESS BAGGAGE RATE FOR SECTOR                             FQXDELLON/35
+EXCESS BAGGAGE RATE WITH CARRIER AND DATE                  FQXDELLON/12JUN10/35/BA
+CREDIT CARD APPROVAL                                       HE DE
+REQUEST MANUAL APPROVAL                                    DECCVI578588875885/1212/50000/AF
+FARE QUOTE CURRENCY                                        HE FQC
+CURRENCY CONVERSION FROM USD TO LKR                        FQC100USD/LKR
+CURRENCY CONVERSION TO NUC AMOUNT                          FQC1000USD/NUC
+Note: To get the Currency Code encode or decode the country.
+FARE QUOTE DISPLAY                                         HE FQD
+FARE QUOTE DISPLAY FOR A CITY PAIR                         FQDDELPAR
+FARE DISPLAY ON SPECIFIC CARRIER                           FQDDELBKK/ATG
+FARE DISPLAY WITH MULTIPLE CARRIERS(MAX 3)                 FQDDELLAX/ABA, AF, LH
+FARE DISPLAY FOR SPECIFIC DATE                             FQDDELPAR/AAF/D15DEC
+FARE DISPLAY WITH DATE RANGE                               FQDDELPAR/AAF/D12DEC**16JAN
+FARE DISPLAY FOR A PAST DATE (upto 2 years in the FQDDELPAR/AAF/D12JUN09
+past)
+FARE DISPLAY INCLUSIVE OF TAXES                            FQDDELPAR/AAF/R,AT
+DISPLAY TAX BREAK DOWN FOR FARE AT LINE 4                  FQK4
+SHOPPERS FARE DISPLAY                                      FQDDELLHR/D10SEP/S
+FARE DISPLAY IN NUC                                        FQDDELPAR/AAF/D23DEC/R,NUC
+FARE DISPLAY FOR ONE-WAY ONLY                              FQDDELPAR/AAF/IO
+FARE DISPLAY IN HALF ROUND TRIP NUC                        FQDDELPAR/AAF/D23DEC/IH
+
+
+                                                                                             GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                      29
+CONTACT AMADEUS HELP DESK THROUGH LIVE CHAT, SUPPORTED AS A SMART TAB IN AMADEUS SELLING PLATFORM
+
+
+
+
+FARE QUOTE DISPLAY FOR THE ROUND THE WORLD                  FQDDELDEL/ABA/VRW
+ROUTING
+FARE DISPLAY FOR SPECIFIC GLOBAL ROUTING                    FQDDELLAX/D23DEC/VAT
+FARE DISPLAY IN REVERSE ORDER                               FQDDELLON/ABA/IX
+ROUND-TRIP FARES                                            FQDBOMLON/ABA/IR
+FARE DISPLAY FOR PARTICULAR CABIN CLASS                     FQDDELLON/ABA/KF
+FARE DISPLAY FOR PARTICULAR BOOKING CLASS (RBD) FQDDELLON/ABA/CS
+CONVERT THE CURRENCY AT LINE 5 OF THE FARE                  FRC5/GBP
+DISPLAY TO GBP
+FARE DISPLAY FOR ONLY SPECIFIC AIRLINE                      FQDDELLON/A-BA
+FARE DISPLAY WITH EXACT OUTBOUND AND INBOUND FQDDELLON/A9W/D10SEP*15SEP
+DATES
+FARE DISPLAY WHEN INBOUND AND OUTBOUND DATES FQDDELBOM/A9W/D10SEP*
+ARE SAME
+FARE DISPLAY WHEN OUTBOUND DATE IS THE CURRENT FQDDELBOM/A9W/D*10SEP
+DATE AND INBOUND DATE IS SPECIFIED
+HISTORICAL FARES                                            HEFQD
+FARE DISPLAY FOR A SPECIFIC PAST DATE                       FQDDELLON/ABA/D15APR09
+Note: The system can display fares upto 24 months
+in the past
+FARE DISPLAY FOR THE PAST MONTH                             FQDDELLON/ABA/DMAR13
+FARE DISPLAY FOR THE 3-MONTH PERIOD                         FQDDELLON/ABA/DJAN
+FARE DISPLAY FOR INDIAN AIRLINES’ CORPORATE
+FARES
+AMEX GOLD CARD                                              FQDDELBOM/AIC/R,U*AXGOLD
+AMEX SILVER CARD                                            FQDDELBOM/AIC/R,U*AXSILVER
+AMEX GREEN CARD                                             FQDDELBOM/AIC/R,U*AXGREEN
+ABN AMRO CO-BRANDED CARD HOLDERS                            FQDDELBOM/AIC,R,U*IAABN
+Note: Form of payment for these fares has to be through credit card. Fare basis has to be passed to IC in
+the SSR format
+FARE QUOTE DISPLAY CHANGE ENTRIES
+CHANGE LOCAL CURRENCY DISPLAY TO NUC                        FQDN
+CHANGE BACK TO LOCAL CURRENCY                               FQDL
+DISPLAY A FARE AT LINE 7 IN ANOTHER CURRENCY                FRC7/GBP
+CHANGE TO AIRLINE SPECIFIC DISPLAY                          FQDC/AAF
+
+                                                                                              GPROT05/JAN14/VER7
+                            ADVANTAGE                                                        30
+MANAGE YOUR SIGN BANK WITH LSA RIGHTS
+
+
+
+
+DISPLAY MILEAGE SURCHARGE BAND FOR FARE AT       FRM1
+LINE 1 OF DISPLAY
+DISPLAY LIST OF FARE REQUEST TYPE CODES          FQL*
+FARE QUOTE NOTES                                 HE FQN
+DISPLAY FARE NOTES FOR FARE AT LINE 4            FQN4
+DISPLAY FARE NOTES WHERE FARE HAS MULTIPLE       FQN1-1
+COMPONENTS
+DISPLAY FARE NOTES IN LIST FORMAT                FQN4*L
+DISPLAY CATAGORIES                               FQN4*AP,PE,CD or FQN4//PE
+DISPLAY INFORMATIONAL NOTES                      FQN LH/0448
+DISPLAY BY RULE NUMBER                           FQN A200
+TAX INFORMATION FOR A COUNTRY                    FQNTAX/FR (where FR is the country code)
+TAX INFORMATION FOR A UNIQUE TAX CODE            FQN TAX/XA
+TAX INFORMATION FOR A UNIQUE TAX CODE IN A       FQN TAX/GB/YO
+COUNTRY
+FARE QUOTE BOOKING CLASS                         HE FQS
+DISPLAY BOOKING CLASS INFORMATION
+BOOKING CODE INFORMATION FOR FARE WITH MULTIPLE FQS3-3
+FARE COMPONENTS
+FARE QUOTE CLASS FOR A DIFFERENT AIRLINE         FQS/ACO
+FARE QUOTE ROUTING                               HE FQR
+DISPLAY ROUTING INFORMATION FOR FARE AT LINE 4 FQR4
+VIEW ROUTING INFORMATION WHERE THE FARE HAS      FQR 2-1
+MULTIPLE FARE COMPONENTS
+FARE QUOTE PRICING                               HE FQP
+FARE QUOTE PRICING                               FQPDELPARZRHPARDEL
+FARE QUOTE PRICING WITH LON AS STOPOVER          FQPDELZRHLHR-PARDEL
+FARE QUOTE PRICING WITH ZRH AS TRANSIT AND PAR   FQPDELZRHLHR-PAR-DEL
+AND LON AS STOPOVER
+FARE QUOTE PRICING THROUGH MASK                  FQPDELLHRJFK-CDG-DEL/S
+FARE QUOTE PRICING FOR CHILD PASSENGER           FQPDELPARZRH-PARDEL/RCH
+FARE QUOTE PRICING FOR INFANT PASSENGER          FQPDELPARZRH-PARDEL/RIN
+FARE IMAGE FOR FARE ON LINE NUMBER 3             FQQ3
+FARE QUOTE PRICING - LOWEST FARE                 FQPDELLHRDEL/L
+
+                                                                                GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                31
+DOWNLOAD THE ONLINE QRG /QRT FROM www.amadeus.co.in
+
+
+
+
+ FARE QUOTE PRICING ONLINE ON PARTICULAR AIRLINE FQPDELCDGDEL/OAF
+ FARE QUOTE PRICING WITH DATE, AIRLINE AND CLASS FQPDEL/ABA/D12DEC/CYLHR
+ FARE QUOTE PRICING WITH SURFACE SEGMENT              FQPDELBKKKUL- -SIN-BKK-DEL
+ FARE QUOTE PRICING WITH SURFACE & STOPOVER           FQPDELBKKKUL- - -SIN-BKK-DEL
+ FARE QUOTE PRICING WITH TAX EXEMPT(FT TAX)           FQPDELPARJFK-PAR-DEL/R,ET-FT
+ FARE QUOTE PRICING FOR PTA FARE (WHERE DEL IS        FQPJFKDELJFK/R,DEL.JFK
+ CITY OF SALE AND JFK IS CITY OF TICKET ISSUE)
+ FARE FOR ADULT, CHILD AND INFANT                     FQPDELSINDEL/OAI/RADT*CH*IN
+ TO CALCULATE THE TOTAL OF SEVERAL FARES FROM         FQU1//2//3
+ THE FQP DISPLAY
+ TO MULTIPLY A FARE AMOUNT WHEN YOU HAVE MORE FQU 1/X2//2/X2//3/X4
+ THAN ONE PASSENGER TRAVELLING ON THE SAME FARE
+                                                      (Fare at line 1 for 2 passengers plus the fare at
+                                                      line 2 for 2 passengers plus the fare at line 3 for
+                                                      4 passengers)
+ FARE QUOTE PRICING WITH VALIDATING CARRIER           FQPDELLHRDEL/R,VC-AI
+ SPECIFIED
+ FARE QUOTE PRICING WITH TRAVEL CARRIER AND           FQPSINDPSSIN/OGA/R,VC-SQ
+ VALIDATING CARRIER SPECIFIED
+ FARE QUOTE MILEAGE                                   HE FQM
+ MILEAGE CALCULATION                                  FQMDELSINTYOLAXSFOHNL
+ DISPLAY MILEAGE TABLE                                FQM*LONLAX
+ Calculate mileage from a PNR                         FRM/​S4-​6
+ CALCULATE MILEAGE FROM A FARE DISPLAY                FRM1
+ ITINERARY PRICING                                    HE FXX/HE FXP
+ ITINERARY PRICING WITH NO TST CREATION               FXX
+ ITINERARY PRICING WITH TST CREATION                  FXP
+ Note : This entry also generates FV and FE           ALSO GENERATES FV FE
+ automatically into the PNR
+ ITINERARY PRICING FOR SPECIFIED PASSENGERS           FXP/P2,4
+ ITINERARY PRICING FOR AN INFANT                      FXP/INF
+ ITINERARY PRICING FOR ADULT, CHILD AND INFANT        FXX/RADT*CH*IN
+ ITINERARY PRICING FOR SPECIFIED SEGMENTS             FXP/S5,7
+ ITINERARY PRICING WITH FT TAX EXEMPT                 FXP/R,ET-FT
+ SELECT THE FARE AT LINE 4 TO CREATE THE TST          FXT04
+
+
+                                                                                        GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                  32
+BOOK INDIA LOW COST AIRLINES WITH BOOKING BUILDER
+
+
+
+
+SELECT THE FARE AT LINE 4 FOR PASSENGER 1 AND          FXT04/P1//05/P2
+AT LINE 5 FOR PASSENGER 2 TO CREATE THE TSTS
+PRICE AS PER VALIDATING CARRIER                        FXP/R,VC-BA
+VIEW THE STORED TST IN THE PNR                         TQT
+DELETE THE TST FROM THE PNR                            TTE OR TTE/T1
+VIEW THE DISPLAY FOR TST NUMBER 1                      TQT/T1
+FARE DIAGNOSTIC                                        HE FARE DIAGNOSTIC
+THIS ALLOWS YOU TO TARGET A SPECIFIC FARE WHILE PRICING AND IF THE FARE IS NOT APPLICABLE,
+DISPLAYS THE REASON FOR THE PRICING FAILURE
+USE ITINERARY PRICING TO DIAGNOSE THE FARE             FXX/D F-Y2RT
+BASIS Y2RT
+USE INFORMATIVE PRICING TO DIAGNOSE THE FARE           FQPLONSINTYO/S/DF-Y2RT
+BASIS Y2RT
+Note: After doing the entry move down to view the diagnostic panel.
+BEST PRICER                                            HE FXA / HEFXB / HEFXR
+REBOOK TO THE LOWEST FARE AND DO NOT CREATE            FXR
+A TST
+REBOOK TO THE LOWEST FARE AND CREATE A TST             FXB
+DISPLAY A LIST OF LOWER FARES                          FXA
+SELECT A FARE AFTER FXA,REBOOK AND CREATE A TST FXU2
+SELECT A FARE AFTER FXA,REBOOK AND DO NOT              FXZ2
+CREATE A TST
+DISPLAY THE LOWEST POSSIBLE FARE, AND ADVISE           FXL
+THE SEAT AVAILABILITY
+Note: Do not use the automatic rebooking option for the airlines sold on standard access
+HOTELS                                                 HE HOTEL
+There are 4 types of access levels that Amadeus provides for Hotel companies. The level of access is
+indicated in the availability display in the space between the hotel chain code and the hotel name
+
+ACCESS LEVEL                                           DESCRIPTION
+Dynamic Access                                         Indicated by a (!) in the availability display.This
+                                                       is the highest level of connectivity and links the
+                                                       Amadeus Central System with the hotel company’s
+                                                       own reservation system. All availability and rates
+                                                       for the hotel chain are returned seamlessly
+                                                       from the hotel chain’s own system. The hotel
+                                                       company responds with a conﬁrmation and other
+                                                       information within four to eight seconds.
+                                                                                           GPROT05/JAN14/VER7
+                           ADVANTAGE                                                                   33
+AMADEUS SELLING PLATFORM NOW AVAILABLE ON MOBILE
+
+
+
+
+Hotel Complete Access Plus                              Indicated by a (+) in the avaialbility display.
+                                                        Information on the single property display is
+                                                        directly from the hotel chain’s reservation system.
+                                                        Bookings are sent to the hotel chain via a high-
+                                                        speed communication link when the sale is made
+                                                        and the hotel system immediately returns the
+                                                        conﬁrmation number and other data.
+Hotel Complete Access                                   Indicated by a (/) in the availability display The
+                                                        information on the availability display comes from
+                                                        the distribution system. Bookings are processed
+                                                        like Complete Access Plus. A conﬁrmation number
+                                                        is returned within four to eight seconds, even
+                                                        before you save the PNR.
+Hotel Standard Access                                   Indicated by a blank space ( ) in the availability
+                                                        display. Booking requests are sent to the hotel
+                                                        chain via teletype when you save your PNR. The
+                                                        hotel then updates your PNR with the conﬁrmation
+                                                        number.
+BEST AVAILABLE RATE (BAR) GUARANTEE
+The BAR indicator acts as a guarantee that the rates available in the distribution system are the best
+available public rates for Rack Rate, Non negotiated rates, Corporate Rates, Weekend Rates, Lowest
+Unrestricted Rates, Promotional Search Rates. The BAR is guaranteed by the hotel chain. In the event of a
+rate discrepancy, contact the hotel chain provider directly.
+HOTEL AIS AND HELP PAGES                                HE HOTEL
+HOTEL COMPANY AIS PAGES DISPLAY                         GG HTL UI (where UI is the chain code)
+HOTEL COMPANY HELP PAGES                                HE HTL RD
+HELP ON HOTEL DISPLAY CODES                             HE HTL CODES
+DECODE SPECIAL RATE CODE WKD                            DNN WKD
+ENCODE A HOTEL CHAIN                                    DNH TAJ
+DECODE A HOTEL CHAIN CODE                               DNH HL
+INFORMATION ABOUT THE NET TRANS                         GG HTL NET TRANS
+INFORMATION ABOUT THE TIDS PROGRAM                      GG TIDS
+HOTEL LIST DISPLAY                                      HE HL
+HOTEL LOCATION LIST DISPLAY FOR A CITY CODE             HL PAR
+HOTEL LOCATION LIST FOR A CITY CODE WITH AREA           HL HKG /AR-D /CO-UI
+AND CHAIN CODE SPECIFIED
+HOTEL LIST WITH DISTANCE FROM CITY OR POR               HLNCE/DI-8K
+HOTEL LIST FROM PNR SEGMENT                             HL S3
+                                                                                         GPROT05/JAN14/VER7
+                            ADVANTAGE                                                                    34
+CREATE TRAVELER PROFILES THROUGH PROFILE CREATOR
+
+
+
+
+ HOTEL LIST FOR ALL PROPERTIES OF A PARTICULAR HL TJ IN
+ CHAIN IN A PARTICULAR COUNTRY (for all Taj hotels
+ in India)
+ HOTEL AVAILABILITY                                       HE HA
+ HOTEL AVAILABILITY FOR 3 NIGHTS                          HA ZRH 07DEC-3
+ HOTEL AVAILABILITY WITH CHECK-OUT DATE                   HA ZRH 07DEC-10DEC
+ HOTEL AVAILABILITY WITH AREA & CURRENCY                  HA LON 10JUL-4/AR-D/FC-INR
+ HOTEL AVAILABILITY FROM SEGMENT3 OF PNR                  HA S3
+ HOTEL AVAILABILITY, OCCUPANCY, ALL STATUS                HA DEL 14JUL-2/RT-2/ST-ALL
+ TYPES
+ HOTEL AVAILABILITY WITH TRANSPORTATION TYPE              HAPAR12DEC-2/TR-F-L
+ Note: The Occupancy Level can be upto 9
+ FOLLOW UP ENTRY TO DISPLAY ALTERNATE                     HA8 (WHERE THE PROPERTY AT LINE 8 HAS
+ PROPERTIES                                               CLOSED STATUS)
+ FOLLOW UP ENTRY TO DISPLAY AVAILABILITY FOR THE HA 1
+ ALTERNATE PROPERTY AT LINE 1 OF THE DISPLAY
+ FOLLOW UP ENTRY TO DISPLAY HOTEL FEATURES FOR HF 1
+ THE ALTERNATE PROPERTY AT LINE 1 OF THE DISPLAY
+ HOTEL AVAILABILITY BY SPECIFYING SPECIAL RATE            HA ZRH 12DEC-2 /SR-WTT
+ CODE
+ AVAILABILITY FOR SPECIFIC CHAIN CODE AND                 HA BLR 03SEP /CO-TJ/ HN-WEST END
+ NAME OF HOTEL
+ HOTEL AVAILABILITY WITH MASTER CHAIN CODE                HA EM LON 12SEP-2 (where EM is the Master
+                                                          Chain code for Marriott group of hotels. To
+                                                          know if the hotel chain has a Master Chain code
+                                                          supported, use DNH MARRIOTT)
+ HOTEL AVAILABILITY FOR YATRA CHAIN HOTELS                HA BLR 11SEP-6/CO-YT
+ Note: Yatra hotels are available on the selling platform with the net rates and are saleable through deposit
+ option only.
+ HOTEL AVAILABILITY FOR MORE THAN 7 AREAS                 HA LON 12SEP-2 /AR-D-N-S-E
+ (AREA CODE PLUS ALL OPTION)
+ HOTEL AVAILABILITY OF ASSOCIATED CITIES                  HA NCE 17JUN-1 /AR-ALL
+ HOTEL AVAILABILITY WITH RATE UPTO SPECIFIED              HA PAR 10JUN-2 /FC-USD /QU-250
+ LEVEL
+ HOTEL AVAILABILITY WITH PREFERRED RATE RANGE HA ZRH 23JUN-2 /FC-INR /QU-3000-5000
+ SPECIFIED
+ HOTEL AVAILABILITY WITH HOTEL CATEGORY                   HA PAR 10OCT-4 /AR-D /FC-INR /HC-L (where L
+ SPECIFIED                                                = LUXURY. Check for codes on HE HTL CODES)
+                                                                                           GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                     35
+USE PNR CLAIM TO TAKE OVER PNR CREATED BY AIRLINES
+
+
+
+
+ HOTEL AVAILABILITY WITH MULTIPLE NUMBER OF                HALON12DEC-3/NR-2/RT-2
+ ROOMS
+ HOTEL AVAILABILITY FOR LOWEST RATES                       HALON12DEC-3/LOW
+ Note: Pls note that /LOW option works with various search parameters like /TC-, /HN-, /LOC, /RP-, /-DI-, /-TPR
+ HOTEL AVAILABILITY FOR LOWEST RATES WITH ALL              HALON12DEC-3/LOW/ST-ALL
+ STATUS
+ HOTEL SEARCH BY FLEXIBLE LOCATION (For non geo- HADEL12APR/LOC-GURGAON
+ coded countries, the search by IATA or non-IATA city code.
+ For geo-coded countries , you can search by landmark,
+ IATA or non IATA city or hotel property name)
+ HOTEL SEARCH FOR CITY OTHER THAN IATA CITY                HA*IN12APR-4/CT-GURGAON
+ (Works for non-geocoded countries as well)
+ HOTEL AVAILABILITY WITH AMADEUS TRAVEL                    HA FRA 25AUG /RT-2 /ST-ALL /TC
+ PREFERENCES MANAGER (you need to have the
+ displayed proﬁle in the background)
+ HOTEL AVAILABILITY WITH SEARCH BASED ON                   HA PAR 10OCT-4 /AR-D /FF-SWI-CON
+ SPECIFIC FACILITIES REQUIRED (Check for codes
+ on HE HTL CODES)
+ MOVE TO HOTEL SINGLE COMPANY DISPLAY FOR                  HA3
+ LINE 3 OF AVAILABILITY
+ SCROLLING ENTRIES
+ RETURN TO HOTEL MULTI PROPERTY DISPLAY                    MPHM
+ RETURN TO HOTEL SINGLE PROPERTY DISPLAY                   MPHA
+ HOTEL SELL                                                HE HS
+ HOTEL SELL FROM LINE 3, COLUMN A OF HOTEL SINGLE HS3
+ PROPERTY DISPLAY
+ HOTEL SELL WITH GUARANTEE, SUPPLEMENTARY                  HS3A /G-CCAX376919082501005EXP1209 /SI-
+ INFORMATION AND PASSENGER ASSOCIATION                     PREFERS POOL FACING ROOM /P1
+ HOTEL SELL AND MANUALLY SEND ARRIVAL DETAILS,             HS1/ ARR-S2
+ BY SEGMENT ASSOCIATION
+ HOTEL SELL AND MANUALLY SEND ARRIVAL DETAILS              HS1/ARR-AF7715-NCE-LON-3-0930
+ HOTEL FEATURES                                            HE HF
+ HOTEL FEATURES DISPLAY FROM MULTI PROPERTY                HF3
+ AVAILABILITY DISPLAY
+ HOTEL FEATURES DISPLAY FROM PNR SEGMENT                   HF S3
+ HOTEL FEATURES DISPLAY FROM SINGLE PROPERTY               HF
+ AVAILABILITY DISPLAY
+
+                                                                                             GPROT05/JAN14/VER7
+                           ADVANTAGE                                                                      36
+FOLLOW UP HOTEL COMMISSION THROUGH NET TRANS AND PEGASUS
+
+
+
+
+HOTEL POLICY INFORMATION                                   HE HP, HE HR
+TO SEE THE HOTEL POLICY IN A RETRIEVED HOTEL               RTSVCH2
+PNR FOR SEGMENT 2 OF PNR DISPLAY
+HOTEL PRICING                                              HE HP
+Hotel pricing is a display that you can request from from a single property hotel availability display or
+from a hotel PNR segment.It is available for hotels in Amadeus Dynamic Access(DA) and Hotel Complete
+Access Plus(CA+)only. It provides detailed information for a speciﬁc room rate on the price and conditions
+associated to the room rate.The information on Hotel pricing displays is supplied directly from the hotel
+chain’s own reservation system.
+TO SEE HOTEL PRICING DETAILS FOR RATE AT LINE              HP1
+1COLOUMN A OF HOTEL SINGLE PROPERTY DISPLAY
+TO SEE HOTEL PRICING DETAILS FOR HOTEL AT                  HP S4
+SEGMENT 4 IN PNR
+HOTEL RATE CHANGE                                          HE HR
+If the room rate changes in the period you are booking, it is indicated in a single property display with an
+asterix (*) next to the availability status code. Check the hotel chain’s policy on rate change by entering HE
+HTL XX (xx=hotel chain code).
+If the property belongs to an Amadeus Dynamic Access or Hotel Complete Access Plus chain, the HP x
+(where x = line number of the rate) entry performed on the single property display gets you the most up-to-
+date rate information. The information comes directly from the hotel chain’s central reservation system.
+For Hotel Standard Access and Complete Access Hotels, the information about room rates is stored in the
+distribution system and is updated regularly by the hotel chain. To obtain room rate information, enter the
+hotel single property display and use the HR command to display hotel rate change information.
+DISPLAY HOTEL RATE CHANGE INFORMATION (IF                  HR2
+APPLICABLE) FOR PROPERTY AT LINE 2 OF HOTEL
+MULTI PROPERTY DISPLAY
+DISPLAY HOTEL RATE CHANGE (IF APPLICABLE)FROM              HR
+HOTEL SINGLE PROPERTY DISPLAY
+DISPLAY HOTEL RATE CHANGE (IF APPLICABLE) FROM             HR S2
+HOTEL PNR SEGMENT
+HOTEL TERMS                                                HE HT
+Hotel Terms display is only available for Hotel Standard Access or Hotel Complete Access chains. A Hotel
+Terms display gives you the following information about a speciﬁc rate - what the rate includes, the
+cancellation policy, the booking requirements.
+TO DISPLAY HOTEL TERMS FROM LINE 2 COLOUMN A               HT 2
+OF SINGLE PROPERTY DISPLAY
+TO DISPLAY HOTEL TERMS FROM SEGMENT 4 OF PNR               HT S4
+
+                                                                                            GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                   37
+REGISTER FOR TRAINING ONLINE ON www.amadeus.co.in
+
+
+
+
+HOTEL POINTS OF REFERENCE                                 HE POR
+A Point of Reference is a building/monument or any other type of landmark considered important enough
+to be used as a criterion when searching for and booking hotels.Each point of reference is assigned to
+a category according to its nature. For example: An airport, a university, a sports stadium or a tourist
+attraction in a particular country.You can search for hotels that are less than a certain distance from the
+point of reference. In some countries partial geo coding is applied which means that, one or several areas
+of a country are including in POR but not the whole country.
+DISPLAY POINT OF REFERENCE CATAGORIES                     DRP-CAT
+HOTEL AVAILABILITY WITH POR                               HA LON 12DEC-4 /RP-ATT-BIGBEN
+LIST HOTELS NEAR EIFFEL TOWER IN PARIS                    HL PAR /RP-ATT-EIFFEL TOWER
+LIST ALL SHOPPING AREAS IN LONDON                         DRP*/ LON-SHO
+LIST ALL ATTRACTIONS IN GREAT BRITAIN                     DRP*/ GB-ATT
+DISPLAY DETAILS OF LINE 12 FROM ABOVE DISPLAY             DRP 12
+AVAILABILITY FROM DRP LIST                                HA L9/DT-12DEC-4
+DISPLAY A LIST OF HOTELS FROM DRP LIST RETURN             HL L2
+TO THE DRP LIST DRP
+DISPLAY HOTEL LIST BY GIVNG COUNTRY CODE                  HL*GB/RP-SPO-WEMBLEY
+HOTEL MODIFICATIONS / CANCELLATION                        HE HTL and then GP CHA
+Note: A change in the hotel segment may result in the segment getting cancelled and rebooked. There are
+2 types of options, Critical and Non-Critical. For Complete Access and Complete Access Plus car companies,
+when you enter a critical option, Amadeus tries to book a new segment. If the new request is accepted,
+the old segment is cancelled. If the new request is rejected, the old segment is retained. In the case of
+non-critical options, the new information is added to the existing reservation, the segment is modiﬁed, but
+not rebooked. Which options are Critical and which are Non - critical varies from company to company. To
+see which options are critical for a company, see HE HOTEL XX (where XX=Company code) The following
+options cannot be modiﬁed for Hotel Complete Access Plus chains: /RO- /RT- /SR- For Standard Access
+bookings, any change causes the old segment to be cancelled and a new one to be booked. You cannot
+modify or cancel a hotel segment if the guest has already checked in or if it is a past date segment.
+TO CHANGE CHECK-IN DATE                                   5/ DT-9MAY
+TO CHANGE CHECK-OUT DATE                                  5/ DD-29MAY
+TO DELETE SEGMENT DATA, ENTER THE OPTION                  5/ SI-
+IDENTIFIER WITHOUT UPDATE TEXT
+TO CANCEL A CONFIRMED HOTEL SEGMENT                       XE 3 (Check the cancellation policy in RTSVCH
+                                                          display before cancelling the segment)
+Note: In the hotel supports Interactive cancellation, a cancellation number is returned by the hotel provider
+and is appended to the hotel segment immediately. A remark with conﬁrmation and cancellation number
+remains appended in the PNR on EOT. To see if the hotel chain supports Interactive Cancellation, check HE
+HTL XX
+
+                                                                                            GPROT05/JAN14/VER7
+                             ADVANTAGE                                                                 38
+CHECK YOUR ITINERARY ONLINE ON www.checkmytrip.com
+
+
+
+
+TO DELETE AN INACTIVE SEGMENT / TO ACCEPT ALL          DL3, ERK or ETK
+STATUS CHANGES ON THE RETRIEVED PNR
+REMOVE ARRIVAL INFORMATION                             6/ARR-
+CARS                                                   HE CAR
+There are 3 types of access that Amadeus provides for car companies. The level of access is indicated in
+the availability display in the space between the car chain code and the car company name.
+ACCESS LEVELS DESCRIPTION
+Complete Access Plus (Seamless)                        The availability information is directly obtained
+                                                       from the providers system. The bookings are also
+                                                       sent via a high speed link at sell time. Represented
+                                                       by a (+) sign in the availability display
+Complete Access                                        Bookings are sent via a dedicated high-speed
+                                                       communication link at sell time. The car company
+                                                       returns a conﬁrmation number and other
+                                                       data within 4-8 seconds after segment sell.
+                                                       Represented by a (/) in the availability display
+Standard Access                                        The booking is sent to the car company via a
+                                                       teletype link. The conﬁrmation number is returned
+                                                       after End of Transaction. Represented by a blank
+                                                       space ( ) in the availability display
+DECODE A CAR COMPANY CODE                              DNC ZE
+ENCODE A CAR COMPANY                                   DNC BUDGET
+CAR COMPANY AIS PAGES                                  GG CAR ZI (where ZI is the chain code)
+CAR COMPANY AIS PAGE FOR SPECIFIC CITY                 GG CAR ZI FRA
+CAR COMPANY HELP PAGES                                 HE CAR SX
+HELP ON CAR DISPLAY CODES                              HE CAR CODES or GP COD
+HELP PAGE ON CAR CLASSIFICATION CODES                  CG
+DISPLAY LIST OF EQUIPMENT CODES FOR CAR COMPANY CE/CO-ZD
+DECODE CAR EQUPMENT CODE                               CE PHN
+CAR LIST DISPLAY                                       HE CL
+DISPLAY CAR LIST FOR HERTZ CAR RENTALS                 CL MAD/CO-ZE
+TO DISPLAY CAR LOCATION POLICY FOR A CAR               CPO ZI LHR
+COMPANY AND SPECIFIC AIRPORT
+TO DISPLAY CAR LOCATION POLICY FOR A CITY LOCATION CPO ZI MAD-C
+TO DISPLAY CAR LOCATION 

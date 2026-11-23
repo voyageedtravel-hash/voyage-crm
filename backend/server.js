@@ -92,6 +92,40 @@ const start = async () => {
     });
     console.log("MongoDB Connected ✅");
 
+    // ─── LMS: Auto-seed the Amadeus QRG on startup ────────────────────────
+    // If LMSConfig.qrgText is empty, read the shipped amadeus_qrg.txt
+    // from backend/seed/ and store it. Idempotent — once the QRG is
+    // in the DB (via this seeder OR an admin uploading a newer file),
+    // subsequent restarts skip the seed. Admins can still replace the
+    // text any time from the CRM admin panel; we never overwrite their
+    // uploaded version.
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const LMSConfigBoot = require("./models/LMSConfig");
+      let cfg = await LMSConfigBoot.findById("default");
+      if (!cfg) cfg = await LMSConfigBoot.create({ _id: "default" });
+      if (!cfg.qrgText || cfg.qrgText.length < 100) {
+        const qrgPath = path.join(__dirname, "seed", "amadeus_qrg.txt");
+        if (fs.existsSync(qrgPath)) {
+          const qrgText = fs.readFileSync(qrgPath, "utf8");
+          cfg.qrgText = qrgText;
+          cfg.qrgTitle = "Amadeus Quick Reference Guide";
+          cfg.qrgUpdatedAt = new Date();
+          cfg.qrgUpdatedBy = "auto-seed (startup)";
+          await cfg.save();
+          console.log(`LMS QRG seeded ✅ (${qrgText.length.toLocaleString()} chars)`);
+        } else {
+          console.warn("LMS QRG not seeded — seed/amadeus_qrg.txt missing");
+        }
+      } else {
+        console.log(`LMS QRG already loaded (${cfg.qrgText.length.toLocaleString()} chars) — skipping seed`);
+      }
+    } catch (e) {
+      console.warn("LMS QRG seed failed:", e.message);
+      // Non-fatal — admin can upload QRG manually from the CRM panel
+    }
+
     // ─── LEAD SCHEMA ──────────────────────────────────────────────────────────
     const leadSchema = new mongoose.Schema({}, { strict: false, timestamps: true });
     const Lead = mongoose.model("Lead", leadSchema);
