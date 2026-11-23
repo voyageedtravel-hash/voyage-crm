@@ -5481,39 +5481,66 @@ function buildInvoiceItemsV2(deal) {
   const fmtD = (d) => { if (!d) return ''; try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return d; } };
   const items = [];
   let seq = 0;
+  // IMPORTANT — never include the SUPPLIER/DMC vendor name on a
+  // client-facing invoice. The vendor (Akbar Travels Online, IRCTC,
+  // the DMC who runs the land tour) is Voyage-Ed's trade secret:
+  // showing it lets the client bypass us next time. Use only the
+  // PUBLIC-facing carrier / hotel / ship / policy name. Every item
+  // remains editable in the invoice modal's customItems list, so if
+  // Vishal ever wants to add text back he just types it there.
   (deal.flightVendors || []).forEach((f) => {
     const secs = [...(f.sectors || []), ...(f.returnSectors || [])].filter((s) => s.from || s.to);
     if (!secs.length && !f.sellingPrice) return;
     seq++;
     const routes = secs.map((s) => `${s.from || '?'} → ${s.to || '?'}`).join(', ');
     const dates = secs.map((s) => fmtD(s.date)).filter(Boolean).join(' + ');
-    items.push({ seq, desc: `${f.name || 'Flight'} — ${routes}`, sub: dates ? `${dates}` : '', paxCount: pax || '', amount: toINR(f.sellingPrice, f.currency, f.exchangeRate) });
+    // Pull the ACTUAL airline (the carrier the client flew, e.g.
+    // 'Air India') from the first sector. The vendor name f.name
+    // is the CONSOLIDATOR/OTA we booked through — not for client eyes.
+    const airline = secs.find((s) => s.airlineName)?.airlineName
+                 || secs.find((s) => s.airlineCode)?.airlineCode
+                 || 'Flight';
+    items.push({ seq, desc: `${airline} — ${routes}`, sub: dates || '', paxCount: pax || '', amount: toINR(f.sellingPrice, f.currency, f.exchangeRate) });
   });
   (deal.hotelVendors || []).forEach((h) => {
     if (!h.hotelName && !h.sellingPrice) return;
     seq++;
     const nights = (() => { let n = Number(h.nights); if (!n && h.checkIn && h.checkOut) n = Math.round((new Date(h.checkOut) - new Date(h.checkIn)) / 86400000); return n > 0 ? n : ''; })();
+    // Hotel description already uses h.hotelName (the hotel the guest
+    // actually stays at — Smile Hotel Kanazawa, etc.) not the vendor
+    // name, so this one was already safe.
     items.push({ seq, desc: `${h.hotelName || 'Hotel'} — Hotel Stay`, sub: `${h.roomCategory || ''} · ${nights ? nights + ' Night' + (nights > 1 ? 's' : '') : ''} · ${fmtD(h.checkIn)} → ${fmtD(h.checkOut)}${h.confirmationNo ? ' · Ref: ' + h.confirmationNo : ''}`, paxCount: pax || '', amount: toINR(h.sellingPrice, h.currency, h.exchangeRate) });
   });
   (deal.trainVendors || []).forEach((t) => {
     seq++;
-    items.push({ seq, desc: `${t.name || 'Train'} — Rail Travel`, sub: '', paxCount: pax || '', amount: toINR(t.sellingPrice, t.currency, t.exchangeRate) });
+    // Drop t.name — 'IRCTC' is the booking vendor, not client-facing.
+    // If a train name/number was captured, prefer that; else just
+    // 'Rail Travel'.
+    const trainLabel = t.trainName || t.trainNo ? [t.trainName, t.trainNo].filter(Boolean).join(' ') : 'Rail Travel';
+    items.push({ seq, desc: trainLabel.includes('Rail') ? trainLabel : `${trainLabel} — Rail Travel`, sub: '', paxCount: pax || '', amount: toINR(t.sellingPrice, t.currency, t.exchangeRate) });
   });
   (deal.landVendors || []).forEach((l) => {
     seq++;
-    items.push({ seq, desc: `${l.name || 'Land Package'} — Tours & Transfers`, sub: destination(deal) || '', paxCount: pax || '', amount: toINR(l.sellingPrice, l.currency, l.exchangeRate) });
+    // Drop l.name (the DMC) — show the destination the tour covers.
+    items.push({ seq, desc: `${destination(deal) || 'Destination'} — Tours & Transfers`, sub: '', paxCount: pax || '', amount: toINR(l.sellingPrice, l.currency, l.exchangeRate) });
   });
   (deal.visaVendors || []).forEach((v) => {
     seq++;
-    items.push({ seq, desc: `${v.name || 'Visa'} — Visa Services`, sub: v.visaStatus || '', paxCount: pax || '', amount: toINR(v.sellingPrice, v.currency, v.exchangeRate) });
+    // Drop v.name (the visa consultant/agency we route through).
+    // Show the destination so the client sees what the fee is for.
+    items.push({ seq, desc: `${destination(deal) || 'Travel'} — Visa Services`, sub: v.visaStatus || '', paxCount: pax || '', amount: toINR(v.sellingPrice, v.currency, v.exchangeRate) });
   });
   (deal.cruiseVendors || []).forEach((c) => {
     seq++;
+    // Ship name and cruise line are client-facing (they're on the
+    // cruise ticket), so safe to show. No change.
     items.push({ seq, desc: `${c.shipName || c.cruiseLine || 'Cruise'} — Cruise`, sub: `${c.cabinCategory || ''} · ${fmtD(c.checkIn)} → ${fmtD(c.checkOut)}`, paxCount: pax || '', amount: toINR(c.sellingPrice, c.currency, c.exchangeRate) });
   });
   (deal.insuranceVendors || []).forEach((ins) => {
     seq++;
-    items.push({ seq, desc: `${ins.name || 'Insurance'} — Travel Insurance`, sub: ins.policyType || '', paxCount: pax || '', amount: toINR(ins.sellingPrice, ins.currency, ins.exchangeRate) });
+    // Drop ins.name — the insurer's brand is on the policy document
+    // itself; on the invoice we just say 'Travel Insurance'.
+    items.push({ seq, desc: `Travel Insurance`, sub: ins.policyType || '', paxCount: pax || '', amount: toINR(ins.sellingPrice, ins.currency, ins.exchangeRate) });
   });
   (deal.pricingRows || []).forEach((pr) => {
     if (!pr.label && !pr.amount && !pr.sellingPrice) return;
