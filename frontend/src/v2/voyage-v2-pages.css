@@ -2297,3 +2297,401 @@
 .v2-deal-layout[style*="1fr"] .v2-side-card label {
   justify-content: flex-start !important;
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+   UI POLISH  (2026-11-25)
+   Small modernisations that apply at every viewport. These are the
+   subtle changes that take the UI from "functional" to "premium":
+   smoother transitions, tighter spacing scale, better card shadows,
+   friendlier focus states. No layout breakage — every rule either
+   introduces a new property on an existing class or adjusts a value
+   in the same direction as before.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* Smooth global scrolling — stops the jerky jump when a pill inside
+   the dashboard global-search dropdown is clicked and the deal page
+   opens. Combined with scroll-padding so the sticky header doesn't
+   eat the first row of any anchor jump. */
+html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+
+/* Make focus visible for keyboard users without being ugly for mouse
+   users. Modern browsers' :focus-visible only shows when the user
+   actually tabbed in, not on every click. */
+.v2-cta:focus-visible,
+.v2-icon-btn:focus-visible,
+.v2-hero-btn:focus-visible,
+.v2-filter-chip:focus-visible {
+  outline: 2px solid #c9a84c;
+  outline-offset: 2px;
+}
+
+/* Softer, more premium shadows across cards + modals. */
+.v2-kpi-card,
+.v2-chart-card,
+.v2-dest-card,
+.v2-flight-card,
+.v2-hotel-card {
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+.v2-kpi-card:hover,
+.v2-dest-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(13, 27, 62, 0.10);
+}
+
+/* Softer, cleaner CTA button — reduces visual weight slightly so the
+   gold primary buttons (Proposal PDF etc.) stand out more. */
+.v2-cta {
+  transition: background 180ms ease, transform 150ms ease, box-shadow 200ms ease;
+}
+.v2-cta:active { transform: translateY(0); box-shadow: 0 4px 12px rgba(15,35,80,.3); }
+
+/* Filter chips — add a soft hover halo. */
+.v2-filter-chip {
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.v2-filter-chip:hover:not(.active) {
+  background: #fdf6e5;
+  border-color: #f0c842;
+}
+
+/* Table rows — subtle hover highlight so the pointer feels tracked. */
+.v2-dep-row {
+  transition: background 120ms ease;
+}
+.v2-dep-row:hover { background: #fdf9ef; }
+
+/* Nicer scrollbar on desktop — doesn't change mobile at all. */
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(13, 27, 62, 0.15);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(201, 150, 26, 0.5); background-clip: padding-box; border: 2px solid transparent; }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   RESPONSIVE LAYOUT  —  Tablet + Mobile pass
+   The CRM previously had 3 narrow-viewport media queries (1200 / 900 /
+   700). Beyond 900px of width the deal-detail layout collapsed; below
+   that, almost nothing adapted. Tables overflowed, modals clipped,
+   KPI grids stayed 4-across. This is a full tablet + phone pass.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* ────── TABLET: 768 px and below ────── */
+@media (max-width: 768px) {
+  .v2-page {
+    padding: 24px 20px;
+  }
+  .v2-page-title {
+    font-size: 30px;
+  }
+  .v2-page-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .v2-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 0;
+  }
+  .v2-search {
+    width: 100%;
+    order: -1; /* search goes to top of the wrapped row */
+  }
+  .v2-cta {
+    padding: 10px 18px;
+    font-size: 12px;
+  }
+  /* KPI grids: 2 columns on tablet */
+  .v2-kpi-grid,
+  .v2-leads-kpis,
+  .v2-destinations,
+  .v2-finance-ribbon {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 12px;
+  }
+  /* Hero facts: 2 columns */
+  .v2-hero-facts {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  .v2-health-hero {
+    padding: 22px 20px;
+    border-radius: 16px;
+  }
+  /* Modals — take full viewport width with safe margins */
+  .v2-modal,
+  .v2-modal-content,
+  [class*="modal"][style*="width"] {
+    max-width: calc(100vw - 24px) !important;
+  }
+  /* Tables overflow nicely */
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+  /* Hero buttons wrap and shrink */
+  .v2-hero-actions {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .v2-hero-btn {
+    font-size: 11px !important;
+    padding: 7px 12px !important;
+  }
+  /* Deal hero number + dealnum */
+  .v2-hero-title {
+    font-size: 26px !important;
+  }
+  .v2-hero-dealnum {
+    font-size: 11px !important;
+  }
+  .v2-filter-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .v2-filter-chip {
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+}
+
+/* ────── PHONE: 540 px and below ────── */
+@media (max-width: 540px) {
+  .v2-page {
+    padding: 16px 12px;
+  }
+  .v2-page-title {
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+  .v2-page-sub {
+    font-size: 12.5px;
+    margin-bottom: 20px;
+  }
+  /* KPIs: single column on phone */
+  .v2-kpi-grid,
+  .v2-leads-kpis,
+  .v2-destinations,
+  .v2-finance-ribbon {
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+  .v2-kpi-card {
+    padding: 16px;
+  }
+  .v2-kpi-value {
+    font-size: 24px !important;
+  }
+  /* Hero facts: 1 column */
+  .v2-hero-facts {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .v2-health-hero {
+    padding: 18px 16px;
+    border-radius: 14px;
+  }
+  /* Deal hero chips stack */
+  .v2-hero-chips {
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .v2-hero-chip {
+    font-size: 10px !important;
+    padding: 4px 9px !important;
+  }
+  /* Search bar full-width */
+  .v2-search {
+    padding: 11px 14px 11px 36px;
+    font-size: 13px;
+  }
+  /* Modal: borderless on phone so it fills the screen like a sheet */
+  [class*="modal"] [style*="borderRadius: 18"] {
+    border-radius: 14px !important;
+  }
+  /* Chart cards adjust */
+  .v2-chart-card {
+    padding: 16px;
+  }
+  .v2-chart-title {
+    font-size: 14px;
+  }
+  /* Form inputs full width and proper touch target (44px) */
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important; /* 16px prevents iOS zoom on focus */
+    min-height: 40px;
+  }
+  /* Deal detail: panels stack, less dense */
+  .v2-deal-layout {
+    grid-template-columns: 1fr !important;
+    gap: 14px;
+  }
+  .v2-deal-hero {
+    padding: 18px 16px !important;
+  }
+  .v2-deal-hero-top {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  /* Side cards full width */
+  .v2-side-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+  /* Filter bar compact */
+  .v2-filter-bar {
+    padding: 10px 12px;
+  }
+  .v2-filter-search {
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+  /* Finance ribbon compact */
+  .v2-finance-ribbon > div {
+    padding: 14px !important;
+  }
+  /* Schedule / dep rows: stack */
+  .v2-dep-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+    padding: 12px !important;
+  }
+  .v2-dep-amount,
+  .v2-schedule-amount {
+    align-self: flex-end;
+  }
+  /* Breadcrumb smaller */
+  .v2-crumb,
+  .v2-crumb-link,
+  .v2-crumb-current {
+    font-size: 10px !important;
+  }
+  /* Accordion cards tighter */
+  .v2-acc-head {
+    padding: 12px 14px !important;
+  }
+  .v2-acc-body {
+    padding: 14px !important;
+  }
+  .v2-acc-title {
+    font-size: 13px !important;
+  }
+  /* Hide secondary chrome on very small screens to recover space */
+  .v2-icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+  /* Tables → scroll horizontal AND show a soft shadow to signal scroll */
+  table {
+    position: relative;
+  }
+  /* Extra bottom padding on the page to avoid clash with a possible
+     floating AI assistant / FAB at the bottom-right */
+  .v2-page {
+    padding-bottom: 80px;
+  }
+}
+
+/* ────── SMALL PHONE: 380 px and below ────── */
+@media (max-width: 380px) {
+  .v2-page-title {
+    font-size: 21px;
+  }
+  .v2-health-hero {
+    padding: 14px 12px;
+  }
+  .v2-hero-title {
+    font-size: 22px !important;
+  }
+  .v2-hero-btn {
+    font-size: 10.5px !important;
+    padding: 6px 10px !important;
+  }
+  .v2-kpi-value {
+    font-size: 22px !important;
+  }
+  /* Even tighter breadcrumb */
+  .v2-crumb,
+  .v2-crumb-link {
+    display: none; /* hide intermediate crumbs — show only current */
+  }
+  .v2-crumb-current {
+    display: inline !important;
+  }
+}
+
+/* ────── TOUCH DEVICES: finger-friendly tap targets ────── */
+@media (hover: none) and (pointer: coarse) {
+  /* All buttons, links, chips get a minimum 36 px touch height (44 px
+     is Apple's guideline but 36 fits the brand density better). */
+  button,
+  .v2-cta,
+  .v2-hero-btn,
+  .v2-filter-chip,
+  .v2-chip,
+  .v2-icon-btn {
+    min-height: 36px;
+  }
+  /* Remove hover transforms — they feel janky on touch (the "sticky"
+     hover state after a tap looks like a bug). */
+  .v2-kpi-card:hover,
+  .v2-dest-card:hover,
+  .v2-cta:hover {
+    transform: none;
+  }
+}
+
+/* ────── LANDSCAPE PHONE: keep hero compact so content shows ────── */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+  .v2-health-hero { padding: 14px 20px; }
+  .v2-page { padding: 16px 20px; }
+}
+
+/* ────── PRINT: clean deal summaries ────── */
+@media print {
+  .v2-header-actions,
+  .v2-filter-bar,
+  .v2-cta,
+  .v2-hero-btn,
+  .v2-icon-btn,
+  .v-sidebar,
+  button {
+    display: none !important;
+  }
+  .v2-page {
+    padding: 0;
+    background: #fff;
+  }
+  .v2-page-title {
+    font-size: 24px;
+  }
+  .v2-deal-hero {
+    background: #fff !important;
+    color: #0d1b3e !important;
+    box-shadow: none !important;
+    border: 1px solid #e3eaf7;
+  }
+  .v2-side-card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #e3eaf7;
+  }
+}
