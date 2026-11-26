@@ -172,6 +172,45 @@ const start = async () => {
       }
     });
 
+    // ─── PUBLIC FARE ENQUIRY (Special Blocked Fares 1-click Book) ────────────
+    // Fire-and-forget ping from the public /special-fares/ pages when a visitor
+    // taps "Book" on a specific fare. Logs the enquiry as a Lead so Vishal can
+    // see who's looking at what in the CRM, even if they never actually hit
+    // Send on WhatsApp. No auth, rate-limited.
+    app.post("/api/public/fare-enquiry", publicLimiter, async (req, res) => {
+      try {
+        const { slug, sectorIdx, date, fare, channel, ts, ua, ref } = req.body || {};
+        const destName = String(slug || "unknown").replace(/-/g, " ");
+        const dealNumber = await getNextDealNumber();
+        const notes = `BLOCKED FARE 1-CLICK ENQUIRY
+Destination: ${destName}
+Travel date: ${date || "unspecified"}
+Fare shown: ${fare ? "₹" + Number(fare).toLocaleString("en-IN") : "FARE ON CALL"}
+Channel: ${channel || "whatsapp"}
+Sector idx: ${sectorIdx}
+Referrer: ${ref || "direct"}
+UA: ${(ua || "").slice(0, 200)}
+Captured: ${ts || new Date().toISOString()}`;
+        const lead = new Lead({
+          dealNumber,
+          client: {
+            name: `Blocked-Fare Visitor (${destName})`,
+            phone: "WA/Email enquiry",
+            destination: String(destName).slice(0, 80),
+          },
+          source: "Special Blocked Fares",
+          page: `/special-fares/destination.html?slug=${slug || ""}`,
+          status: "new",
+          notes,
+        });
+        await lead.save();
+        res.json({ ok: true, dealNumber });
+      } catch (err) {
+        // Never fail the user's WhatsApp click
+        res.json({ ok: false });
+      }
+    });
+
     // ─── LEAD ROUTES (PROTECTED) ──────────────────────────────────────────────
 
     // CREATE deal
