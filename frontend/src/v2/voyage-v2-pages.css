@@ -2810,24 +2810,110 @@ html { scroll-behavior: smooth; scroll-padding-top: 20px; }
   }
 }
 
-/* Absolute safety net on the shell itself. Loaded after any other
-   shell rules so it wins when there's a specificity tie. */
+/* ═════════════════════════════════════════════════════════════════════
+   NUCLEAR MOBILE OVERRIDE (2026-11-26 last-resort)
+   Every previous attempt to fix the "content crammed into left half
+   of screen" bug kept failing because some unknown parent container
+   was still constraining width. This block stops trying to be subtle
+   and forces every conceivable layout ancestor to 100 % width on
+   mobile + sets display: block on all flex children in the page
+   header so they stack cleanly.
+   ═════════════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
-  body,
+  /* Reset every potential layout ancestor to full width */
+  html, body, #root,
   body.v-has-sidebar,
-  body.v-has-sidebar .voyage-shell-main,
-  body.v-has-sidebar #root {
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-    width: 100% !important;
-    max-width: 100vw !important;
-  }
-  /* Main content area: clamp to viewport width, allow internal scroll */
-  .voyage-shell-main,
-  #root > div:not(.v-sidebar) {
-    width: 100% !important;
+  body > *,
+  #root > *,
+  .voyage-shell, .voyage-shell-main,
+  main, .v2-page {
+    width: 100vw !important;
     max-width: 100vw !important;
     min-width: 0 !important;
-    overflow-x: hidden;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+    box-sizing: border-box !important;
   }
+
+  /* .v2-page keeps its own internal 12 px side padding */
+  .v2-page {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Page header: FLEX off entirely — let children be plain blocks */
+  .v2-page-header {
+    display: block !important;
+  }
+  .v2-page-header > * {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 14px !important;
+  }
+
+  /* Title + sub forcibly sized down */
+  .v2-page-title {
+    font-size: 26px !important;
+    line-height: 1.15 !important;
+    letter-spacing: -0.4px !important;
+  }
+  .v2-page-sub {
+    font-size: 12.5px !important;
+  }
+
+  /* Dashboard action pills row: wrap into a horizontal row, each ≥ 44 px */
+  .v2-header-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .v2-header-actions > * {
+    display: inline-flex !important;
+    width: auto !important;
+    max-width: 100% !important;
+    flex: 0 1 auto !important;
+  }
+  /* The search input takes a full row by itself */
+  .v2-search {
+    width: 100% !important;
+    flex-basis: 100% !important;
+  }
+  /* The relative-positioned wrapper around the search also goes full-width */
+  .v2-header-actions > div:has(.v2-search) {
+    width: 100% !important;
+    flex-basis: 100% !important;
+  }
+
+  /* Business Health hero: block layout instead of grid */
+  .v2-health-hero {
+    display: block !important;
+  }
+  .v2-health-hero > * {
+    display: block !important;
+    width: 100% !important;
+    margin-bottom: 12px !important;
+  }
+
+  /* KPI grid + destinations: 1 column */
+  .v2-kpi-grid,
+  .v2-leads-kpis,
+  .v2-destinations,
+  .v2-finance-ribbon {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+  .v2-kpi-card,
+  .v2-dest-card {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 540px) {
+  .v2-page-title { font-size: 22px !important; }
+  .v2-page { padding: 14px 10px !important; }
 }
