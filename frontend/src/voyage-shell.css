@@ -284,8 +284,24 @@ body.v-has-sidebar .body {
   body.v-sidebar-open .v-sidebar {
     transform: translateX(0);
   }
-  body.v-has-sidebar {
-    padding-left: 0;
+  /* AGGRESSIVE RESET — the 240 px sidebar padding was leaving content
+     crammed into ~45 % of the screen on phones because some
+     downstream rule was keeping the padding alive. Force it off at
+     every mobile code path, high specificity + !important. */
+  body.v-has-sidebar,
+  body.v-has-sidebar.ve-sidebar-hidden,
+  body.v-has-sidebar.ve-sidebar-drawer,
+  body.v-has-sidebar #root,
+  body.v-has-sidebar .voyage-shell-main {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+  /* If the shell is a CSS grid, collapse the first column on mobile.
+     !important guards against the ve-sidebar-hidden rule further down
+     the file that only fires when a deal is open. */
+  body.v-has-sidebar .voyage-shell,
+  body.v-has-sidebar #root > .voyage-shell {
+    grid-template-columns: 0 1fr !important;
   }
 }
 

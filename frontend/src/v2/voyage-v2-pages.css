@@ -2695,3 +2695,93 @@ html { scroll-behavior: smooth; scroll-padding-top: 20px; }
     border: 1px solid #e3eaf7;
   }
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+   MOBILE SAFETY NET  (2026-11-26)
+   Loaded late in the cascade so these rules win against any upstream
+   layout container that still tries to reserve sidebar space or set a
+   fixed width. This is the fix for the "content crammed into ~45 % of
+   the screen" bug.
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* Flex children need min-width: 0 to be allowed to shrink below their
+   intrinsic content size. Without this, a long title or a wide child
+   can force the whole row to overflow or stay at content width even
+   when the parent is narrow. */
+@media (max-width: 900px) {
+  /* Universal: any flex item under any .v2 container can shrink */
+  .v2-page *,
+  .v2-page-header > *,
+  .v2-deal-hero *,
+  .v2-hero-actions *,
+  .v2-filter-bar * {
+    min-width: 0;
+  }
+
+  /* HARD CAP every top-level V2 container to 100 % of the viewport
+     so no inline style, no stale grid column, no sidebar padding can
+     push content off-screen. */
+  .v2-page,
+  .v2-page-header,
+  .v2-deal-hero,
+  .v2-health-hero,
+  .v2-kpi-grid,
+  .v2-leads-kpis,
+  .v2-destinations,
+  .v2-finance-ribbon,
+  .v2-deal-layout,
+  .v2-leads-layout {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Dashboard header title: force wrap and tighten */
+  .v2-page-title,
+  .v2-hero-title {
+    overflow-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+  }
+
+  /* Destination card title + numbers never get trapped by their flex
+     child (which was happening on the Thailand / Singapore cards) */
+  .v2-dest-card,
+  .v2-dest-card * {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .v2-dest-card {
+    width: auto !important;
+  }
+
+  /* Globe: it's a square aspect-ratio canvas inside a React.lazy block.
+     Force it to fit its container so it doesn't overflow sideways. */
+  .v2-chart-card canvas,
+  .v2-chart-card [class*="globe"],
+  .v2-chart-card > div {
+    max-width: 100% !important;
+    height: auto;
+  }
+}
+
+/* Absolute safety net on the shell itself. Loaded after any other
+   shell rules so it wins when there's a specificity tie. */
+@media (max-width: 900px) {
+  body,
+  body.v-has-sidebar,
+  body.v-has-sidebar .voyage-shell-main,
+  body.v-has-sidebar #root {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+  /* Main content area: clamp to viewport width, allow internal scroll */
+  .voyage-shell-main,
+  #root > div:not(.v-sidebar) {
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    overflow-x: hidden;
+  }
+}
