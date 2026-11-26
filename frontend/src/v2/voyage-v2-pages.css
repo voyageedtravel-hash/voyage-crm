@@ -2704,11 +2704,39 @@ html { scroll-behavior: smooth; scroll-padding-top: 20px; }
    the screen" bug.
    ═════════════════════════════════════════════════════════════════════ */
 
-/* Flex children need min-width: 0 to be allowed to shrink below their
-   intrinsic content size. Without this, a long title or a wide child
-   can force the whole row to overflow or stay at content width even
-   when the parent is narrow. */
 @media (max-width: 900px) {
+  /* ──── CORE FIX: flex children stretch to full width ──────────
+     The dashboard header is <div class="v2-page-header"><div>title…
+     </div><div class="v2-header-actions">…</div></div>. The FIRST
+     child div has no class and the parent uses align-items:
+     flex-start (so children DON'T stretch to parent width). On
+     mobile flex-direction:column, each child takes only the width
+     of its own content — which is why the title column was ~180 px
+     wide even after the sidebar padding was fixed.
+     Force EVERY flex child inside .v2-page-header, .v2-deal-hero
+     and similar to take full width. */
+  .v2-page-header,
+  .v2-deal-hero,
+  .v2-deal-hero-top,
+  .v2-hero-actions {
+    align-items: stretch !important;
+  }
+  .v2-page-header > *,
+  .v2-deal-hero > *,
+  .v2-deal-hero-top > * {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* The title h1 + sub paragraph should also use the full column */
+  .v2-page-title,
+  .v2-page-sub,
+  .v2-hero-title,
+  .v2-hero-subtitle {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
   /* Universal: any flex item under any .v2 container can shrink */
   .v2-page *,
   .v2-page-header > *,
@@ -2739,8 +2767,8 @@ html { scroll-behavior: smooth; scroll-padding-top: 20px; }
   .v2-page-title,
   .v2-hero-title {
     overflow-wrap: break-word;
-    word-break: break-word;
-    hyphens: auto;
+    word-break: normal;
+    hyphens: manual;
   }
 
   /* Destination card title + numbers never get trapped by their flex
@@ -2761,6 +2789,24 @@ html { scroll-behavior: smooth; scroll-padding-top: 20px; }
   .v2-chart-card > div {
     max-width: 100% !important;
     height: auto;
+  }
+
+  /* Header actions on dashboard — Search + the 5 pills — stack
+     properly on mobile. Current stacked-column layout squeezes each
+     pill into narrow content width. Force each to full width. */
+  .v2-header-actions > *,
+  .v2-header-actions button,
+  .v2-header-actions input {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Business Health hero: the big 85 circle + revenue block were
+     stacking into narrow columns too. Force full width. */
+  .v2-health-hero > *,
+  .v2-health-hero > div {
+    width: 100% !important;
+    max-width: 100% !important;
   }
 }
 
